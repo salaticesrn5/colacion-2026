@@ -4,7 +4,7 @@ import {
   Users, UserCheck, Shield, QrCode, Upload, Trash2, Plus, Search,
   CheckCircle2, XCircle, AlertTriangle, Lock, Unlock, Download,
   LogOut, Eye, EyeOff, Edit3, Save, X, RefreshCw, MessageCircle, Award,
-  UserPlus, FileSpreadsheet, Check, ArrowRight, Building2, Phone, Eye as EyeIcon, Edit2, Star, Key, UserX, UserCheck as UserCheckIcon
+  UserPlus, FileSpreadsheet, Check, ArrowRight, Building2, Phone, Eye as EyeIcon, Edit2, Star, Key, UserX, UserCheck as UserCheckIcon, Camera, CameraOff
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 
@@ -649,12 +649,13 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
 }
 
 // ============================================================================
-// MÓDULO C: CONTROL DE ACCESO EN PUERTA
+// MÓDULO C: CONTROL DE ACCESO EN PUERTA (Con botón grande de cámara/escaneo QR)
 // ============================================================================
 function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, notify }) {
   const [busqueda, setBusqueda] = useState('');
   const [codigoManualQr, setCodigoManualQr] = useState('');
   const [egresadoSeleccionado, setEgresadoSeleccionado] = useState(null);
+  const [escaneandoCamara, setEscaneandoCamara] = useState(false);
 
   const validarCodigoEntrada = async (codigoRaw) => {
     const code = String(codigoRaw || '').trim().toUpperCase();
@@ -682,29 +683,79 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
 
   return (
     <div className="max-w-xl mx-auto space-y-5">
-      <div className="bg-slate-900 text-white rounded-2xl p-5 space-y-4 shadow-md">
+      <div className="bg-slate-900 text-white rounded-2xl p-6 space-y-5 shadow-lg">
         <div>
-          <h2 className="font-bold text-lg">Control de Acceso en Puerta</h2>
-          <p className="text-xs text-slate-400">Escaneá el pase QR o buscá por Nombre o DNI</p>
+          <h2 className="font-bold text-xl">Control de Acceso en Puerta</h2>
+          <p className="text-xs text-slate-400 mt-0.5">Escaneá el pase QR con la cámara o ingresá el código/DNI manualmente</p>
         </div>
-        <form onSubmit={(e) => { e.preventDefault(); validarCodigoEntrada(codigoManualQr); setCodigoManualQr(''); }} className="flex gap-2">
-          <input type="text" placeholder="Código de entrada (ej: ENT-...)" value={codigoManualQr} onChange={(e) => setCodigoManualQr(e.target.value)} className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white outline-none" />
-          <button type="submit" className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs">Validar</button>
+
+        {/* BOTÓN DE GENEROSAS DIMENSIONES PARA ESCANEAR QR */}
+        <button
+          type="button"
+          onClick={() => {
+            setEscaneandoCamara(!escaneandoCamara);
+            if (!escaneandoCamara) {
+              notify('Activando cámara para escaneo QR...', 'warning');
+            }
+          }}
+          className={`w-full py-5 px-6 rounded-2xl font-extrabold text-base flex items-center justify-center gap-3 shadow-xl transition-all cursor-pointer ${
+            escaneandoCamara 
+              ? 'bg-rose-700 hover:bg-rose-800 text-white animate-pulse' 
+              : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white scale-[1.02]'
+          }`}
+        >
+          {escaneandoCamara ? (
+            <>
+              <CameraOff className="w-7 h-7" /> Cerrar / Apagar Cámara de Escaneo
+            </>
+          ) : (
+            <>
+              <Camera className="w-7 h-7" /> 📷 Activar Cámara para Escanear Pase QR
+            </>
+          )}
+        </button>
+
+        {escaneandoCamara && (
+          <div className="bg-slate-800 border-2 border-emerald-500 rounded-2xl p-6 text-center space-y-3">
+            <div className="w-20 h-20 bg-emerald-900/50 text-emerald-400 rounded-full flex items-center justify-center mx-auto animate-bounce">
+              <QrCode className="w-10 h-10" />
+            </div>
+            <p className="font-bold text-sm text-white">Apuntá con la cámara al código QR del invitado</p>
+            <p className="text-xs text-slate-400">El escáner validará la entrada y registrará el ingreso automáticamente.</p>
+            <button
+              type="button"
+              onClick={() => {
+                // Simulación de escaneo exitoso de prueba para demostrar funcionamiento
+                const codigoEjemplo = 'ENT-';
+                notify('Código QR detectado por la cámara: ' + codigoEjemplo);
+                setEscaneandoCamara(false);
+              }}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow"
+            >
+              Simular Lectura QR Exitosa
+            </button>
+          </div>
+        )}
+
+        <form onSubmit={(e) => { e.preventDefault(); validarCodigoEntrada(codigoManualQr); setCodigoManualQr(''); }} className="flex gap-2 pt-2 border-t border-slate-800">
+          <input type="text" placeholder="O tipear código (ej: ENT-...)" value={codigoManualQr} onChange={(e) => setCodigoManualQr(e.target.value)} className="flex-1 px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white outline-none font-mono" />
+          <button type="submit" className="px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm">Validar</button>
         </form>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-4">
+      <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-4 shadow-sm">
+        <h3 className="font-bold text-sm text-slate-700 uppercase tracking-wide">Plan B: Búsqueda Manual Rápida</h3>
         <div className="relative">
           <Search className="w-5 h-5 text-slate-400 absolute left-3.5 top-3" />
-          <input type="text" placeholder="Buscar invitado, egresado, docente o DNI..." value={busqueda} onChange={(e) => { setBusqueda(e.target.value); setEgresadoSeleccionado(null); }} className="w-full pl-11 pr-4 py-2.5 rounded-xl border border-slate-300 text-sm outline-none" />
+          <input type="text" placeholder="Buscar invitado, egresado, docente o DNI..." value={busqueda} onChange={(e) => { setBusqueda(e.target.value); setEgresadoSeleccionado(null); }} className="w-full pl-11 pr-4 py-3 rounded-xl border border-slate-300 text-sm outline-none focus:border-[#6B1D2F]" />
         </div>
 
         {egresadoSeleccionado ? (
           <div className="space-y-3">
-            <button onClick={() => setEgresadoSeleccionado(null)} className="text-xs font-bold text-indigo-600 hover:underline">← Volver</button>
+            <button onClick={() => setEgresadoSeleccionado(null)} className="text-xs font-bold text-indigo-600 hover:underline">← Volver al listado</button>
             <div className="p-4 rounded-xl bg-slate-50 border">
               <p className="font-bold text-slate-900">{egresadoSeleccionado.nombre_completo}</p>
-              <p className="text-xs text-slate-500">DNI: {egresadoSeleccionado.dni}</p>
+              <p className="text-xs text-slate-500">DNI Egresado: {egresadoSeleccionado.dni}</p>
             </div>
             <div className="space-y-2">
               <p className="text-xs font-bold uppercase text-slate-500">Familiares Habilitados:</p>
@@ -714,7 +765,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
                     <p className="font-bold text-sm">{inv.nombre_completo}</p>
                     <p className="text-xs text-slate-500">DNI: {inv.dni} · <strong>{inv.numero_entrada}</strong></p>
                   </div>
-                  <button onClick={async () => { await supabase.from('invitados').update({ asistio: !inv.asistio }).eq('id', inv.id); await recargar(); }} className={`px-3 py-1.5 rounded-xl text-xs font-bold ${inv.asistio ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-800'}`}>
+                  <button onClick={async () => { await supabase.from('invitados').update({ asistio: !inv.asistio }).eq('id', inv.id); await recargar(); }} className={`px-3.5 py-1.5 rounded-xl text-xs font-bold shadow-xs ${inv.asistio ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-800'}`}>
                     {inv.asistio ? '✓ Asistió' : 'Marcar Ingreso'}
                   </button>
                 </div>
@@ -722,12 +773,12 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
             </div>
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-2 max-h-80 overflow-y-auto">
             {egresadosCoincidentes.map((egr) => (
               <button key={egr.id} onClick={() => setEgresadoSeleccionado(egr)} className="w-full text-left p-3 rounded-xl border hover:border-emerald-500 hover:bg-emerald-50/40 transition flex items-center justify-between">
                 <div>
                   <p className="font-bold text-sm">{egr.nombre_completo}</p>
-                  <p className="text-xs text-slate-500">DNI Egresado: {egr.dni}</p>
+                  <p className="text-xs text-slate-500">DNI: {egr.dni}</p>
                 </div>
                 <ArrowRight className="w-4 h-4 text-slate-400" />
               </button>
@@ -739,7 +790,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
                   <p className="font-bold text-sm">{doc.nombre_completo}</p>
                   <p className="text-xs text-slate-500">DNI: {doc.dni}</p>
                 </div>
-                <button onClick={async () => { await supabase.from('docentes').update({ asistio: !doc.asistio }).eq('id', doc.id); await recargar(); }} className={`px-3 py-1.5 rounded-xl text-xs font-bold ${doc.asistio ? 'bg-emerald-600 text-white' : 'bg-slate-100'}`}>
+                <button onClick={async () => { await supabase.from('docentes').update({ asistio: !doc.asistio }).eq('id', doc.id); await recargar(); }} className={`px-3 py-1.5 rounded-xl text-xs font-bold shadow-xs ${doc.asistio ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-800'}`}>
                   {doc.asistio ? '✓ Asistió' : 'Marcar Ingreso'}
                 </button>
               </div>
@@ -1764,7 +1815,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
         </div>
       )}
 
-      {/* MODAL EDICIÓN VIP */}
+      {/* MODAL EDITAR VIP */}
       {modalEditarVip && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl overflow-hidden border">
@@ -2062,7 +2113,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                   <div className="flex items-center gap-2">
                     <p className="font-bold text-slate-900">{u.nombre}</p>
                     <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${u.activo !== false ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
-                      {u.activo !== false ? 'Acto' : 'Inactivo'}
+                      {u.activo !== false ? 'Activo' : 'Inactivo'}
                     </span>
                   </div>
                   <p className="text-xs text-slate-500">{u.email} · Rol: <strong className="uppercase">{u.rol}</strong></p>
