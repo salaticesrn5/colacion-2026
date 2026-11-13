@@ -13,7 +13,7 @@ const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 export default function App() {
-  const [vistaActual, setVistaActual] = useState('egresado'); // 'egresado', 'puerta', 'admin', 'docente'
+  const [vistaActual, setVistaActual] = useState('egresado'); // 'egresado', 'puerta', 'admin'
 
   return (
     <div className="min-h-screen bg-gray-100 font-sans text-gray-900">
@@ -36,13 +36,7 @@ export default function App() {
               onClick={() => setVistaActual('egresado')} 
               className={`px-2.5 py-1 rounded transition ${vistaActual === 'egresado' ? 'bg-white text-[#6B1D2F] font-bold' : 'text-rose-200 hover:text-white'}`}
             >
-              Egresados
-            </button>
-            <button 
-              onClick={() => setVistaActual('docente')} 
-              className={`px-2.5 py-1 rounded transition ${vistaActual === 'docente' ? 'bg-white text-[#6B1D2F] font-bold' : 'text-rose-200 hover:text-white'}`}
-            >
-              Docentes
+              Portal Principal (DNI)
             </button>
             <button 
               onClick={() => setVistaActual('puerta')} 
@@ -62,8 +56,7 @@ export default function App() {
 
       {/* Contenido Dinámico */}
       <main className="py-8">
-        {vistaActual === 'egresado' && <PortalEgresado />}
-        {vistaActual === 'docente' && <PortalDocente />}
+        {vistaActual === 'egresado' && <PortalPrincipalDNI />}
         {vistaActual === 'puerta' && <PanelPuerta />}
         {vistaActual === 'admin' && <PanelAdmin />}
       </main>
@@ -72,46 +65,50 @@ export default function App() {
 }
 
 // ==========================================
-// 1. PORTAL DIRECTO DE EGRESADOS (Con Bienvenida e Instructivo)
+// 1. PORTAL PRINCIPAL UNIFICADO POR DNI (Egresados y Docentes)
 // ==========================================
-function PortalEgresado() {
+function PortalPrincipalDNI() {
   const [dni, setDni] = useState('');
-  const [datosEstudiante, setDatosEstudiante] = useState(null);
+  const [tipoUsuario, setTipoUsuario] = useState('egresado'); // 'egresado' o 'docente'
+  const [datosPersona, setDatosPersona] = useState(null);
   const [error, setError] = useState('');
   const [celular, setCelular] = useState('');
   const [tipoIngreso, setTipoIngreso] = useState('individual');
 
-  const buscarEgresado = async (e) => {
+  const buscarPorDNI = async (e) => {
     e.preventDefault();
     setError('');
-    setDatosEstudiante(null);
+    setDatosPersona(null);
 
+    const tabla = tipoUsuario === 'egresado' ? 'egresados' : 'docentes';
     const { data, error: err } = await supabase
-      .from('egresados')
+      .from(tabla)
       .select('*')
       .eq('dni', dni.trim())
       .single();
 
     if (err || !data) {
-      setError('No se encontró ningún egresado con ese DNI.');
+      setError(`No se encontró ningún registro con ese DNI en ${tipoUsuario === 'egresado' ? 'Egresados' : 'Docentes'}.`);
       return;
     }
 
-    if (data.activo === false) {
+    if (tipoUsuario === 'egresado' && data.activo === false) {
       setError('Este acceso se encuentra inactivo (marcado como No Asiste).');
       return;
     }
 
-    setDatosEstudiante(data);
-    if (data.celular) setCelular(data.celular);
-    if (data.tipo_ingreso) setTipoIngreso(data.tipo_ingreso);
+    setDatosPersona(data);
+    if (tipoUsuario === 'egresado') {
+      if (data.celular) setCelular(data.celular);
+      if (data.tipo_ingreso) setTipoIngreso(data.tipo_ingreso);
+    }
   };
 
-  const guardarDatos = async () => {
+  const guardarDatosEstudiante = async () => {
     const { error: updateErr } = await supabase
       .from('egresados')
       .update({ celular, tipo_ingreso: tipoIngreso })
-      .eq('id', datosEstudiante.id);
+      .eq('id', datosPersona.id);
 
     if (updateErr) {
       alert('Error al guardar los cambios.');
@@ -122,23 +119,43 @@ function PortalEgresado() {
 
   return (
     <div className="max-w-md mx-auto px-4 space-y-4">
-      {/* Tarjeta de Bienvenida e Instructivo */}
+      {/* Tarjeta de Bienvenida e Instructivo Unificado */}
       <div className="bg-gradient-to-r from-[#6B1D2F] to-[#8a253c] text-white rounded-xl shadow-md p-5 text-center">
         <h2 className="text-xl font-bold mb-1">¡Bienvenidos al Acto de Colación 2026! 🎉</h2>
         <p className="text-xs text-rose-100 leading-relaxed">
-          Egresado de la <b>ESRN N° 005</b>: Para gestionar tu acceso, ingresá tu número de DNI debajo. Podrás verificar tus plazas, registrar tu WhatsApp, elegir si ingresas de forma individual o en grupo y descargar tu código QR para la puerta.
+          Seleccioná tu rol (Egresado o Docente) e ingresá tu número de DNI para gestionar tu acceso, verificar plazas, registrar tu WhatsApp, configurar tu modalidad y descargar tu código QR para la entrada.
         </p>
       </div>
 
-      {/* Formulario Principal */}
+      {/* Formulario Principal con Selector de Rol */}
       <div className="bg-white rounded-xl shadow-md p-6 border-t-4 border-[#6B1D2F]">
-        <h3 className="text-lg font-bold text-[#6B1D2F] mb-1 text-center">Portal de Egresados</h3>
-        <p className="text-xs text-gray-500 text-center mb-6">Ingresá tu DNI para continuar</p>
+        <h3 className="text-lg font-bold text-[#6B1D2F] mb-1 text-center">Portal de Acceso por DNI</h3>
+        <p className="text-xs text-gray-500 text-center mb-4">Seleccioná tu rol y consultá tu pase</p>
 
-        {!datosEstudiante ? (
-          <form onSubmit={buscarEgresado} className="space-y-4">
+        {/* Selector de Pestañas Egresados / Docentes */}
+        <div className="flex gap-2 mb-6 bg-gray-100 p-1 rounded-lg">
+          <button 
+            type="button"
+            onClick={() => { setTipoUsuario('egresado'); setDatosPersona(null); setError(''); }}
+            className={`flex-1 py-2 rounded-md font-medium text-xs transition ${tipoUsuario === 'egresado' ? 'bg-[#6B1D2F] text-white shadow' : 'text-gray-600 hover:text-gray-900'}`}
+          >
+            🎓 Egresado
+          </button>
+          <button 
+            type="button"
+            onClick={() => { setTipoUsuario('docente'); setDatosPersona(null); setError(''); }}
+            className={`flex-1 py-2 rounded-md font-medium text-xs transition ${tipoUsuario === 'docente' ? 'bg-[#6B1D2F] text-white shadow' : 'text-gray-600 hover:text-gray-900'}`}
+          >
+            📚 Docente
+          </button>
+        </div>
+
+        {!datosPersona ? (
+          <form onSubmit={buscarPorDNI} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Número de DNI del Egresado</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                DNI de {tipoUsuario === 'egresado' ? 'Egresado' : 'Docente'}
+              </label>
               <input 
                 type="text" 
                 value={dni}
@@ -150,56 +167,65 @@ function PortalEgresado() {
             </div>
             {error && <p className="text-sm text-red-600">{error}</p>}
             <button type="submit" className="w-full py-2.5 bg-[#6B1D2F] text-white rounded-lg hover:bg-opacity-90 font-medium shadow">
-              Consultar mi Ingreso
+              Consultar mi Pase QR
             </button>
           </form>
         ) : (
           <div className="space-y-4 text-left">
             <div className="p-4 bg-gray-50 rounded-lg border text-center">
-              <h3 className="font-bold text-lg text-gray-800">{datosEstudiante.nombre}</h3>
-              <p className="text-xs text-gray-500">DNI: {datosEstudiante.dni}</p>
+              <h3 className="font-bold text-lg text-gray-800">{datosPersona.nombre}</h3>
+              <p className="text-xs text-gray-500">DNI: {datosPersona.dni}</p>
+              <p className="text-[11px] uppercase tracking-wider text-[#6B1D2F] font-semibold mt-1">
+                {tipoUsuario === 'egresado' ? 'Egresado / Titulado' : 'Personal Docente ESRN N° 005'}
+              </p>
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Celular / WhatsApp</label>
-              <input 
-                type="text"
-                placeholder="Ej: 2994444444"
-                value={celular}
-                onChange={(e) => setCelular(e.target.value)}
-                className="w-full px-3 py-2 border rounded-lg text-sm"
-              />
-              <p className="text-xs text-gray-400 mt-0.5">Para recibir avisos institucionales.</p>
-            </div>
+            {tipoUsuario === 'egresado' && (
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Celular / WhatsApp</label>
+                  <input 
+                    type="text"
+                    placeholder="Ej: 2994444444"
+                    value={celular}
+                    onChange={(e) => setCelular(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-lg text-sm"
+                  />
+                  <p className="text-xs text-gray-400 mt-0.5">Para recibir avisos institucionales.</p>
+                </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Modalidad de Ingreso</label>
-              <select 
-                value={tipoIngreso} 
-                onChange={(e) => setTipoIngreso(e.target.value)}
-                className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
-              >
-                <option value="individual">🪪 Individual (Cada invitado con su QR)</option>
-                <option value="grupal">👥 Grupal (Un solo QR para todo el grupo)</option>
-              </select>
-            </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Modalidad de Ingreso</label>
+                  <select 
+                    value={tipoIngreso} 
+                    onChange={(e) => setTipoIngreso(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
+                  >
+                    <option value="individual">🪪 Individual (Cada invitado con su QR)</option>
+                    <option value="grupal">👥 Grupal (Un solo QR para todo el grupo)</option>
+                  </select>
+                </div>
 
-            <button 
-              onClick={guardarDatos}
-              className="w-full py-1.5 bg-gray-800 text-white rounded-lg text-sm font-medium hover:bg-gray-700"
-            >
-              Guardar Cambios
-            </button>
+                <button 
+                  onClick={guardarDatosEstudiante}
+                  className="w-full py-1.5 bg-gray-800 text-white rounded-lg text-sm font-medium hover:bg-gray-700"
+                >
+                  Guardar Cambios
+                </button>
+              </>
+            )}
 
             <div className="p-4 bg-white border-2 border-dashed border-gray-300 rounded-xl text-center">
               <div className="w-36 h-36 bg-gray-200 mx-auto flex items-center justify-center text-xs text-gray-500 rounded font-mono">
-                [QR {tipoIngreso.toUpperCase()}]
+                [QR {tipoUsuario === 'docente' ? 'DOCENTE' : tipoIngreso.toUpperCase()}]
               </div>
-              <p className="text-xs text-gray-500 mt-2">Pase habilitado para la entrada</p>
+              <p className="text-xs text-gray-500 mt-2">
+                {tipoUsuario === 'docente' ? 'Pase Nominal Docente' : `Pase de Ingreso (${tipoIngreso})`}
+              </p>
             </div>
 
             <button 
-              onClick={() => setDatosEstudiante(null)} 
+              onClick={() => { setDatosPersona(null); setDni(''); }} 
               className="w-full py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 text-sm"
             >
               Consultar otro DNI
@@ -212,84 +238,7 @@ function PortalEgresado() {
 }
 
 // ==========================================
-// 2. PORTAL DE DOCENTES
-// ==========================================
-function PortalDocente() {
-  const [dni, setDni] = useState('');
-  const [datosDocente, setDatosDocente] = useState(null);
-  const [error, setError] = useState('');
-
-  const buscarDocente = async (e) => {
-    e.preventDefault();
-    setError('');
-    setDatosDocente(null);
-
-    const { data, error: err } = await supabase
-      .from('docentes')
-      .select('*')
-      .eq('dni', dni.trim())
-      .single();
-
-    if (err || !data) {
-      setError('No se encontró ningún docente con ese DNI.');
-      return;
-    }
-
-    setDatosDocente(data);
-  };
-
-  return (
-    <div className="max-w-md mx-auto px-4 space-y-4">
-      <div className="bg-gradient-to-r from-[#6B1D2F] to-[#8a253c] text-white rounded-xl shadow-md p-5 text-center">
-        <h2 className="text-xl font-bold mb-1">Portal Docente 🎓</h2>
-        <p className="text-xs text-rose-100">Ingresá tu DNI para obtener tu pase nominal de acceso al acto.</p>
-      </div>
-
-      <div className="bg-white rounded-xl shadow-md p-6 border-t-4 border-[#6B1D2F]">
-        {!datosDocente ? (
-          <form onSubmit={buscarDocente} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">DNI del Docente</label>
-              <input 
-                type="text" 
-                value={dni}
-                onChange={(e) => setDni(e.target.value)}
-                placeholder="Ej: 25123456"
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-[#6B1D2F]"
-                required
-              />
-            </div>
-            {error && <p className="text-sm text-red-600">{error}</p>}
-            <button type="submit" className="w-full py-2.5 bg-[#6B1D2F] text-white rounded-lg hover:bg-opacity-90 font-medium shadow">
-              Ver mi Pase QR Nominal
-            </button>
-          </form>
-        ) : (
-          <div className="space-y-4 text-center">
-            <div className="p-4 bg-gray-50 rounded-lg border">
-              <h3 className="font-bold text-lg text-gray-800">{datosDocente.nombre}</h3>
-              <p className="text-xs text-[#6B1D2F] font-semibold mt-1">Personal Docente ESRN N° 005</p>
-            </div>
-            <div className="p-4 bg-white border-2 border-dashed border-gray-300 rounded-xl inline-block">
-              <div className="w-36 h-36 bg-gray-200 mx-auto flex items-center justify-center text-xs text-gray-500 rounded font-mono">
-                [QR DOCENTE]
-              </div>
-            </div>
-            <button 
-              onClick={() => setDatosDocente(null)} 
-              className="w-full py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 text-sm"
-            >
-              Consultar otro DNI
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ==========================================
-// 3. CONTROL DE PUERTA
+// 2. CONTROL DE PUERTA
 // ==========================================
 function PanelPuerta() {
   const [busquedaManual, setBusquedaManual] = useState('');
@@ -314,7 +263,7 @@ function PanelPuerta() {
         <div className="p-10 bg-gray-900 text-white rounded-2xl text-center mb-6 shadow-md">
           <div className="w-16 h-16 border-4 border-dashed border-[#6B1D2F] rounded-full mx-auto flex items-center justify-center mb-3 animate-spin">📷</div>
           <p className="font-bold text-lg">Escáner Continuo Activo</p>
-          <p className="text-xs text-gray-400 mt-1">Listo para escanear QRs</p>
+          <p className="text-xs text-gray-400 mt-1">Listo para escanear QRs (Egresados y Docentes)</p>
         </div>
       )}
 
@@ -346,7 +295,7 @@ function PanelPuerta() {
 }
 
 // ==========================================
-// 4. PANEL DE ADMINISTRACIÓN
+// 3. PANEL DE ADMINISTRACIÓN
 // ==========================================
 function PanelAdmin() {
   const [whatsappActivo, setWhatsappActivo] = useState(true);
