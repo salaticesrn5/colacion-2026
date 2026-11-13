@@ -891,6 +891,21 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     }
   };
 
+  const ajustarCupoEgresado = async (egr, delta) => {
+    const nuevoCupo = Math.max(0, (Number(egr.cupo_asignado) || 0) + delta);
+    if (delta > 0 && vacantesLibres <= 0) {
+      notify('No hay vacantes libres disponibles en el recinto (525 máx).', 'error');
+      return;
+    }
+    try {
+      await supabase.from('egresados').update({ cupo_asignado: nuevoCupo }).eq('id', egr.id);
+      await recargar();
+      notify(`Cupo actualizado a ${nuevoCupo} lugares para ${egr.nombre_completo}`);
+    } catch (err) {
+      notify('Error ajustando cupo: ' + err.message, 'error');
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
@@ -945,7 +960,11 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
               <div key={e.id} className="py-2.5 flex justify-between items-center text-sm">
                 <div><span className="font-semibold">{e.nombre_completo}</span> <span className="text-xs text-slate-500">({e.dni})</span></div>
                 <div className="flex items-center gap-3">
-                  <span className="text-xs font-bold">Cupo: {e.cupo_asignado}</span>
+                  <div className="flex items-center gap-1 bg-slate-100 px-2.5 py-1 rounded-lg">
+                    <span className="text-xs font-bold">Cupo: {e.cupo_asignado}</span>
+                    <button onClick={() => ajustarCupoEgresado(e, -1)} className="px-1.5 py-0.5 bg-white border rounded text-xs font-bold hover:bg-slate-50" title="Restar butaca">-1</button>
+                    <button onClick={() => ajustarCupoEgresado(e, 1)} className="px-1.5 py-0.5 bg-white border rounded text-xs font-bold text-emerald-700 hover:bg-slate-50" title="Sumar butaca">+1</button>
+                  </div>
                   <button onClick={async () => {
                     const nuevoActivo = e.activo === false ? true : false;
                     await supabase.from('egresados').update({ activo: nuevoActivo }).eq('id', e.id);
