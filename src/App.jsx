@@ -4,7 +4,7 @@ import {
   Users, UserCheck, Shield, QrCode, Upload, Trash2, Plus, Search,
   CheckCircle2, XCircle, AlertTriangle, Lock, Unlock, Download,
   LogOut, Eye, EyeOff, Edit3, Save, X, RefreshCw, MessageCircle, Award,
-  UserPlus, FileSpreadsheet, Check, ArrowRight, Building2, Phone
+  UserPlus, FileSpreadsheet, Check, ArrowRight, Building2, Phone, Eye as EyeIcon
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 
@@ -756,6 +756,8 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
 // ============================================================================
 function PanelAdministracion({ perfilStaff, config, egresados, invitados, docentes, especiales, solicitudes, usuariosSistema, totalEgresados, totalDocentes, totalEspeciales, totalCuposFamiliares, vacantesLibres, recargar, notify }) {
   const [tab, setTab] = useState('egresados');
+  const [filtroEgresado, setFiltroEgresado] = useState('');
+  const [modalInvitadosEgr, setModalInvitadosEgr] = useState(null); // Egresado seleccionado para ver sus invitados
   const fileEgrRef = useRef(null);
   const fileDocRef = useRef(null);
 
@@ -906,6 +908,11 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     }
   };
 
+  const egresadosFiltrados = egresados.filter((e) =>
+    (e.nombre_completo || '').toLowerCase().includes(filtroEgresado.toLowerCase()) ||
+    (e.dni || '').includes(filtroEgresado)
+  );
+
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
@@ -955,27 +962,119 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
               )}
             </div>
           </div>
+
+          {/* Buscador en tiempo real para egresados */}
+          <div className="relative">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+            <input
+              type="text"
+              placeholder="Filtrar egresados por nombre o DNI..."
+              value={filtroEgresado}
+              onChange={(e) => setFiltroEgresado(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 rounded-xl border text-sm outline-none focus:border-[#6B1D2F]"
+            />
+          </div>
+
           <div className="max-h-96 overflow-y-auto divide-y">
-            {egresados.map((e) => (
-              <div key={e.id} className="py-2.5 flex justify-between items-center text-sm">
-                <div><span className="font-semibold">{e.nombre_completo}</span> <span className="text-xs text-slate-500">({e.dni})</span></div>
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-1 bg-slate-100 px-2.5 py-1 rounded-lg">
-                    <span className="text-xs font-bold">Cupo: {e.cupo_asignado}</span>
-                    <button onClick={() => ajustarCupoEgresado(e, -1)} className="px-1.5 py-0.5 bg-white border rounded text-xs font-bold hover:bg-slate-50" title="Restar butaca">-1</button>
-                    <button onClick={() => ajustarCupoEgresado(e, 1)} className="px-1.5 py-0.5 bg-white border rounded text-xs font-bold text-emerald-700 hover:bg-slate-50" title="Sumar butaca">+1</button>
+            {egresadosFiltrados.map((e) => {
+              const misInvitados = invitados.filter((i) => i.egresado_id === e.id);
+              const numeroWp = e.celular ? e.celular.replace(/\D/g, '') : '';
+              const linkWpAdicionales = numeroWp
+                ? `https://wa.me/549${numeroWp}?text=Hola%20${encodeURIComponent(e.nombre_completo)},%20te%20escribimos%20desde%20la%20ESRN%20N°%20005%20para%20recordarte%20que%20ya%20podes%20gestionar%20o%20solicitar%20butacas%20adicionales%20para%20la%20Colación%202026.`
+                : '';
+
+              return (
+                <div key={e.id} className="py-3 flex flex-wrap justify-between items-center gap-3 text-sm">
+                  <div>
+                    <span className="font-semibold">{e.nombre_completo}</span> <span className="text-xs text-slate-500">({e.dni})</span>
+                    <p className="text-xs text-slate-400">Invitados cargados: <b>{misInvitados.length} / {e.cupo_asignado}</b></p>
                   </div>
-                  <button onClick={async () => {
-                    const nuevoActivo = e.activo === false ? true : false;
-                    await supabase.from('egresados').update({ activo: nuevoActivo }).eq('id', e.id);
-                    await recargar();
-                    notify(nuevoActivo ? 'Egresado reactivado.' : 'Egresado marcado como No Asiste.');
-                  }} className={`px-2.5 py-1 rounded text-xs font-semibold ${e.activo === false ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
-                    {e.activo === false ? 'Reactivar' : 'Marcar No Asiste'}
-                  </button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {/* Botón Ver Invitados Modal */}
+                    <button
+                      onClick={() => setModalInvitadosEgr(e)}
+                      className="px-3 py-1.5 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 rounded-lg text-xs font-bold flex items-center gap-1"
+                    >
+                      <EyeIcon className="w-3.5 h-3.5" /> Ver Invitados ({misInvitados.length})
+                    </button>
+
+                    {/* Botón Enviar Mensaje WhatsApp para Adicionales */}
+                    {numeroWp && (
+                      <a
+                        href={linkWpAdicionales}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-xs"
+                        title="Enviar WhatsApp para adicionales"
+                      >
+                        <MessageCircle className="w-3.5 h-3.5" /> WhatsApp Adicionales
+                      </a>
+                    )}
+
+                    {/* Controles de Cupo +1 / -1 */}
+                    <div className="flex items-center gap-1 bg-slate-100 px-2.5 py-1 rounded-lg">
+                      <span className="text-xs font-bold">Cupo: {e.cupo_asignado}</span>
+                      <button onClick={() => ajustarCupoEgresado(e, -1)} className="px-1.5 py-0.5 bg-white border rounded text-xs font-bold hover:bg-slate-50" title="Restar butaca">-1</button>
+                      <button onClick={() => ajustarCupoEgresado(e, 1)} className="px-1.5 py-0.5 bg-white border rounded text-xs font-bold text-emerald-700 hover:bg-slate-50" title="Sumar butaca">+1</button>
+                    </div>
+
+                    <button onClick={async () => {
+                      const nuevoActivo = e.activo === false ? true : false;
+                      await supabase.from('egresados').update({ activo: nuevoActivo }).eq('id', e.id);
+                      await recargar();
+                      notify(nuevoActivo ? 'Egresado reactivado.' : 'Egresado marcado como No Asiste.');
+                    }} className={`px-2.5 py-1 rounded text-xs font-semibold ${e.activo === false ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                      {e.activo === false ? 'Reactivar' : 'Marcar No Asiste'}
+                    </button>
+                  </div>
                 </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* MODAL PARA VER LOS INVITADOS DE UN EGRESADO */}
+      {modalInvitadosEgr && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl">
+            <div className="flex justify-between items-start border-b pb-3">
+              <div>
+                <h3 className="font-bold text-base text-[#6B1D2F]">Listado de Invitados</h3>
+                <p className="text-xs text-slate-500">Egresado/a: <b>{modalInvitadosEgr.nombre_completo}</b> (DNI: {modalInvitadosEgr.dni})</p>
               </div>
-            ))}
+              <button onClick={() => setModalInvitadosEgr(null)} className="p-1 rounded-lg text-slate-400 hover:bg-slate-100">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-2.5 max-h-80 overflow-y-auto">
+              {invitados.filter((i) => i.egresado_id === modalInvitadosEgr.id).length === 0 ? (
+                <p className="text-xs text-slate-400 text-center py-6">Este egresado aún no tiene invitados cargados.</p>
+              ) : (
+                invitados.filter((i) => i.egresado_id === modalInvitadosEgr.id).map((inv, idx) => (
+                  <div key={inv.id} className="p-3 bg-slate-50 border rounded-xl flex items-center justify-between text-xs">
+                    <div>
+                      <span className="font-mono bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded font-bold">{inv.numero_entrada || 'ENT-...'}</span>
+                      <p className="font-bold text-slate-900 mt-1">{idx + 1}. {inv.nombre_completo}</p>
+                      <p className="text-slate-500">DNI: {inv.dni}</p>
+                    </div>
+                    <span className={`px-2.5 py-1 rounded-full font-bold uppercase ${inv.asistio ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                      {inv.asistio ? 'Presente' : 'Pendiente ingreso'}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="pt-3 border-t flex justify-end">
+              <button
+                onClick={() => setModalInvitadosEgr(null)}
+                className="px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold"
+              >
+                Cerrar
+              </button>
+            </div>
           </div>
         </div>
       )}
