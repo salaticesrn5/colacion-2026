@@ -31,8 +31,8 @@ export default function App() {
             </div>
           </div>
           
-          {/* Accesos secundarios discretos */}
-          <div className="flex gap-1.5 text-xs">
+          {/* Accesos secundarios discretos y botón de Administración claramente visible */}
+          <div className="flex gap-1.5 text-xs items-center">
             <button 
               onClick={() => setVistaActual('egresado')} 
               className={`px-2.5 py-1 rounded transition ${vistaActual === 'egresado' ? 'bg-white text-[#6B1D2F] font-bold' : 'text-rose-200 hover:text-white'}`}
@@ -47,9 +47,9 @@ export default function App() {
             </button>
             <button 
               onClick={() => setVistaActual('admin')} 
-              className={`px-2.5 py-1 rounded transition ${vistaActual === 'admin' ? 'bg-amber-500 text-white font-bold' : 'text-rose-200 hover:text-white'}`}
+              className={`px-3 py-1 rounded bg-amber-500 hover:bg-amber-600 text-white font-bold shadow transition ${vistaActual === 'admin' ? 'ring-2 ring-white' : ''}`}
             >
-              Admin
+              Administración
             </button>
           </div>
         </div>
@@ -102,11 +102,21 @@ function PortalPrincipalDNI() {
     if (tipoUsuario === 'docente') tabla = 'docentes';
     if (tipoUsuario === 'vip') tabla = 'vip';
 
-    const { data, error: err } = await supabase
+    let { data, error: err } = await supabase
       .from(tabla)
       .select('*')
       .eq('dni', dni.trim())
       .single();
+
+    if ((err || !data) && tipoUsuario === 'vip') {
+      const resAlt = await supabase
+        .from('invitados_especiales')
+        .select('*')
+        .eq('dni', dni.trim())
+        .single();
+      data = resAlt.data;
+      err = resAlt.error;
+    }
 
     if (err || !data) {
       setError(`No se encontró ningún registro con ese DNI en ${tipoUsuario.toUpperCase()}.`);
@@ -118,6 +128,7 @@ function PortalPrincipalDNI() {
       return;
     }
 
+    console.log("Datos recuperados de Supabase:", data);
     setDatosPersona(data);
     if (tipoUsuario === 'egresado') {
       if (data.celular) setCelular(data.celular);
@@ -192,7 +203,7 @@ function PortalPrincipalDNI() {
     );
   };
 
-  const descargarTarjeta1080x1920 = (nombreQR, subtituloQR, textoValorQR) => {
+  const descargarTarjeta1080x1920 = (nombreQR, subtituloQR, textoRolQR) => {
     const svgElement = qrRef.current?.querySelector('svg');
     if (!svgElement) {
       alert('No se pudo generar la imagen del QR.');
@@ -250,7 +261,7 @@ function PortalPrincipalDNI() {
 
           ctx.fillStyle = '#6B1D2F';
           ctx.font = 'bold 28px sans-serif';
-          ctx.fillText('EGRESADO', 540, 710);
+          ctx.fillText(textoRolQR, 540, 710);
 
           ctx.drawImage(qrImage, 290, 780, 500, 500);
 
@@ -286,6 +297,7 @@ function PortalPrincipalDNI() {
 
   const nombreMostrado = obtenerNombreReal(datosPersona);
   const valorQRPrincipal = datosPersona ? `ESRN005-${tipoUsuario.toUpperCase()}-${datosPersona.dni || dni}-${nombreMostrado}` : '';
+  const textoRolTarjeta = tipoUsuario === 'egresado' ? 'EGRESADO' : tipoUsuario === 'docente' ? 'DOCENTE' : 'INVITADO VIP';
 
   const gruposInvitados = invitados.reduce((acc, inv) => {
     if (!inv.nombre) return acc;
@@ -367,14 +379,14 @@ function PortalPrincipalDNI() {
                 <h3 className="font-bold text-lg text-gray-800">{nombreMostrado || 'Asistente ESRN N° 005'}</h3>
                 <p className="text-xs text-gray-500">DNI: {datosPersona.dni || dni}</p>
                 <p className="text-[11px] uppercase tracking-wider text-[#6B1D2F] font-semibold mt-1">
-                  EGRESADO
+                  {textoRolTarjeta}
                 </p>
               </div>
 
               {/* Botón de descarga del QR personal justo abajo del nombre */}
               <button 
                 type="button"
-                onClick={() => descargarTarjeta1080x1920(nombreMostrado, `DNI: ${datosPersona.dni || dni}`, valorQRPrincipal)}
+                onClick={() => descargarTarjeta1080x1920(nombreMostrado, `DNI: ${datosPersona.dni || dni}`, textoRolTarjeta)}
                 className="w-full py-2.5 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 shadow cursor-pointer"
               >
                 <Download className="w-4 h-4" /> Descargar Mi QR Personal
@@ -462,7 +474,7 @@ function PortalPrincipalDNI() {
                         onClick={() => descargarTarjeta1080x1920(
                           grupo.startsWith('Individual') ? lista[0].nombre : `Grupo de ${nombreMostrado} (${lista.length} pers.)`,
                           grupo.startsWith('Individual') ? `DNI: ${lista[0].dni}` : `Integrantes: ${lista.map(x => x.nombre).join(', ')}`,
-                          `GRUPO-${grupo}-${dni}`
+                          'INVITADO FAMILIAR'
                         )}
                         className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 shadow cursor-pointer"
                       >
