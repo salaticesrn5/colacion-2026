@@ -137,7 +137,7 @@ function PortalPrincipalDNI() {
     }
   };
 
-  // Función robusta de descarga para evitar errores de renderizado en canvas
+  // Función robusta de descarga para generar la tarjeta 1080x1920 con el nombre real
   const descargarTarjeta1080x1920 = () => {
     const svgElement = qrRef.current?.querySelector('svg');
     if (!svgElement) {
@@ -177,7 +177,7 @@ function PortalPrincipalDNI() {
           ctx.font = '26px sans-serif';
           ctx.fillText('Acto de Colación 2026 — Pase Oficial de Ingreso', 540, 180);
 
-          // 3. Tarjeta blanca central con bordes redondeados (compatible sin roundRect si da error)
+          // 3. Tarjeta blanca central con bordes redondeados
           ctx.fillStyle = '#FFFFFF';
           ctx.beginPath();
           if (typeof ctx.roundRect === 'function') {
@@ -190,9 +190,9 @@ function PortalPrincipalDNI() {
           ctx.strokeStyle = '#E5E7EB';
           ctx.stroke();
 
-          // 4. Datos del titular dentro de la tarjeta
-          const nombreTitular = datosPersona.nombre || 'NOMBRE Y APELLIDO';
-          const dniTitular = datosPersona.dni || 'DNI';
+          // 4. Datos reales del titular dentro de la tarjeta
+          const nombreTitular = datosPersona.nombre || datosPersona.name || datosPersona.apellido || 'DOCENTE ESRN N° 005';
+          const dniTitular = datosPersona.dni || dni;
 
           ctx.fillStyle = '#111827';
           ctx.font = 'bold 50px sans-serif';
@@ -245,7 +245,7 @@ function PortalPrincipalDNI() {
     }
   };
 
-  const valorQRTexto = datosPersona ? `ESRN005-${tipoUsuario.toUpperCase()}-${datosPersona.dni}-${datosPersona.nombre}` : '';
+  const valorQRTexto = datosPersona ? `ESRN005-${tipoUsuario.toUpperCase()}-${datosPersona.dni || dni}-${datosPersona.nombre || 'Docente'}` : '';
 
   return (
     <div className="max-w-md mx-auto px-4 space-y-4">
@@ -303,8 +303,8 @@ function PortalPrincipalDNI() {
         ) : (
           <div className="space-y-4 text-left">
             <div className="p-4 bg-gray-50 rounded-lg border text-center">
-              <h3 className="font-bold text-lg text-gray-800">{datosPersona.nombre}</h3>
-              <p className="text-xs text-gray-500">DNI: {datosPersona.dni}</p>
+              <h3 className="font-bold text-lg text-gray-800">{datosPersona.nombre || datosPersona.name || 'Docente'}</h3>
+              <p className="text-xs text-gray-500">DNI: {datosPersona.dni || dni}</p>
               <p className="text-[11px] uppercase tracking-wider text-[#6B1D2F] font-semibold mt-1">
                 {tipoUsuario === 'egresado' ? 'Egresado / Titulado' : 'Personal Docente ESRN N° 005'}
               </p>
