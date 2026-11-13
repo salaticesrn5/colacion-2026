@@ -137,7 +137,7 @@ function PortalPrincipalDNI() {
     }
   };
 
-  // Función para generar y descargar la tarjeta institucional en 1080x1920
+  // Función robusta de descarga para evitar errores de renderizado en canvas
   const descargarTarjeta1080x1920 = () => {
     const svgElement = qrRef.current?.querySelector('svg');
     if (!svgElement) {
@@ -145,84 +145,104 @@ function PortalPrincipalDNI() {
       return;
     }
 
-    const svgData = new XMLSerializer().serializeToString(svgElement);
-    const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
-    const URL = window.URL || window.webkitURL || window;
-    const blobURL = URL.createObjectURL(svgBlob);
+    try {
+      const svgData = new XMLSerializer().serializeToString(svgElement);
+      const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+      const URL = window.URL || window.webkitURL || window;
+      const blobURL = URL.createObjectURL(svgBlob);
 
-    const qrImage = new Image();
-    qrImage.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = 1080;
-      canvas.height = 1920;
-      const ctx = canvas.getContext('2d');
+      const qrImage = new Image();
+      qrImage.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = 1080;
+          canvas.height = 1920;
+          const ctx = canvas.getContext('2d');
 
-      // 1. Fondo general gris claro
-      ctx.fillStyle = '#F3F4F6';
-      ctx.fillRect(0, 0, 1080, 1920);
+          // 1. Fondo general gris claro
+          ctx.fillStyle = '#F3F4F6';
+          ctx.fillRect(0, 0, 1080, 1920);
 
-      // 2. Encabezado institucional Borgoña (#6B1D2F)
-      ctx.fillStyle = '#6B1D2F';
-      ctx.fillRect(0, 0, 1080, 380);
+          // 2. Encabezado institucional Borgoña (#6B1D2F)
+          ctx.fillStyle = '#6B1D2F';
+          ctx.fillRect(0, 0, 1080, 380);
 
-      // Texto de cabecera
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = 'bold 42px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('ESRN N° 005 — CIPOLLETTI', 540, 120);
+          // Texto de cabecera
+          ctx.fillStyle = '#FFFFFF';
+          ctx.font = 'bold 42px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('ESRN N° 005 — CIPOLLETTI', 540, 120);
 
-      ctx.fillStyle = '#FBCFE8';
-      ctx.font = '26px sans-serif';
-      ctx.fillText('Acto de Colación 2026 — Pase Oficial de Ingreso', 540, 180);
+          ctx.fillStyle = '#FBCFE8';
+          ctx.font = '26px sans-serif';
+          ctx.fillText('Acto de Colación 2026 — Pase Oficial de Ingreso', 540, 180);
 
-      // 3. Tarjeta blanca central con bordes redondeados
-      ctx.fillStyle = '#FFFFFF';
-      ctx.beginPath();
-      ctx.roundRect(120, 440, 840, 1280, 30);
-      ctx.fill();
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = '#E5E7EB';
-      ctx.stroke();
+          // 3. Tarjeta blanca central con bordes redondeados (compatible sin roundRect si da error)
+          ctx.fillStyle = '#FFFFFF';
+          ctx.beginPath();
+          if (typeof ctx.roundRect === 'function') {
+            ctx.roundRect(120, 440, 840, 1280, 30);
+          } else {
+            ctx.rect(120, 440, 840, 1280);
+          }
+          ctx.fill();
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = '#E5E7EB';
+          ctx.stroke();
 
-      // 4. Datos del titular dentro de la tarjeta
-      ctx.fillStyle = '#111827';
-      ctx.font = 'bold 50px sans-serif';
-      ctx.fillText(datosPersona.nombre.toUpperCase(), 540, 580);
+          // 4. Datos del titular dentro de la tarjeta
+          const nombreTitular = datosPersona.nombre || 'NOMBRE Y APELLIDO';
+          const dniTitular = datosPersona.dni || 'DNI';
 
-      ctx.fillStyle = '#4B5563';
-      ctx.font = '32px sans-serif';
-      ctx.fillText(`DNI: ${datosPersona.dni}`, 540, 650);
+          ctx.fillStyle = '#111827';
+          ctx.font = 'bold 50px sans-serif';
+          ctx.fillText(nombreTitular.toUpperCase(), 540, 580);
 
-      ctx.fillStyle = '#6B1D2F';
-      ctx.font = 'bold 28px sans-serif';
-      ctx.fillText(tipoUsuario === 'egresado' ? 'EGRESADO / TITULADO' : 'PERSONAL DOCENTE', 540, 710);
+          ctx.fillStyle = '#4B5563';
+          ctx.font = '32px sans-serif';
+          ctx.fillText(`DNI: ${dniTitular}`, 540, 650);
 
-      // 5. Dibujar el Código QR centrado (500x500 px)
-      ctx.drawImage(qrImage, 290, 780, 500, 500);
+          ctx.fillStyle = '#6B1D2F';
+          ctx.font = 'bold 28px sans-serif';
+          ctx.fillText(tipoUsuario === 'egresado' ? 'EGRESADO / TITULADO' : 'PERSONAL DOCENTE', 540, 710);
 
-      // 6. Información de modalidad
-      ctx.fillStyle = '#374151';
-      ctx.font = 'bold 30px sans-serif';
-      ctx.fillText(tipoUsuario === 'egresado' ? `Modalidad: Ingreso ${tipoIngreso.toUpperCase()}` : 'Pase Nominal Docente', 540, 1370);
+          // 5. Dibujar el Código QR centrado (500x500 px)
+          ctx.drawImage(qrImage, 290, 780, 500, 500);
 
-      ctx.fillStyle = '#6B7280';
-      ctx.font = '24px sans-serif';
-      ctx.fillText('Válido para el ingreso al establecimiento', 540, 1430);
+          // 6. Información de modalidad
+          ctx.fillStyle = '#374151';
+          ctx.font = 'bold 30px sans-serif';
+          ctx.fillText(tipoUsuario === 'egresado' ? `Modalidad: Ingreso ${tipoIngreso.toUpperCase()}` : 'Pase Nominal Docente', 540, 1370);
 
-      // 7. Pie de página institucional
-      ctx.fillStyle = '#9CA3AF';
-      ctx.font = '24px sans-serif';
-      ctx.fillText('Presentar este pase en puerta (digital o impreso)', 540, 1810);
+          ctx.fillStyle = '#6B7280';
+          ctx.font = '24px sans-serif';
+          ctx.fillText('Válido para el ingreso al establecimiento', 540, 1430);
 
-      const pngUrl = canvas.toDataURL('image/png');
-      const downloadLink = document.createElement('a');
-      downloadLink.href = pngUrl;
-      downloadLink.download = `Pase-Oficial-ESRN005-${datosPersona.dni}.png`;
-      document.body.appendChild(downloadLink);
-      downloadLink.click();
-      document.body.removeChild(downloadLink);
-    };
-    qrImage.src = blobURL;
+          // 7. Pie de página institucional
+          ctx.fillStyle = '#9CA3AF';
+          ctx.font = '24px sans-serif';
+          ctx.fillText('Presentar este pase en puerta (digital o impreso)', 540, 1810);
+
+          const pngUrl = canvas.toDataURL('image/png');
+          const downloadLink = document.createElement('a');
+          downloadLink.href = pngUrl;
+          downloadLink.download = `Pase-Oficial-ESRN005-${dniTitular}.png`;
+          document.body.appendChild(downloadLink);
+          downloadLink.click();
+          document.body.removeChild(downloadLink);
+        } catch (canvasErr) {
+          console.error('Error al pintar canvas:', canvasErr);
+          alert('Hubo un error al procesar la imagen del pase.');
+        }
+      };
+      qrImage.onerror = () => {
+        alert('Error al cargar la imagen del código QR.');
+      };
+      qrImage.src = blobURL;
+    } catch (err) {
+      console.error('Error en descarga:', err);
+      alert('No se pudo iniciar la descarga de la tarjeta.');
+    }
   };
 
   const valorQRTexto = datosPersona ? `ESRN005-${tipoUsuario.toUpperCase()}-${datosPersona.dni}-${datosPersona.nombre}` : '';
@@ -325,7 +345,7 @@ function PortalPrincipalDNI() {
               </>
             )}
 
-            {/* Visualización oculta del QR para renderizar el canvas y botón de descarga 1080x1920 */}
+            {/* Visualización del código QR (oculta para el canvas) y Botón de Descarga 1080x1920 */}
             <div className="p-4 bg-white border-2 border-dashed border-gray-300 rounded-xl text-center space-y-3">
               <div ref={qrRef} className="w-36 h-36 bg-white mx-auto flex items-center justify-center p-1 rounded border hidden">
                 <QRCodeSVG value={valorQRTexto} size={130} level="H" includeMargin={true} />
@@ -337,8 +357,9 @@ function PortalPrincipalDNI() {
               </div>
 
               <button 
+                type="button"
                 onClick={descargarTarjeta1080x1920}
-                className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-semibold flex items-center justify-center gap-2 shadow"
+                className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-semibold flex items-center justify-center gap-2 shadow cursor-pointer"
               >
                 <Download className="w-4 h-4" /> Descargar Tarjeta Pase (1080x1920)
               </button>
@@ -347,14 +368,16 @@ function PortalPrincipalDNI() {
             {/* Botón de No Asistiré / Liberar Cupo */}
             <div className="pt-2 border-t">
               <button 
+                type="button"
                 onClick={marcarNoAsistire}
-                className="w-full py-2.5 bg-red-50 hover:bg-red-100 border border-red-300 text-red-700 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition"
+                className="w-full py-2.5 bg-red-50 hover:bg-red-100 border border-red-300 text-red-700 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer"
               >
                 <XCircle className="w-4 h-4" /> No podré asistir / Liberar cupo
               </button>
             </div>
 
             <button 
+              type="button"
               onClick={() => { setDatosPersona(null); setDni(''); }} 
               className="w-full py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 text-sm"
             >
