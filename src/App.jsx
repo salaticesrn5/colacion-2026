@@ -31,7 +31,7 @@ export default function App() {
             </div>
           </div>
           
-          {/* Accesos secundarios discretos y botón de Administración claramente visible */}
+          {/* Accesos de navegación y Panel Administrativo claramente visible */}
           <div className="flex gap-1.5 text-xs items-center">
             <button 
               onClick={() => setVistaActual('egresado')} 
@@ -498,7 +498,7 @@ function PortalPrincipalDNI() {
             </div>
 
             <button 
-                type="button"
+              type="button"
               onClick={() => { setDatosPersona(null); setDni(''); }} 
               className="w-full py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 text-sm"
             >
