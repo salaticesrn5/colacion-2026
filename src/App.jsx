@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import {
   Users, UserCheck, Shield, QrCode, Upload, Trash2, Plus, Search,
   CheckCircle2, XCircle, AlertTriangle, Lock, Unlock, Download,
-  LogOut, Eye, Edit3, Save, X, RefreshCw, MessageCircle, Award,
+  LogOut, Eye, EyeOff, Edit3, Save, X, RefreshCw, MessageCircle, Award,
   UserPlus, FileSpreadsheet, Check, ArrowRight, Building2, Phone
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
@@ -33,7 +33,7 @@ const parseCSV = (text) => {
 };
 
 export default function App() {
-  const [vista, setVista] = useState('portal');
+  const [vista, setVista] = useState('portal'); // 'portal', 'login', 'puerta', 'admin'
   const [session, setSession] = useState(null);
   const [perfilStaff, setPerfilStaff] = useState(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
@@ -77,7 +77,8 @@ export default function App() {
         setPerfilStaff(data);
         setVista(data.rol === 'puerta' ? 'puerta' : 'admin');
       } else {
-        setPerfilStaff({ nombre: user.email.split('@')[0], email: user.email, rol: 'admin', activo: true });
+        const fallbackAdmin = { nombre: user.email.split('@')[0], email: user.email, rol: 'admin', activo: true };
+        setPerfilStaff(fallbackAdmin);
         setVista('admin');
       }
     } catch (err) {
@@ -160,7 +161,7 @@ export default function App() {
                     vista === 'portal' ? 'bg-white text-[#6B1D2F] font-bold' : 'text-rose-200 hover:text-white'
                   }`}
                 >
-                  Portal Egresados
+                  Portal Principal
                 </button>
                 <button
                   onClick={() => setVista('login')}
@@ -237,11 +238,12 @@ export default function App() {
 }
 
 // ============================================================================
-// LOGIN PERSONAL
+// LOGIN PERSONAL (Con ojito para ver contraseña)
 // ============================================================================
 function LoginStaff({ onSuccess, notify }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const handleLogin = async (e) => {
@@ -277,7 +279,12 @@ function LoginStaff({ onSuccess, notify }) {
         </div>
         <div>
           <label className="block text-xs font-semibold text-slate-700 mb-1">Contraseña</label>
-          <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#6B1D2F] outline-none text-sm" />
+          <div className="relative">
+            <input type={showPassword ? "text" : "password"} required value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#6B1D2F] outline-none text-sm pr-10" />
+            <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-3 text-slate-400 hover:text-slate-600 focus:outline-none">
+              {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </button>
+          </div>
         </div>
         <button type="submit" disabled={loading} className="w-full py-3 rounded-xl bg-[#6B1D2F] hover:bg-opacity-90 text-white font-semibold text-sm transition disabled:opacity-50">
           {loading ? 'Verificando...' : 'Ingresar al Sistema'}
