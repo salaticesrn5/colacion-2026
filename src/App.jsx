@@ -137,7 +137,7 @@ function PortalPrincipalDNI() {
     }
   };
 
-  // Función robusta de descarga para generar la tarjeta 1080x1920 extrayendo el nombre correctamente
+  // Función robusta de descarga para generar la tarjeta 1080x1920 con el nombre real
   const descargarTarjeta1080x1920 = () => {
     const svgElement = qrRef.current?.querySelector('svg');
     if (!svgElement) {
@@ -190,8 +190,20 @@ function PortalPrincipalDNI() {
           ctx.strokeStyle = '#E5E7EB';
           ctx.stroke();
 
-          // 4. Extracción robusta del nombre del docente / egresado de Supabase
-          const nombreTitular = datosPersona.nombre || datosPersona.name || datosPersona.apellido || datosPersona.docente || datosPersona.profesor || 'DOCENTE ESRN N° 005';
+          // 4. Extracción exhaustiva y segura del nombre (incluyendo apellido, name, docente, profesor, fullname, etc.)
+          const nombreTitular = (
+            datosPersona.nombre || 
+            datosPersona.name || 
+            datosPersona.apellido || 
+            datosPersona.docente || 
+            datosPersona.profesor || 
+            datosPersona.fullname || 
+            datosPersona.full_name || 
+            datosPersona.docente_nombre || 
+            datosPersona.egresado || 
+            (datosPersona.apellidos ? `${datosPersona.apellidos}, ${datosPersona.nombre}` : '') || 
+            'DOCENTE ESRN N° 005'
+          );
           const dniTitular = datosPersona.dni || dni;
 
           ctx.fillStyle = '#111827';
@@ -245,7 +257,20 @@ function PortalPrincipalDNI() {
     }
   };
 
-  const nombreMostrado = datosPersona ? (datosPersona.nombre || datosPersona.name || datosPersona.apellido || datosPersona.docente || datosPersona.profesor || 'Docente') : '';
+  const nombreMostrado = datosPersona ? (
+    datosPersona.nombre || 
+    datosPersona.name || 
+    datosPersona.apellido || 
+    datosPersona.docente || 
+    datosPersona.profesor || 
+    datosPersona.fullname || 
+    datosPersona.full_name || 
+    datosPersona.docente_nombre || 
+    datosPersona.egresado || 
+    (datosPersona.apellidos ? `${datosPersona.apellidos}, ${datosPersona.nombre}` : '') || 
+    'Docente'
+  ) : '';
+
   const valorQRTexto = datosPersona ? `ESRN005-${tipoUsuario.toUpperCase()}-${datosPersona.dni || dni}-${nombreMostrado}` : '';
 
   return (
