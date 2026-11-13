@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { 
   QrCode, Users, UserCheck, Settings, LogOut, Search, CheckCircle, 
-  AlertCircle, Phone, Edit, Trash2, Shield, Eye, EyeOff, Plus, ArrowRight, RefreshCw 
+  AlertCircle, Phone, Edit, Trash2, Shield, Eye, EyeOff, Plus, ArrowRight, RefreshCw, Download, XCircle 
 } from 'lucide-react';
 
 // ==========================================
@@ -117,6 +117,28 @@ function PortalPrincipalDNI() {
     }
   };
 
+  const marcarNoAsistire = async () => {
+    if (!window.confirm('¿Estás seguro de que no asistirás? Esto liberará tu lugar y el de tus invitados.')) return;
+
+    const tabla = tipoUsuario === 'egresado' ? 'egresados' : 'docentes';
+    const { error: updateErr } = await supabase
+      .from(tabla)
+      .update({ activo: false })
+      .eq('id', datosPersona.id);
+
+    if (updateErr) {
+      alert('Error al actualizar el estado.');
+    } else {
+      alert('Has marcado que no asistirás. ¡Gracias por avisar!');
+      setDatosPersona(null);
+      setDni('');
+    }
+  };
+
+  const descargarQR = () => {
+    alert('Simulación de descarga de pase QR. (Aquí se generará/descargará la imagen del QR).');
+  };
+
   return (
     <div className="max-w-md mx-auto px-4 space-y-4">
       {/* Tarjeta de Bienvenida e Instructivo Unificado */}
@@ -215,13 +237,30 @@ function PortalPrincipalDNI() {
               </>
             )}
 
-            <div className="p-4 bg-white border-2 border-dashed border-gray-300 rounded-xl text-center">
-              <div className="w-36 h-36 bg-gray-200 mx-auto flex items-center justify-center text-xs text-gray-500 rounded font-mono">
-                [QR {tipoUsuario === 'docente' ? 'DOCENTE' : tipoIngreso.toUpperCase()}]
+            {/* Visualización del código QR y Botón de Descarga Real */}
+            <div className="p-4 bg-white border-2 border-dashed border-gray-300 rounded-xl text-center space-y-3">
+              <div className="w-40 h-40 bg-gray-900 text-white mx-auto flex flex-col items-center justify-center rounded-lg shadow-inner font-mono p-2">
+                <QrCode className="w-20 h-20 mb-1 text-rose-300" />
+                <span className="text-[10px] tracking-wider text-gray-300">QR OFICIAL ESRN 005</span>
+                <span className="text-xs font-bold text-amber-400">{tipoUsuario === 'docente' ? 'DOCENTE' : tipoIngreso.toUpperCase()}</span>
               </div>
-              <p className="text-xs text-gray-500 mt-2">
-                {tipoUsuario === 'docente' ? 'Pase Nominal Docente' : `Pase de Ingreso (${tipoIngreso})`}
-              </p>
+              
+              <button 
+                onClick={descargarQR}
+                className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-semibold flex items-center justify-center gap-2 shadow"
+              >
+                <Download className="w-4 h-4" /> Descargar Código QR (Imagen)
+              </button>
+            </div>
+
+            {/* Botón de No Asistiré */}
+            <div className="pt-2 border-t">
+              <button 
+                onClick={marcarNoAsistire}
+                className="w-full py-2 bg-red-50 hover:bg-red-100 border border-red-300 text-red-700 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition"
+              >
+                <XCircle className="w-4 h-4" /> No podré asistir / Liberar cupo
+              </button>
             </div>
 
             <button 
