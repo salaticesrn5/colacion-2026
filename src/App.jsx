@@ -30,7 +30,7 @@ const createTempAuthClient = () =>
 const sanitizeDNI = (val) => String(val || '').replace(/\D/g, '').slice(0, 8);
 
 const CAPACIDAD_MAXIMA = 525;
-const CUPO_BASE_DEFECTO = 3;
+const CUPO_BASE_DEFECTO = 4;
 
 const getQrImageUrl = (code) =>
   `https://api.qrserver.com/v1/create-qr-code/?size=240x240&margin=10&data=${encodeURIComponent(code)}`;
@@ -1161,6 +1161,25 @@ function PanelAdministracion({
     }
   };
 
+  const vaciarPadronDocentes = async () => {
+    const confirmacion = window.prompt(
+      'ATENCIÓN: Esta acción eliminará TODOS los docentes y no docentes cargados actualmente.\n\nEscribí VACIAR en mayúsculas para confirmar:'
+    );
+    if (confirmacion !== 'VACIAR') return;
+
+    try {
+      const { error } = await supabase
+        .from('docentes')
+        .delete()
+        .neq('id', '00000000-0000-0000-0000-000000000000');
+      if (error) throw error;
+      await recargar();
+      notify('Padrón de docentes vaciado correctamente.');
+    } catch (err) {
+      notify('Error al vaciar docentes: ' + err.message, 'error');
+    }
+  };
+
   const handleImportarCSVDocentes = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -1230,6 +1249,25 @@ function PanelAdministracion({
       notify('Invitado Especial agregado.');
     } catch (err) {
       notify('Error agregando invitado especial: ' + err.message, 'error');
+    }
+  };
+
+  const vaciarPadronVIP = async () => {
+    const confirmacion = window.prompt(
+      'ATENCIÓN: Esta acción eliminará TODOS los Invitados Especiales / VIP cargados actualmente.\n\nEscribí VACIAR en mayúsculas para confirmar:'
+    );
+    if (confirmacion !== 'VACIAR') return;
+
+    try {
+      const { error } = await supabase
+        .from('invitados_especiales')
+        .delete()
+        .neq('id', '00000000-0000-0000-0000-000000000000');
+      if (error) throw error;
+      await recargar();
+      notify('Listado de Invitados Especiales (VIP) vaciado correctamente.');
+    } catch (err) {
+      notify('Error al vaciar VIP: ' + err.message, 'error');
     }
   };
 
@@ -1649,9 +1687,9 @@ function PanelAdministracion({
       {tab === 'docentes' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-4">
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 className="font-bold text-slate-900">Padrón de Docentes ({docentes.length})</h3>
-              <div>
+              <div className="flex flex-wrap items-center gap-2">
                 <input
                   ref={fileDocRef}
                   type="file"
@@ -1667,6 +1705,17 @@ function PanelAdministracion({
                   <Upload className="w-3.5 h-3.5" />
                   Importar CSV Docentes
                 </button>
+
+                {docentes.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={vaciarPadronDocentes}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold transition"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Vaciar Padrón
+                  </button>
+                )}
               </div>
             </div>
 
@@ -1717,9 +1766,21 @@ function PanelAdministracion({
           </div>
 
           <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-4">
-            <h3 className="font-bold text-slate-900">
-              Invitados Especiales / Autoridades ({especiales.length})
-            </h3>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="font-bold text-slate-900">
+                Invitados Especiales / Autoridades ({especiales.length})
+              </h3>
+              {especiales.length > 0 && (
+                <button
+                  type="button"
+                  onClick={vaciarPadronVIP}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold transition"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Vaciar Padrón
+                </button>
+              )}
+            </div>
 
             <form onSubmit={agregarEspecial} className="space-y-2">
               <div className="flex flex-wrap gap-2">
@@ -2270,5 +2331,3 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
     </div>
   );
 }
-
-
