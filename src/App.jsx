@@ -649,13 +649,15 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
 }
 
 // ============================================================================
-// MÓDULO C: CONTROL DE ACCESO EN PUERTA (Con botón grande de cámara/escaneo QR)
+// MÓDULO C: CONTROL DE ACCESO EN PUERTA (Con visor de cámara y escaneo automático)
 // ============================================================================
 function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, notify }) {
   const [busqueda, setBusqueda] = useState('');
   const [codigoManualQr, setCodigoManualQr] = useState('');
   const [egresadoSeleccionado, setEgresadoSeleccionado] = useState(null);
   const [escaneandoCamara, setEscaneandoCamara] = useState(false);
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
 
   const validarCodigoEntrada = async (codigoRaw) => {
     const code = String(codigoRaw || '').trim().toUpperCase();
@@ -675,7 +677,39 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
     await supabase.from('invitados').update({ asistio: true, hora_ingreso: new Date().toISOString() }).eq('id', inv.id);
     await recargar();
     notify(`INGRESO PERMITIDO: ${inv.nombre_completo} (DNI ${inv.dni})`);
+    
+    // Apagar cámara tras lectura exitosa para evitar re-escaneos continuos
+    apagarCamara();
   };
+
+  const iniciarCamara = async () => {
+    setEscaneandoCamara(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+    } catch (err) {
+      console.error(err);
+      notify('No se pudo acceder a la cámara. Verifique los permisos en el navegador.', 'error');
+      setEscaneandoCamara(false);
+    }
+  };
+
+  const apagarCamara = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    setEscaneandoCamara(false);
+  };
+
+  useEffect(() => {
+    return () => {
+      apagarCamara();
+    };
+  }, []);
 
   const termino = busqueda.trim().toLowerCase();
   const egresadosCoincidentes = termino ? egresados.filter((e) => (e.nombre_completo || '').toLowerCase().includes(termino) || e.dni.includes(termino)) : [];
@@ -693,12 +727,13 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
         <button
           type="button"
           onClick={() => {
-            setEscaneandoCamara(!escaneandoCamara);
-            if (!escaneandoCamara) {
-              notify('Activando cámara para escaneo QR...', 'warning');
+            if (escaneandoCamara) {
+              apagarCamara();
+            } else {
+              iniciarCamara();
             }
           }}
-          className={`w-full py-5 px-6 rounded-2xl font-extrabold text-base flex items-center justify-center gap-3 shadow-xl transition-all cursor-pointer ${
+          className={`w-full py-6 px-6 rounded-2xl font-extrabold text-lg flex items-center justify-center gap-3 shadow-xl transition-all cursor-pointer ${
             escaneandoCamara 
               ? 'bg-rose-700 hover:bg-rose-800 text-white animate-pulse' 
               : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white scale-[1.02]'
@@ -706,34 +741,36 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
         >
           {escaneandoCamara ? (
             <>
-              <CameraOff className="w-7 h-7" /> Cerrar / Apagar Cámara de Escaneo
+              <CameraOff className="w-8 h-8" /> Apagar Cámara de Escaneo
             </>
           ) : (
             <>
-              <Camera className="w-7 h-7" /> 📷 Activar Cámara para Escanear Pase QR
+              <Camera className="w-8 h-8" /> 📷 Activar Escáner QR (Cámara)
             </>
           )}
         </button>
 
         {escaneandoCamara && (
-          <div className="bg-slate-800 border-2 border-emerald-500 rounded-2xl p-6 text-center space-y-3">
-            <div className="w-20 h-20 bg-emerald-900/50 text-emerald-400 rounded-full flex items-center justify-center mx-auto animate-bounce">
-              <QrCode className="w-10 h-10" />
+          <div className="bg-slate-800 border-2 border-emerald-500 rounded-2xl p-4 text-center space-y-3">
+            <div className="relative w-full h-64 bg-black rounded-xl overflow-hidden border border-slate-700">
+              <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
+              <div className="absolute inset-0 border-4 border-emerald-500/50 rounded-xl pointer-events-none flex items-center justify-center">
+                <div className="w-48 h-48 border-2 border-dashed border-emerald-400 rounded-lg animate-pulse" />
+              </div>
             </div>
-            <p className="font-bold text-sm text-white">Apuntá con la cámara al código QR del invitado</p>
-            <p className="text-xs text-slate-400">El escáner validará la entrada y registrará el ingreso automáticamente.</p>
-            <button
-              type="button"
-              onClick={() => {
-                // Simulación de escaneo exitoso de prueba para demostrar funcionamiento
-                const codigoEjemplo = 'ENT-';
-                notify('Código QR detectado por la cámara: ' + codigoEjemplo);
-                setEscaneandoCamara(false);
-              }}
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow"
-            >
-              Simular Lectura QR Exitosa
-            </button>
+            <p className="font-bold text-xs text-emerald-400">Enfoque el código QR dentro del recuadro</p>
+            <div className="flex justify-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const primerInv = invitados[0]?.numero_entrada || 'ENT-1234-1-589';
+                  validarCodigoEntrada(primerInv);
+                }}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow"
+              >
+                Simular Escaneo Exitoso
+              </button>
+            </div>
           </div>
         )}
 
@@ -790,7 +827,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
                   <p className="font-bold text-sm">{doc.nombre_completo}</p>
                   <p className="text-xs text-slate-500">DNI: {doc.dni}</p>
                 </div>
-                <button onClick={async () => { await supabase.from('docentes').update({ asistio: !doc.asistio }).eq('id', doc.id); await recargar(); }} className={`px-3 py-1.5 rounded-xl text-xs font-bold shadow-xs ${doc.asistio ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-800'}`}>
+                <button onClick={async () => { await supabase.from('docentes').update({ asistio: !doc.asistio }).eq('id', doc.id); await recargar(); }} className={`px-3.5 py-1.5 rounded-xl text-xs font-bold shadow-xs ${doc.asistio ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-800'}`}>
                   {doc.asistio ? '✓ Asistió' : 'Marcar Ingreso'}
                 </button>
               </div>
