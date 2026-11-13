@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { 
   QrCode, Users, UserCheck, Settings, LogOut, Search, CheckCircle, 
   AlertCircle, Phone, Edit, Trash2, Shield, Eye, EyeOff, Plus, ArrowRight, RefreshCw, Download, XCircle 
 } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 
 // ==========================================
 // CONFIGURACIÓN DE SUPABASE (Variables de entorno seguras)
@@ -74,6 +75,7 @@ function PortalPrincipalDNI() {
   const [error, setError] = useState('');
   const [celular, setCelular] = useState('');
   const [tipoIngreso, setTipoIngreso] = useState('individual');
+  const qrRef = useRef(null);
 
   const buscarPorDNI = async (e) => {
     e.preventDefault();
@@ -135,9 +137,95 @@ function PortalPrincipalDNI() {
     }
   };
 
-  const descargarQR = () => {
-    alert('Simulación de descarga de pase QR. (Aquí se generará/descargará la imagen del QR).');
+  // Función para generar y descargar la tarjeta institucional en 1080x1920
+  const descargarTarjeta1080x1920 = () => {
+    const svgElement = qrRef.current?.querySelector('svg');
+    if (!svgElement) {
+      alert('No se pudo generar la imagen del QR.');
+      return;
+    }
+
+    const svgData = new XMLSerializer().serializeToString(svgElement);
+    const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+    const URL = window.URL || window.webkitURL || window;
+    const blobURL = URL.createObjectURL(svgBlob);
+
+    const qrImage = new Image();
+    qrImage.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1080;
+      canvas.height = 1920;
+      const ctx = canvas.getContext('2d');
+
+      // 1. Fondo general gris claro
+      ctx.fillStyle = '#F3F4F6';
+      ctx.fillRect(0, 0, 1080, 1920);
+
+      // 2. Encabezado institucional Borgoña (#6B1D2F)
+      ctx.fillStyle = '#6B1D2F';
+      ctx.fillRect(0, 0, 1080, 380);
+
+      // Texto de cabecera
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = 'bold 42px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('ESRN N° 005 — CIPOLLETTI', 540, 120);
+
+      ctx.fillStyle = '#FBCFE8';
+      ctx.font = '26px sans-serif';
+      ctx.fillText('Acto de Colación 2026 — Pase Oficial de Ingreso', 540, 180);
+
+      // 3. Tarjeta blanca central con bordes redondeados
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.roundRect(120, 440, 840, 1280, 30);
+      ctx.fill();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = '#E5E7EB';
+      ctx.stroke();
+
+      // 4. Datos del titular dentro de la tarjeta
+      ctx.fillStyle = '#111827';
+      ctx.font = 'bold 50px sans-serif';
+      ctx.fillText(datosPersona.nombre.toUpperCase(), 540, 580);
+
+      ctx.fillStyle = '#4B5563';
+      ctx.font = '32px sans-serif';
+      ctx.fillText(`DNI: ${datosPersona.dni}`, 540, 650);
+
+      ctx.fillStyle = '#6B1D2F';
+      ctx.font = 'bold 28px sans-serif';
+      ctx.fillText(tipoUsuario === 'egresado' ? 'EGRESADO / TITULADO' : 'PERSONAL DOCENTE', 540, 710);
+
+      // 5. Dibujar el Código QR centrado (500x500 px)
+      ctx.drawImage(qrImage, 290, 780, 500, 500);
+
+      // 6. Información de modalidad
+      ctx.fillStyle = '#374151';
+      ctx.font = 'bold 30px sans-serif';
+      ctx.fillText(tipoUsuario === 'egresado' ? `Modalidad: Ingreso ${tipoIngreso.toUpperCase()}` : 'Pase Nominal Docente', 540, 1370);
+
+      ctx.fillStyle = '#6B7280';
+      ctx.font = '24px sans-serif';
+      ctx.fillText('Válido para el ingreso al establecimiento', 540, 1430);
+
+      // 7. Pie de página institucional
+      ctx.fillStyle = '#9CA3AF';
+      ctx.font = '24px sans-serif';
+      ctx.fillText('Presentar este pase en puerta (digital o impreso)', 540, 1810);
+
+      const pngUrl = canvas.toDataURL('image/png');
+      const downloadLink = document.createElement('a');
+      downloadLink.href = pngUrl;
+      downloadLink.download = `Pase-Oficial-ESRN005-${datosPersona.dni}.png`;
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+      document.body.removeChild(downloadLink);
+    };
+    qrImage.src = blobURL;
   };
+
+  const valorQRTexto = datosPersona ? `ESRN005-${tipoUsuario.toUpperCase()}-${datosPersona.dni}-${datosPersona.nombre}` : '';
 
   return (
     <div className="max-w-md mx-auto px-4 space-y-4">
@@ -145,7 +233,7 @@ function PortalPrincipalDNI() {
       <div className="bg-gradient-to-r from-[#6B1D2F] to-[#8a253c] text-white rounded-xl shadow-md p-5 text-center">
         <h2 className="text-xl font-bold mb-1">¡Bienvenidos al Acto de Colación 2026! 🎉</h2>
         <p className="text-xs text-rose-100 leading-relaxed">
-          Seleccioná tu rol (Egresado o Docente) e ingresá tu número de DNI para gestionar tu acceso, verificar plazas, registrar tu WhatsApp, configurar tu modalidad y descargar tu código QR para la entrada.
+          Seleccioná tu rol (Egresado o Docente) e ingresá tu número de DNI para gestionar tu acceso, verificar plazas, registrar tu WhatsApp, configurar tu modalidad y descargar tu tarjeta de pase QR en alta resolución (1080x1920) para la entrada.
         </p>
       </div>
 
@@ -237,27 +325,30 @@ function PortalPrincipalDNI() {
               </>
             )}
 
-            {/* Visualización del código QR y Botón de Descarga Real */}
+            {/* Visualización oculta del QR para renderizar el canvas y botón de descarga 1080x1920 */}
             <div className="p-4 bg-white border-2 border-dashed border-gray-300 rounded-xl text-center space-y-3">
-              <div className="w-40 h-40 bg-gray-900 text-white mx-auto flex flex-col items-center justify-center rounded-lg shadow-inner font-mono p-2">
-                <QrCode className="w-20 h-20 mb-1 text-rose-300" />
-                <span className="text-[10px] tracking-wider text-gray-300">QR OFICIAL ESRN 005</span>
-                <span className="text-xs font-bold text-amber-400">{tipoUsuario === 'docente' ? 'DOCENTE' : tipoIngreso.toUpperCase()}</span>
+              <div ref={qrRef} className="w-36 h-36 bg-white mx-auto flex items-center justify-center p-1 rounded border hidden">
+                <QRCodeSVG value={valorQRTexto} size={130} level="H" includeMargin={true} />
               </div>
               
+              <div className="p-3 bg-gray-50 rounded-lg border">
+                <p className="text-xs font-bold text-[#6B1D2F] mb-1">Pase Oficial Generado</p>
+                <p className="text-[11px] text-gray-500">Incluye datos del titular, DNI, institución y código QR en formato vertical (1080x1920).</p>
+              </div>
+
               <button 
-                onClick={descargarQR}
-                className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-semibold flex items-center justify-center gap-2 shadow"
+                onClick={descargarTarjeta1080x1920}
+                className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-semibold flex items-center justify-center gap-2 shadow"
               >
-                <Download className="w-4 h-4" /> Descargar Código QR (Imagen)
+                <Download className="w-4 h-4" /> Descargar Tarjeta Pase (1080x1920)
               </button>
             </div>
 
-            {/* Botón de No Asistiré */}
+            {/* Botón de No Asistiré / Liberar Cupo */}
             <div className="pt-2 border-t">
               <button 
                 onClick={marcarNoAsistire}
-                className="w-full py-2 bg-red-50 hover:bg-red-100 border border-red-300 text-red-700 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition"
+                className="w-full py-2.5 bg-red-50 hover:bg-red-100 border border-red-300 text-red-700 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition"
               >
                 <XCircle className="w-4 h-4" /> No podré asistir / Liberar cupo
               </button>
