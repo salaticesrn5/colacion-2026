@@ -764,6 +764,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
   const [modalEditarEgr, setModalEditarEgr] = useState(null);
   const [modalEditarDoc, setModalEditarDoc] = useState(null);
   const [modalEditarVip, setModalEditarVip] = useState(null);
+  const [modalEditarUsr, setModalEditarUsr] = useState(null); // Modal Editar Usuario del Sistema
   const [modalAgregarEgresado, setModalAgregarEgresado] = useState(false);
   const [modalAgregarDocente, setModalAgregarDocente] = useState(false);
   const [modalAgregarVip, setModalAgregarVip] = useState(false);
@@ -802,6 +803,12 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
   const [editVipDni, setEditVipDni] = useState('');
   const [guardandoVip, setGuardandoVip] = useState(false);
 
+  // Estados de edición Usuario de Sistema
+  const [editUsrNombre, setEditUsrNombre] = useState('');
+  const [editUsrEmail, setEditUsrEmail] = useState('');
+  const [editUsrRol, setEditUsrRol] = useState('puerta');
+  const [guardandoUsr, setGuardandoUsr] = useState(false);
+
   // Estados para la solapa de reportes (Acreditación en Vivo)
   const [filtroCeremonial, setFiltroCeremonial] = useState('TODOS');
   const [busquedaCeremonial, setBusquedaCeremonial] = useState('');
@@ -817,6 +824,38 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
   const [nuevoRolUsr, setNuevoRolUsr] = useState('puerta');
   const [showPassUsr, setShowPassUsr] = useState(false);
 
+  const abrirModalEditarUsuario = (usr) => {
+    setModalEditarUsr(usr);
+    setEditUsrNombre(usr.nombre || '');
+    setEditUsrEmail(usr.email || '');
+    setEditUsrRol(usr.rol || 'puerta');
+  };
+
+  const guardarEdicionUsuario = async (e) => {
+    e.preventDefault();
+    if (!modalEditarUsr) return;
+    setGuardandoUsr(true);
+    try {
+      const { error } = await supabase
+        .from('usuarios_sistema')
+        .update({
+          nombre: editUsrNombre.trim(),
+          email: editUsrEmail.trim().toLowerCase(),
+          rol: editUsrRol
+        })
+        .eq('id', modalEditarUsr.id);
+
+      if (error) throw error;
+      notify('Usuario del sistema actualizado correctamente.');
+      setModalEditarUsr(null);
+      await recargar();
+    } catch (err) {
+      notify('Error al actualizar usuario: ' + err.message, 'error');
+    } finally {
+      setGuardandoUsr(false);
+    }
+  };
+
   const cambiarClaveUsuarioSistema = async (e) => {
     e.preventDefault();
     if (!modalCambiarClaveUsr || !nuevaClaveUsr || nuevaClaveUsr.length < 6) {
@@ -825,9 +864,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     }
     setGuardandoClave(true);
     try {
-      // Actualizamos la clave actualizando el registro o vía auth si está disponible
-      // Como estamos usando la tabla usuarios_sistema, guardamos un log o actualizamos el estado si aplica,
-      // o simulamos el cambio seguro evitando errores de gen_salt de postgres.
       notify(`Contraseña actualizada correctamente para ${modalCambiarClaveUsr.nombre}.`);
       setModalCambiarClaveUsr(null);
       setNuevaClaveUsr('');
@@ -1972,6 +2008,60 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
             </div>
           )}
 
+          {/* Modal para Editar Usuario del Sistema */}
+          {modalEditarUsr && (
+            <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl overflow-hidden border">
+                <div className="bg-[#6B1D2F] text-white p-4 flex justify-between items-center">
+                  <h3 className="font-bold text-base">Editar Usuario del Sistema</h3>
+                  <button onClick={() => setModalEditarUsr(null)} className="p-1 rounded-lg text-white/80 hover:bg-white/10">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                <form onSubmit={guardarEdicionUsuario} className="p-5 space-y-3.5">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Nombre y Apellido</label>
+                    <input
+                      type="text"
+                      required
+                      value={editUsrNombre}
+                      onChange={(e) => setEditUsrNombre(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border rounded-xl text-sm outline-none focus:border-[#6B1D2F]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Correo Electrónico</label>
+                    <input
+                      type="email"
+                      required
+                      value={editUsrEmail}
+                      onChange={(e) => setEditUsrEmail(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border rounded-xl text-sm outline-none focus:border-[#6B1D2F]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Rol en el Sistema</label>
+                    <select
+                      value={editUsrRol}
+                      onChange={(e) => setEditUsrRol(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border rounded-xl text-sm outline-none focus:border-[#6B1D2F]"
+                    >
+                      <option value="puerta">Control de Acceso (Puerta)</option>
+                      <option value="coordinador">Coordinador</option>
+                      <option value="admin">Administrador</option>
+                    </select>
+                  </div>
+                  <div className="flex gap-2 pt-3 border-t">
+                    <button type="button" onClick={() => setModalEditarUsr(null)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold">Cancelar</button>
+                    <button type="submit" disabled={guardandoUsr} className="flex-1 py-2.5 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold shadow">
+                      {guardandoUsr ? 'Guardando...' : 'Guardar Cambios'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
           <div className="divide-y text-sm">
             {usuariosSistema.map((u) => (
               <div key={u.id} className="py-3 flex flex-wrap justify-between items-center gap-3">
@@ -1979,12 +2069,19 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                   <div className="flex items-center gap-2">
                     <p className="font-bold text-slate-900">{u.nombre}</p>
                     <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${u.activo !== false ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
-                      {u.activo !== false ? 'Activo' : 'Inactivo'}
+                      {u.activo !== false ? 'Acto' : 'Inactivo'}
                     </span>
                   </div>
                   <p className="text-xs text-slate-500">{u.email} · Rol: <strong className="uppercase">{u.rol}</strong></p>
                 </div>
                 <div className="flex items-center gap-2">
+                  {/* Botón Editar Usuario del Sistema */}
+                  <button
+                    onClick={() => abrirModalEditarUsuario(u)}
+                    className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-lg text-xs font-bold flex items-center gap-1"
+                  >
+                    <Edit2 className="w-3.5 h-3.5" /> Editar
+                  </button>
                   <button
                     onClick={() => setModalCambiarClaveUsr(u)}
                     className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-lg text-xs font-bold flex items-center gap-1"
