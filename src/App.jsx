@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import {
   Users, UserCheck, Shield, QrCode, Upload, Trash2, Plus, Search,
   CheckCircle2, XCircle, AlertTriangle, Lock, Unlock, Download,
-  LogOut, Eye, EyeOff, Edit3, Save, X, RefreshCw, MessageCircle, Award,
+  LogOut, Eye, Edit3, Save, X, RefreshCw, MessageCircle, Award,
   UserPlus, FileSpreadsheet, Check, ArrowRight, Building2, Phone
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
@@ -142,7 +142,7 @@ export default function App() {
       {/* Encabezado Institucional ESRN N° 005 */}
       <header className="bg-[#6B1D2F] text-white shadow-md sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 cursor-pointer" onClick={() => setVista('portal')}>
             <div className="w-9 h-9 bg-white rounded-full flex items-center justify-center font-bold text-[#6B1D2F] text-sm shadow">
               05
             </div>
@@ -161,7 +161,7 @@ export default function App() {
                     vista === 'portal' ? 'bg-white text-[#6B1D2F] font-bold' : 'text-rose-200 hover:text-white'
                   }`}
                 >
-                  Portal Principal
+                  Portal Egresados
                 </button>
                 <button
                   onClick={() => setVista('login')}
@@ -299,7 +299,7 @@ function LoginStaff({ onSuccess, notify }) {
 // ============================================================================
 function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales, solicitudes, recargar, notify }) {
   const [dni, setDni] = useState('');
-  const [tipoUsuario, setTipoUsuario] = useState('egresado');
+  const [tipoUsuario, setTipoUsuario] = useState('egresado'); // 'egresado', 'docente', 'vip'
   const [datosPersona, setDatosPersona] = useState(null);
   const [error, setError] = useState('');
   const [celular, setCelular] = useState('');
@@ -368,7 +368,7 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
 
   const obtenerNombreReal = (obj) => {
     if (!obj) return '';
-    return obj.nombre_completo || obj.nombre || obj.docente || '';
+    return obj.nombre_completo || obj.nombre || obj.docente || obj.apellido_y_nombre || obj.profesor || obj.name || '';
   };
 
   const descargarTarjeta1080x1920 = (nombreQR, subtituloQR, textoValorQR) => {
@@ -426,7 +426,7 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
 
           ctx.fillStyle = '#6B1D2F';
           ctx.font = 'bold 28px sans-serif';
-          ctx.fillText(tipoUsuario === 'egresado' ? 'EGRESADO / TITULADO' : tipoUsuario === 'docente' ? 'DOCENTE' : 'INVITADO VIP', 540, 710);
+          ctx.fillText(textoRolQR, 540, 710);
 
           ctx.drawImage(qrImage, 290, 780, 500, 500);
 
@@ -522,6 +522,7 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
 
   const nombreMostrado = obtenerNombreReal(datosPersona);
   const valorQRPrincipal = datosPersona ? `ESRN005-${tipoUsuario.toUpperCase()}-${datosPersona.dni || dni}-${nombreMostrado}` : '';
+  const textoRolTarjeta = tipoUsuario === 'egresado' ? 'EGRESADO' : tipoUsuario === 'docente' ? 'DOCENTE' : 'INVITADO VIP';
   const misSolicitudes = tipoUsuario === 'egresado' && datosPersona ? solicitudes.filter((s) => s.egresado_id === datosPersona.id) : [];
 
   return (
@@ -529,7 +530,7 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
       <div className="bg-gradient-to-r from-[#6B1D2F] to-[#8a253c] text-white rounded-xl shadow-md p-5 text-center">
         <h2 className="text-xl font-bold mb-1">¡Bienvenidos al Acto de Colación 2026! 🎉</h2>
         <p className="text-xs text-rose-100 leading-relaxed">
-          Ingresá tu DNI, consultá tu pase QR institucional y gestioná tus acompañantes.
+          Seleccioná tu rol e ingresá tu DNI para consultar tu pase QR institucional.
         </p>
       </div>
 
@@ -558,14 +559,14 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
           <div className="space-y-4 text-left">
             <div className="p-4 bg-gray-50 rounded-lg border text-center space-y-3">
               <div>
-                <h3 className="font-bold text-lg text-gray-800">{nombreMostrado}</h3>
+                <h3 className="font-bold text-lg text-gray-800">{nombreMostrado || 'Asistente ESRN N° 005'}</h3>
                 <p className="text-xs text-gray-500">DNI: {datosPersona.dni || dni}</p>
                 <p className="text-[11px] uppercase tracking-wider text-[#6B1D2F] font-semibold mt-1">
-                  {tipoUsuario === 'egresado' ? 'Egresado / Titulado' : tipoUsuario === 'docente' ? 'Docente' : 'Invitado VIP'}
+                  {textoRolTarjeta}
                 </p>
               </div>
 
-              <button type="button" onClick={() => descargarTarjeta1080x1920(nombreMostrado, `DNI: ${datosPersona.dni || dni}`, valorQRPrincipal)} className="w-full py-2.5 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 shadow cursor-pointer">
+              <button type="button" onClick={() => descargarTarjeta1080x1920(nombreMostrado, `DNI: ${datosPersona.dni || dni}`, textoRolTarjeta)} className="w-full py-2.5 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 shadow cursor-pointer">
                 <Download className="w-4 h-4" /> Descargar Mi QR Personal
               </button>
             </div>
@@ -672,8 +673,8 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
   };
 
   const termino = busqueda.trim().toLowerCase();
-  const egresadosCoincidentes = termino ? egresados.filter((e) => e.nombre_completo.toLowerCase().includes(termino) || e.dni.includes(termino)) : [];
-  const docentesCoincidentes = termino ? docentes.filter((d) => d.nombre_completo.toLowerCase().includes(termino) || d.dni.includes(termino)) : [];
+  const egresadosCoincidentes = termino ? egresados.filter((e) => (e.nombre_completo || '').toLowerCase().includes(termino) || e.dni.includes(termino)) : [];
+  const docentesCoincidentes = termino ? docentes.filter((d) => (d.nombre_completo || '').toLowerCase().includes(termino) || d.dni.includes(termino)) : [];
 
   return (
     <div className="max-w-xl mx-auto space-y-5">
