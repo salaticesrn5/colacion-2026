@@ -1,226 +1,65 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import {
-  Users, UserCheck, Shield, QrCode, Upload, Trash2, Plus, Search,
-  CheckCircle2, XCircle, AlertTriangle, Lock, Unlock, Download,
-  LogOut, Eye, Edit3, Save, X, RefreshCw, MessageCircle, Award,
-  UserPlus, FileSpreadsheet, Check, ArrowRight, Building2, Phone
+import { 
+  QrCode, Users, UserCheck, Settings, LogOut, Search, CheckCircle, 
+  AlertCircle, Phone, Edit, Trash2, Shield, Eye, EyeOff, Plus, ArrowRight, RefreshCw, Download, XCircle 
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 
-// ============================================================================
-// CONFIGURACIÓN DE SUPABASE
-// ============================================================================
+// ==========================================
+// CONFIGURACIÓN DE SUPABASE (Variables de entorno seguras)
+// ==========================================
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
-
-const createTempAuthClient = () =>
-  createClient(supabaseUrl, supabaseAnonKey, {
-    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-  });
-
-const sanitizeDNI = (val) => String(val || '').replace(/\D/g, '').slice(0, 8);
-const CAPACIDAD_MAXIMA = 525;
-const CUPO_BASE_DEFECTO = 4;
-
-const parseCSV = (text) => {
-  const cleanText = text.replace(/^\uFEFF/, '').trim();
-  const lines = cleanText.split(/\r?\n/).filter((l) => l.trim().length > 0);
-  if (lines.length === 0) return [];
-  const sep = lines[0].includes(';') ? ';' : ',';
-  return lines.map((line) => line.split(sep).map((cell) => cell.replace(/^["']|["']$/g, '').trim()));
-};
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const supabase = createClient(supabaseUrl, supabaseKey);
 
 export default function App() {
-  const [vista, setVista] = useState('portal'); // 'portal', 'login', 'puerta', 'admin'
-  const [session, setSession] = useState(null);
-  const [perfilStaff, setPerfilStaff] = useState(null);
-  const [loadingAuth, setLoadingAuth] = useState(true);
-
-  const [config, setConfig] = useState({ id: null, estado_etapa: 'abierta', cupo_base: CUPO_BASE_DEFECTO });
-  const [egresados, setEgresados] = useState([]);
-  const [invitados, setInvitados] = useState([]);
-  const [docentes, setDocentes] = useState([]);
-  const [especiales, setEspeciales] = useState([]);
-  const [solicitudes, setSolicitudes] = useState([]);
-  const [usuariosSistema, setUsuariosSistema] = useState([]);
-  const [cargandoDatos, setCargandoDatos] = useState(false);
-
-  const [toast, setToast] = useState(null);
-  const notify = (msg, type = 'success') => {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 4500);
-  };
-
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session: s } }) => {
-      setSession(s);
-      if (s) cargarPerfilStaff(s.user);
-      else setLoadingAuth(false);
-    });
-
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, s) => {
-      setSession(s);
-      if (s) cargarPerfilStaff(s.user);
-      else { setPerfilStaff(null); setLoadingAuth(false); }
-    });
-
-    cargarDatosGlobales();
-    return () => listener.subscription.unsubscribe();
-  }, []);
-
-  const cargarPerfilStaff = async (user) => {
-    try {
-      const { data } = await supabase.from('usuarios_sistema').select('*').eq('email', user.email).maybeSingle();
-      if (data) {
-        setPerfilStaff(data);
-        setVista(data.rol === 'puerta' ? 'puerta' : 'admin');
-      } else {
-        const fallbackAdmin = { nombre: user.email.split('@')[0], email: user.email, rol: 'admin', activo: true };
-        setPerfilStaff(fallbackAdmin);
-        setVista('admin');
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoadingAuth(false);
-    }
-  };
-
-  const cargarDatosGlobales = async () => {
-    setCargandoDatos(true);
-    try {
-      const [resCfg, resEgr, resInv, resDoc, resEsp, resSol, resUsr] = await Promise.all([
-        supabase.from('configuracion').select('*').limit(1).maybeSingle(),
-        supabase.from('egresados').select('*').order('nombre_completo', { ascending: true }),
-        supabase.from('invitados').select('*').order('numero_entrada', { ascending: true }),
-        supabase.from('docentes').select('*').order('nombre_completo', { ascending: true }),
-        supabase.from('invitados_especiales').select('*').order('created_at', { ascending: true }),
-        supabase.from('solicitudes_butacas').select('*').order('created_at', { ascending: false }),
-        supabase.from('usuarios_sistema').select('*').order('created_at', { ascending: true }),
-      ]);
-
-      if (resCfg.data) setConfig(resCfg.data);
-      if (resEgr.data) setEgresados(resEgr.data);
-      if (resInv.data) setInvitados(resInv.data);
-      if (resDoc.data) setDocentes(resDoc.data);
-      if (resEsp.data) setEspeciales(resEsp.data);
-      if (resSol.data) setSolicitudes(resSol.data);
-      if (resUsr.data) setUsuariosSistema(resUsr.data);
-    } catch (e) {
-      console.error('Error cargando datos:', e);
-    } finally {
-      setCargandoDatos(false);
-    }
-  };
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    setPerfilStaff(null);
-    setVista('portal');
-  };
-
-  const totalEgresados = egresados.length;
-  const totalDocentes = docentes.length;
-  const totalEspeciales = especiales.length;
-  const totalCuposFamiliares = egresados.reduce((acc, e) => acc + (Number(e.cupo_asignado) || 0), 0);
-  const totalOcupado = totalEgresados + totalDocentes + totalEspeciales + totalCuposFamiliares;
-  const vacantesLibres = CAPACIDAD_MAXIMA - totalOcupado;
+  const [vistaActual, setVistaActual] = useState('egresado'); // 'egresado', 'puerta', 'admin'
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans relative pb-16">
-      {toast && (
-        <div className={`fixed bottom-5 right-5 z-50 flex items-center gap-3 px-5 py-3.5 rounded-xl shadow-xl text-white text-sm font-medium transition-all ${
-          toast.type === 'error' ? 'bg-rose-600' : toast.type === 'warning' ? 'bg-amber-600' : 'bg-emerald-600'
-        }`}>
-          {toast.type === 'error' ? <XCircle className="w-5 h-5 shrink-0" /> : <CheckCircle2 className="w-5 h-5 shrink-0" />}
-          <span>{toast.msg}</span>
-        </div>
-      )}
-
+    <div className="min-h-screen bg-gray-100 font-sans text-gray-950 relative">
       {/* Encabezado Institucional ESRN N° 005 */}
-      <header className="bg-[#6B1D2F] text-white shadow-md sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3 cursor-pointer" onClick={() => setVista('portal')}>
-            <div className="w-9 h-9 bg-white rounded-full flex items-center justify-center font-bold text-[#6B1D2F] text-sm shadow">
+      <header className="bg-[#6B1D2F] text-white shadow-md">
+        <div className="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-white rounded-full flex items-center justify-center font-bold text-[#6B1D2F] text-sm shadow">
               05
             </div>
             <div>
-              <h1 className="font-bold text-base sm:text-lg leading-tight">ESRN N° 005 — Cipolletti</h1>
-              <p className="text-xs text-rose-200">Acto de Colación 2026 · Aforo: {CAPACIDAD_MAXIMA} butacas</p>
+              <h1 className="text-base font-bold tracking-wide">ESRN N° 005 — Cipolletti</h1>
+              <p className="text-[10px] text-rose-200">Acto de Colación 2026</p>
             </div>
           </div>
-
-          <div className="flex items-center gap-2">
-            {!session ? (
-              <>
-                <button
-                  onClick={() => setVista('portal')}
-                  className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition ${
-                    vista === 'portal' ? 'bg-white text-[#6B1D2F] font-bold' : 'text-rose-200 hover:text-white'
-                  }`}
-                >
-                  Portal Egresados
-                </button>
-                <button
-                  onClick={() => setVista('login')}
-                  className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition ${
-                    vista === 'login' ? 'bg-amber-500 text-white font-bold' : 'text-rose-200 hover:text-white'
-                  }`}
-                >
-                  Acceso Personal / Puerta
-                </button>
-              </>
-            ) : (
-              <>
-                <span className="hidden sm:inline-flex items-center gap-1.5 bg-rose-950/80 border border-rose-700/50 text-rose-200 px-3 py-1 rounded-full text-xs font-medium">
-                  <Shield className="w-3.5 h-3.5" />
-                  {perfilStaff?.nombre} ({perfilStaff?.rol?.toUpperCase()})
-                </span>
-
-                {(perfilStaff?.rol === 'admin' || perfilStaff?.rol === 'coordinador') && (
-                  <button
-                    onClick={() => setVista(vista === 'admin' ? 'puerta' : 'admin')}
-                    className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 hover:bg-amber-600 text-white transition"
-                  >
-                    {vista === 'admin' ? 'Vista Puerta' : 'Panel Gestión'}
-                  </button>
-                )}
-
-                <button
-                  onClick={handleLogout}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-700 hover:bg-rose-800 text-white transition"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                  Salir
-                </button>
-              </>
-            )}
+          
+          {/* Accesos de navegación y Panel Administrativo claramente visible */}
+          <div className="flex gap-1.5 text-xs items-center">
+            <button 
+              onClick={() => setVistaActual('egresado')} 
+              className={`px-2.5 py-1 rounded transition ${vistaActual === 'egresado' ? 'bg-white text-[#6B1D2F] font-bold' : 'text-rose-200 hover:text-white'}`}
+            >
+              Portal Principal (DNI)
+            </button>
+            <button 
+              onClick={() => setVistaActual('puerta')} 
+              className={`px-2.5 py-1 rounded transition ${vistaActual === 'puerta' ? 'bg-white text-[#6B1D2F] font-bold' : 'text-rose-200 hover:text-white'}`}
+            >
+              Puerta
+            </button>
+            <button 
+              onClick={() => setVistaActual('admin')} 
+              className={`px-3 py-1 rounded bg-amber-500 hover:bg-amber-600 text-white font-bold shadow transition ${vistaActual === 'admin' ? 'ring-2 ring-white' : ''}`}
+            >
+              Administración
+            </button>
           </div>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 py-6">
-        {loadingAuth ? (
-          <div className="flex justify-center items-center py-24 text-slate-500 gap-2">
-            <RefreshCw className="w-5 h-5 animate-spin" />
-            <span>Cargando sistema...</span>
-          </div>
-        ) : vista === 'login' && !session ? (
-          <LoginStaff onSuccess={() => cargarDatosGlobales()} notify={notify} />
-        ) : vista === 'puerta' && session ? (
-          <ModuloPuerta egresados={egresados} invitados={invitados} docentes={docentes} especiales={especiales} recargar={cargarDatosGlobales} notify={notify} />
-        ) : vista === 'admin' && session ? (
-          <PanelAdministracion
-            perfilStaff={perfilStaff} config={config} egresados={egresados} invitados={invitados}
-            docentes={docentes} especiales={especiales} solicitudes={solicitudes} usuariosSistema={usuariosSistema}
-            totalEgresados={totalEgresados} totalDocentes={totalDocentes} totalEspeciales={totalEspeciales}
-            totalCuposFamiliares={totalCuposFamiliares} vacantesLibres={vacantesLibres} recargar={cargarDatosGlobales} notify={notify}
-          />
-        ) : (
-          <PortalPrincipalDNI config={config} egresados={egresados} invitados={invitados} docentes={docentes} especiales={especiales} solicitudes={solicitudes} recargar={cargarDatosGlobales} notify={notify} />
-        )}
+      {/* Contenido Dinámico */}
+      <main className="py-8 pb-20">
+        {vistaActual === 'egresado' && <PortalPrincipalDNI />}
+        {vistaActual === 'puerta' && <PanelPuerta />}
+        {vistaActual === 'admin' && <PanelAdmin />}
       </main>
 
       {/* Botón Flotante de Ayuda por WhatsApp */}
@@ -237,141 +76,133 @@ export default function App() {
   );
 }
 
-// ============================================================================
-// LOGIN PERSONAL (Con ojito para ver contraseña)
-// ============================================================================
-function LoginStaff({ onSuccess, notify }) {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [loading, setLoading] = useState(false);
-
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-      if (error) throw error;
-      notify('Sesión iniciada correctamente');
-      onSuccess();
-    } catch (err) {
-      notify(err.message || 'Credenciales inválidas', 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="max-w-md mx-auto mt-10 bg-white rounded-2xl shadow-sm border border-slate-200 p-6 sm:p-8">
-      <div className="flex items-center gap-3 mb-6">
-        <div className="bg-[#6B1D2F]/10 text-[#6B1D2F] p-3 rounded-xl">
-          <Shield className="w-6 h-6" />
-        </div>
-        <div>
-          <h2 className="text-xl font-bold text-slate-900">Acceso Personal</h2>
-          <p className="text-xs text-slate-500">Administración, Coordinación y Control de Puerta</p>
-        </div>
-      </div>
-      <form onSubmit={handleLogin} className="space-y-4">
-        <div>
-          <label className="block text-xs font-semibold text-slate-700 mb-1">Correo Institucional / Usuario</label>
-          <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="usuario@esrn5.edu.ar" className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#6B1D2F] outline-none text-sm" />
-        </div>
-        <div>
-          <label className="block text-xs font-semibold text-slate-700 mb-1">Contraseña</label>
-          <div className="relative">
-            <input type={showPassword ? "text" : "password"} required value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#6B1D2F] outline-none text-sm pr-10" />
-            <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-3 text-slate-400 hover:text-slate-600 focus:outline-none">
-              {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-            </button>
-          </div>
-        </div>
-        <button type="submit" disabled={loading} className="w-full py-3 rounded-xl bg-[#6B1D2F] hover:bg-opacity-90 text-white font-semibold text-sm transition disabled:opacity-50">
-          {loading ? 'Verificando...' : 'Ingresar al Sistema'}
-        </button>
-      </form>
-    </div>
-  );
-}
-
-// ============================================================================
+// ==========================================
 // 1. PORTAL PRINCIPAL UNIFICADO POR DNI (Egresados, Docentes y VIP)
-// ============================================================================
-function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales, solicitudes, recargar, notify }) {
+// ==========================================
+function PortalPrincipalDNI() {
   const [dni, setDni] = useState('');
   const [tipoUsuario, setTipoUsuario] = useState('egresado'); // 'egresado', 'docente', 'vip'
   const [datosPersona, setDatosPersona] = useState(null);
   const [error, setError] = useState('');
   const [celular, setCelular] = useState('');
-  const [filasInvitados, setFilasInvitados] = useState([]);
-  const [guardando, setGuardando] = useState(false);
-  const [cantExtra, setCantExtra] = useState(1);
-  const [obsExtra, setObsExtra] = useState('');
-  const [enviandoSol, setEnviandoSol] = useState(false);
+  const [invitados, setInvitados] = useState([
+    { id: 1, nombre: '', dni: '', grupal: false },
+    { id: 2, nombre: '', dni: '', grupal: false },
+    { id: 3, nombre: '', dni: '', grupal: false },
+    { id: 4, nombre: '', dni: '', grupal: false }
+  ]);
   const qrRef = useRef(null);
-
-  useEffect(() => {
-    if (datosPersona && tipoUsuario === 'egresado') {
-      const actualizado = egresados.find((e) => e.id === datosPersona.id);
-      if (actualizado) {
-        setDatosPersona(actualizado);
-        prepararFilasInvitados(actualizado);
-      }
-    }
-  }, [egresados, invitados]);
-
-  const prepararFilasInvitados = (egr) => {
-    const misInv = invitados.filter((i) => i.egresado_id === egr.id);
-    const cupo = Number(egr.cupo_asignado) || CUPO_BASE_DEFECTO;
-    const arr = [];
-    for (let idx = 0; idx < cupo; idx++) {
-      if (misInv[idx]) {
-        arr.push({ id: misInv[idx].id, nombre_completo: misInv[idx].nombre_completo || '', dni: misInv[idx].dni || '', numero_entrada: misInv[idx].numero_entrada || '', guardado: true });
-      } else {
-        arr.push({ id: null, nombre_completo: '', dni: '', numero_entrada: '', guardado: false });
-      }
-    }
-    setFilasInvitados(arr);
-  };
 
   const buscarPorDNI = async (e) => {
     e.preventDefault();
     setError('');
     setDatosPersona(null);
 
-    const limpio = sanitizeDNI(dni);
-    if (limpio.length < 7) {
-      setError('Ingresá un DNI válido de 7 u 8 dígitos.');
-      return;
+    let tabla = 'egresados';
+    if (tipoUsuario === 'docente') tabla = 'docentes';
+    if (tipoUsuario === 'vip') tabla = 'vip';
+
+    let { data, error: err } = await supabase
+      .from(tabla)
+      .select('*')
+      .eq('dni', dni.trim())
+      .single();
+
+    if ((err || !data) && tipoUsuario === 'vip') {
+      const resAlt = await supabase
+        .from('invitados_especiales')
+        .select('*')
+        .eq('dni', dni.trim())
+        .single();
+      data = resAlt.data;
+      err = resAlt.error;
     }
 
-    let encontrado = null;
-    if (tipoUsuario === 'egresado') {
-      encontrado = egresados.find((x) => sanitizeDNI(x.dni) === limpio);
-    } else if (tipoUsuario === 'docente') {
-      encontrado = docentes.find((x) => sanitizeDNI(x.dni) === limpio);
-    } else {
-      encontrado = especiales.find((x) => sanitizeDNI(x.dni) === limpio);
-    }
-
-    if (!encontrado) {
+    if (err || !data) {
       setError(`No se encontró ningún registro con ese DNI en ${tipoUsuario.toUpperCase()}.`);
       return;
     }
 
-    setDatosPersona(encontrado);
+    if (tipoUsuario === 'egresado' && data.activo === false) {
+      setError('Este acceso se encuentra inactivo (marcado como No Asiste).');
+      return;
+    }
+
+    setDatosPersona(data);
     if (tipoUsuario === 'egresado') {
-      if (encontrado.celular) setCelular(encontrado.celular);
-      prepararFilasInvitados(encontrado);
+      if (data.celular) setCelular(data.celular);
+    }
+  };
+
+  const actualizarInvitado = (index, campo, valor) => {
+    const nuevosInvitados = [...invitados];
+    nuevosInvitados[index][campo] = valor;
+    setInvitados(nuevosInvitados);
+  };
+
+  const guardarDatosEstudiante = async () => {
+    for (let i = 0; i < invitados.length; i++) {
+      const inv = invitados[i];
+      if ((inv.nombre && !inv.dni) || (!inv.nombre && inv.dni)) {
+        alert(`Por favor revise el invitado #${i + 1}: complete tanto el nombre como el DNI, o déjelos vacíos.`);
+        return;
+      }
+    }
+
+    const { error: updateErr } = await supabase
+      .from('egresados')
+      .update({ celular })
+      .eq('id', datosPersona.id);
+
+    if (updateErr) {
+      alert('Error al guardar los cambios.');
+    } else {
+      alert('¡Datos e invitados guardados con éxito!');
+    }
+  };
+
+  const marcarNoAsistire = async () => {
+    if (!window.confirm('¿Estás seguro de que no asistirás? Esto liberará tu lugar.')) return;
+
+    let tabla = 'egresados';
+    if (tipoUsuario === 'docente') tabla = 'docentes';
+    if (tipoUsuario === 'vip') tabla = 'vip';
+
+    const { error: updateErr } = await supabase
+      .from(tabla)
+      .update({ activo: false })
+      .eq('id', datosPersona.id);
+
+    if (updateErr) {
+      alert('Error al actualizar el estado.');
+    } else {
+      alert('Has marcado que no asistirás. ¡Gracias por avisar!');
+      setDatosPersona(null);
+      setDni('');
     }
   };
 
   const obtenerNombreReal = (obj) => {
     if (!obj) return '';
-    return obj.nombre_completo || obj.nombre || obj.docente || obj.apellido_y_nombre || obj.profesor || obj.name || '';
+    return (
+      obj.nombre_completo || 
+      obj.nombre || 
+      obj.name || 
+      obj.apellido || 
+      obj.docente || 
+      obj.profesor || 
+      obj.fullname || 
+      obj.full_name || 
+      obj.docente_nombre || 
+      obj.egresado || 
+      obj.persona || 
+      obj.titular || 
+      (obj.apellidos ? `${obj.apellidos}, ${obj.nombre}` : '') ||
+      ''
+    );
   };
 
-  const descargarTarjeta1080x1920 = (nombreQR, subtituloQR, textoValorQR) => {
+  const descargarTarjeta1080x1920 = (nombreQR, subtituloQR, textoRolQR) => {
     const svgElement = qrRef.current?.querySelector('svg');
     if (!svgElement) {
       alert('No se pudo generar la imagen del QR.');
@@ -409,8 +240,11 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
 
           ctx.fillStyle = '#FFFFFF';
           ctx.beginPath();
-          if (typeof ctx.roundRect === 'function') ctx.roundRect(120, 440, 840, 1280, 30);
-          else ctx.rect(120, 440, 840, 1280);
+          if (typeof ctx.roundRect === 'function') {
+            ctx.roundRect(120, 440, 840, 1280, 30);
+          } else {
+            ctx.rect(120, 440, 840, 1280);
+          }
           ctx.fill();
           ctx.lineWidth = 3;
           ctx.strokeStyle = '#E5E7EB';
@@ -450,87 +284,38 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
           downloadLink.click();
           document.body.removeChild(downloadLink);
         } catch (canvasErr) {
-          console.error(canvasErr);
+          console.error('Error al pintar canvas:', canvasErr);
+          alert('Hubo un error al procesar la imagen del pase.');
         }
       };
       qrImage.src = blobURL;
     } catch (err) {
-      console.error(err);
+      console.error('Error en descarga:', err);
     }
-  };
-
-  const guardarInvitados = async () => {
-    setGuardando(true);
-    try {
-      await supabase.from('egresados').update({ celular }).eq('id', datosPersona.id);
-
-      for (let i = 0; i < filasInvitados.length; i++) {
-        const fila = filasInvitados[i];
-        const nombreLimpio = fila.nombre_completo.trim();
-        const dniLimpio = sanitizeDNI(fila.dni);
-
-        if (nombreLimpio && dniLimpio) {
-          if (fila.id) {
-            await supabase.from('invitados').update({ nombre_completo: nombreLimpio.toUpperCase(), dni: dniLimpio }).eq('id', fila.id);
-          } else {
-            const numEntrada = `ENT-${datosPersona.dni.slice(-4)}-${i + 1}-${Math.floor(100 + Math.random() * 900)}`;
-            await supabase.from('invitados').insert({ egresado_id: datosPersona.id, nombre_completo: nombreLimpio.toUpperCase(), dni: dniLimpio, numero_entrada: numEntrada, asistio: false });
-          }
-        } else if (!nombreLimpio && !dniLimpio && fila.id) {
-          await supabase.from('invitados').delete().eq('id', fila.id);
-        }
-      }
-      await recargar();
-      notify('Invitados y datos guardados correctamente.');
-    } catch (err) {
-      notify('Error al guardar: ' + err.message, 'error');
-    } finally {
-      setGuardando(false);
-    }
-  };
-
-  const enviarSolicitudExtra = async (e) => {
-    e.preventDefault();
-    setEnviandoSol(true);
-    try {
-      await supabase.from('solicitudes_butacas').insert({
-        egresado_id: datosPersona.id,
-        egresado_nombre: datosPersona.nombre_completo,
-        egresado_dni: datosPersona.dni,
-        cantidad_solicitada: Number(cantExtra),
-        observacion: obsExtra.trim(),
-        estado: 'pendiente',
-      });
-      setObsExtra('');
-      await recargar();
-      notify('Solicitud de butacas extra enviada.');
-    } catch (err) {
-      notify('Error: ' + err.message, 'error');
-    } finally {
-      setEnviandoSol(false);
-    }
-  };
-
-  const marcarNoAsistire = async () => {
-    if (!window.confirm('¿Estás seguro de que no asistirás? Esto liberará tu plaza.')) return;
-    let tabla = tipoUsuario === 'egresado' ? 'egresados' : tipoUsuario === 'docente' ? 'docentes' : 'invitados_especiales';
-    await supabase.from(tabla).update({ activo: false }).eq('id', datosPersona.id);
-    notify('Has marcado que no asistirás. ¡Gracias!');
-    setDatosPersona(null);
-    setDni('');
   };
 
   const nombreMostrado = obtenerNombreReal(datosPersona);
   const valorQRPrincipal = datosPersona ? `ESRN005-${tipoUsuario.toUpperCase()}-${datosPersona.dni || dni}-${nombreMostrado}` : '';
   const textoRolTarjeta = tipoUsuario === 'egresado' ? 'EGRESADO' : tipoUsuario === 'docente' ? 'DOCENTE' : 'INVITADO VIP';
-  const misSolicitudes = tipoUsuario === 'egresado' && datosPersona ? solicitudes.filter((s) => s.egresado_id === datosPersona.id) : [];
+
+  const gruposInvitados = invitados.reduce((acc, inv) => {
+    if (!inv.nombre) return acc;
+    const claveGrupo = inv.grupal ? 'Grupo General' : `Individual-${inv.nombre}`;
+    if (!acc[claveGrupo]) acc[claveGrupo] = [];
+    acc[claveGrupo].push(inv);
+    return acc;
+  }, {});
 
   return (
-    <div className="max-w-md mx-auto space-y-4">
+    <div className="max-w-md mx-auto px-4 space-y-4">
       <div className="bg-gradient-to-r from-[#6B1D2F] to-[#8a253c] text-white rounded-xl shadow-md p-5 text-center">
         <h2 className="text-xl font-bold mb-1">¡Bienvenidos al Acto de Colación 2026! 🎉</h2>
         <p className="text-xs text-rose-100 leading-relaxed">
-          Seleccioná tu rol e ingresá tu DNI para consultar tu pase QR institucional.
+          {tipoUsuario === 'egresado' 
+            ? 'Ingresá tu DNI, descargá tu QR personal justo abajo de tu nombre, cargá tus 4 invitados y tildá si entran en grupo o individual.'
+            : tipoUsuario === 'docente'
+            ? 'Ingresá tu DNI docente para consultar tu estado y descargar tu pase QR nominal.'
+            : 'Ingresá tu DNI VIP para consultar y descargar tu pase institucional.'}
         </p>
       </div>
 
@@ -539,16 +324,43 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
         <p className="text-xs text-gray-500 text-center mb-4">Seleccioná tu rol y consultá tu pase</p>
 
         <div className="flex gap-1 mb-6 bg-gray-100 p-1 rounded-lg">
-          <button type="button" onClick={() => { setTipoUsuario('egresado'); setDatosPersona(null); setError(''); }} className={`flex-1 py-2 rounded-md font-medium text-xs transition ${tipoUsuario === 'egresado' ? 'bg-[#6B1D2F] text-white shadow' : 'text-gray-600'}`}>🎓 Egresado</button>
-          <button type="button" onClick={() => { setTipoUsuario('docente'); setDatosPersona(null); setError(''); }} className={`flex-1 py-2 rounded-md font-medium text-xs transition ${tipoUsuario === 'docente' ? 'bg-[#6B1D2F] text-white shadow' : 'text-gray-600'}`}>📚 Docente</button>
-          <button type="button" onClick={() => { setTipoUsuario('vip'); setDatosPersona(null); setError(''); }} className={`flex-1 py-2 rounded-md font-medium text-xs transition ${tipoUsuario === 'vip' ? 'bg-amber-600 text-white shadow' : 'text-gray-600'}`}>⭐ VIP</button>
+          <button 
+            type="button"
+            onClick={() => { setTipoUsuario('egresado'); setDatosPersona(null); setError(''); }}
+            className={`flex-1 py-2 rounded-md font-medium text-xs transition ${tipoUsuario === 'egresado' ? 'bg-[#6B1D2F] text-white shadow' : 'text-gray-600 hover:text-gray-900'}`}
+          >
+            🎓 Egresado
+          </button>
+          <button 
+            type="button"
+            onClick={() => { setTipoUsuario('docente'); setDatosPersona(null); setError(''); }}
+            className={`flex-1 py-2 rounded-md font-medium text-xs transition ${tipoUsuario === 'docente' ? 'bg-[#6B1D2F] text-white shadow' : 'text-gray-600 hover:text-gray-900'}`}
+          >
+            📚 Docente
+          </button>
+          <button 
+            type="button"
+            onClick={() => { setTipoUsuario('vip'); setDatosPersona(null); setError(''); }}
+            className={`flex-1 py-2 rounded-md font-medium text-xs transition ${tipoUsuario === 'vip' ? 'bg-amber-600 text-white shadow' : 'text-gray-600 hover:text-gray-900'}`}
+          >
+            ⭐ VIP
+          </button>
         </div>
 
         {!datosPersona ? (
           <form onSubmit={buscarPorDNI} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">DNI de {tipoUsuario.toUpperCase()}</label>
-              <input type="text" maxLength={8} value={dni} onChange={(e) => setDni(sanitizeDNI(e.target.value))} placeholder="Ej: 40123456" className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-[#6B1D2F]" required />
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                DNI de {tipoUsuario.toUpperCase()}
+              </label>
+              <input 
+                type="text" 
+                value={dni}
+                onChange={(e) => setDni(e.target.value)}
+                placeholder="Ej: 40123456"
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-[#6B1D2F]"
+                required
+              />
             </div>
             {error && <p className="text-sm text-red-600">{error}</p>}
             <button type="submit" className="w-full py-2.5 bg-[#6B1D2F] text-white rounded-lg hover:bg-opacity-90 font-medium shadow">
@@ -566,8 +378,12 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
                 </p>
               </div>
 
-              <button type="button" onClick={() => descargarTarjeta1080x1920(nombreMostrado, `DNI: ${datosPersona.dni || dni}`, textoRolTarjeta)} className="w-full py-2.5 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 shadow cursor-pointer">
-                <Download className="w-4 h-4" /> Descargar Mi QR Personal
+              <button 
+                type="button"
+                onClick={() => descargarTarjeta1080x1920(nombreMostrado, `DNI: ${datosPersona.dni || dni}`, textoRolTarjeta)}
+                className="w-full py-2.5 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 shadow cursor-pointer"
+              >
+                <Download className="w-4 h-4" /> Descargar Mi QR Personal (1080x1920)
               </button>
             </div>
 
@@ -577,64 +393,103 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
 
             {tipoUsuario === 'egresado' && (
               <>
-                <div className="border-2 border-emerald-500 bg-emerald-50 p-4 rounded-xl space-y-2">
-                  <label className="block text-xs font-bold text-emerald-900 uppercase">📱 Tu Celular / WhatsApp</label>
-                  <input type="text" placeholder="Ej: 2994444444" value={celular} onChange={(e) => setCelular(e.target.value)} className="w-full px-3 py-2 border-2 border-emerald-500 rounded-lg text-sm bg-white font-semibold text-emerald-900 outline-none" />
+                <div className="border-2 border-emerald-500 bg-emerald-50 p-4 rounded-xl space-y-2 shadow-sm">
+                  <label className="block text-xs font-bold text-emerald-900 uppercase tracking-wide">📱 Tu Celular / WhatsApp</label>
+                  <input 
+                    type="text"
+                    placeholder="Ej: 2994444444"
+                    value={celular}
+                    onChange={(e) => setCelular(e.target.value)}
+                    className="w-full px-3 py-2 border-2 border-emerald-500 rounded-lg text-sm bg-white focus:ring-2 focus:ring-emerald-700 outline-none font-semibold text-emerald-900"
+                  />
+                  <p className="text-[11px] text-emerald-800 font-medium">Necesario para recibir notificaciones institucionales y avisos de plazas extra.</p>
                 </div>
 
-                <div className="border-2 border-[#6B1D2F] bg-rose-50/40 p-4 rounded-xl space-y-3">
-                  <div className="bg-amber-100 border border-amber-300 p-3 rounded-lg">
+                <div className="border-2 border-[#6B1D2F] bg-rose-50/40 p-4 rounded-xl space-y-3 shadow-sm">
+                  <div className="bg-amber-100 border-2 border-amber-400 p-3 rounded-lg shadow-xs">
                     <p className="text-xs font-bold text-amber-900">⚠️ Recomendación Importante</p>
-                    <p className="text-[11px] text-amber-800 mt-0.5">Revise bien los nombres y DNI de sus invitados antes de guardar.</p>
+                    <p className="text-[11px] text-amber-900 mt-0.5 font-medium">
+                      Por favor, <strong>revise bien los datos</strong> de los invitados antes de guardar. Si tilda la casilla lateral, ingresarán juntos en grupo; si la deja sin tilde, ingresarán de forma individual con su propio QR.
+                    </p>
                   </div>
 
-                  <h4 className="font-bold text-sm text-[#6B1D2F]">Carga de Invitados ({filasInvitados.length} cupos)</h4>
-                  {filasInvitados.map((fila, idx) => (
-                    <div key={idx} className="p-3 bg-white border rounded-lg space-y-2">
+                  <h4 className="font-bold text-sm text-[#6B1D2F]">Carga de Invitados (Máximo 4)</h4>
+                  {invitados.map((inv, idx) => (
+                    <div key={inv.id} className="p-3 bg-white border border-[#6B1D2F]/30 rounded-lg space-y-2 shadow-xs">
                       <div className="flex justify-between items-center">
-                        <span className="text-xs font-bold text-[#6B1D2F]">Invitado #{idx + 1} {fila.numero_entrada && `(${fila.numero_entrada})`}</span>
-                        {fila.guardado && fila.numero_entrada && (
-                          <button type="button" onClick={() => descargarTarjeta1080x1920(fila.nombre_completo, `Invitado de ${nombreMostrado}`, fila.numero_entrada)} className="text-xs text-emerald-700 font-bold hover:underline flex items-center gap-1">
-                            <Download className="w-3 h-3" /> QR
-                          </button>
-                        )}
+                        <span className="text-xs font-bold text-[#6B1D2F]">Invitado #{idx + 1}</span>
+                        <label className="flex items-center gap-1.5 text-xs text-gray-700 font-medium cursor-pointer">
+                          <input 
+                            type="checkbox"
+                            checked={inv.grupal}
+                            onChange={(e) => actualizarInvitado(idx, 'grupal', e.target.checked)}
+                            className="rounded text-[#6B1D2F] focus:ring-[#6B1D2F]"
+                          />
+                          <span>Entrada Grupal</span>
+                        </label>
                       </div>
-                      <input type="text" placeholder="Nombre y Apellido" value={fila.nombre_completo} onChange={(e) => { const arr = [...filasInvitados]; arr[idx].nombre_completo = e.target.value; setFilasInvitados(arr); }} className="w-full px-2.5 py-1.5 border rounded text-xs" />
-                      <input type="text" maxLength={8} placeholder="DNI" value={fila.dni} onChange={(e) => { const arr = [...filasInvitados]; arr[idx].dni = sanitizeDNI(e.target.value); setFilasInvitados(arr); }} className="w-full px-2.5 py-1.5 border rounded text-xs" />
+                      <input 
+                        type="text"
+                        placeholder="Nombre y Apellido"
+                        value={inv.nombre}
+                        onChange={(e) => actualizarInvitado(idx, 'nombre', e.target.value)}
+                        className="w-full px-2.5 py-1.5 border rounded text-xs bg-white"
+                      />
+                      <input 
+                        type="text"
+                        placeholder="DNI"
+                        value={inv.dni}
+                        onChange={(e) => actualizarInvitado(idx, 'dni', e.target.value)}
+                        className="w-full px-2.5 py-1.5 border rounded text-xs bg-white"
+                      />
                     </div>
                   ))}
                 </div>
 
-                <button onClick={guardarInvitados} disabled={guardando} className="w-full py-2 bg-[#6B1D2F] text-white rounded-lg text-sm font-medium hover:bg-opacity-90 shadow">
-                  {guardando ? 'Guardando...' : 'Guardar Cambios y Generar QR'}
+                <button 
+                  onClick={guardarDatosEstudiante}
+                  className="w-full py-2 bg-[#6B1D2F] text-white rounded-lg text-sm font-medium hover:bg-opacity-90 shadow"
+                >
+                  Guardar Datos e Invitados
                 </button>
 
-                <div className="bg-gray-50 border rounded-xl p-4 space-y-3">
-                  <h4 className="font-bold text-xs text-gray-800 uppercase">Solicitar Butacas Extra</h4>
-                  <form onSubmit={enviarSolicitudExtra} className="flex gap-2">
-                    <select value={cantExtra} onChange={(e) => setCantExtra(e.target.value)} className="px-2 py-1.5 border rounded text-xs bg-white">
-                      <option value={1}>+1</option><option value={2}>+2</option><option value={3}>+3</option>
-                    </select>
-                    <input type="text" placeholder="Observación (ej: abuelos)" value={obsExtra} onChange={(e) => setObsExtra(e.target.value)} className="flex-1 px-2.5 py-1.5 border rounded text-xs" />
-                    <button type="submit" disabled={enviandoSol} className="px-3 py-1.5 bg-indigo-600 text-white rounded text-xs font-bold">Solicitar</button>
-                  </form>
-                  {misSolicitudes.map((s) => (
-                    <div key={s.id} className="text-xs bg-white p-2 border rounded flex justify-between">
-                      <span>+{s.cantidad_solicitada} lugar(es)</span>
-                      <span className="font-bold uppercase text-amber-700">{s.estado}</span>
-                    </div>
-                  ))}
-                </div>
+                {Object.keys(gruposInvitados).length > 0 && (
+                  <div className="space-y-2 pt-2 border-t">
+                    <h4 className="font-bold text-xs text-gray-700 uppercase tracking-wider">Pases QR de Invitados:</h4>
+                    {Object.entries(gruposInvitados).map(([grupo, lista], i) => (
+                      <button 
+                        key={i}
+                        type="button"
+                        onClick={() => descargarTarjeta1080x1920(
+                          grupo.startsWith('Individual') ? lista[0].nombre : `Grupo de ${nombreMostrado} (${lista.length} pers.)`,
+                          grupo.startsWith('Individual') ? `DNI: ${lista[0].dni}` : `Integrantes: ${lista.map(x => x.nombre).join(', ')}`,
+                          'INVITADO FAMILIAR'
+                        )}
+                        className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 shadow cursor-pointer"
+                      >
+                        <Download className="w-4 h-4" /> Descargar QR ({grupo.startsWith('Individual') ? lista[0].nombre : `Entrada Grupal (${lista.length} inv.)`})
+                      </button>
+                    ))}
+                  </div>
+                )}
               </>
             )}
 
             <div className="pt-2 border-t">
-              <button type="button" onClick={marcarNoAsistire} className="w-full py-2.5 bg-red-50 hover:bg-red-100 border border-red-300 text-red-700 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition">
+              <button 
+                type="button"
+                onClick={marcarNoAsistire}
+                className="w-full py-2.5 bg-red-50 hover:bg-red-100 border border-red-300 text-red-700 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer"
+              >
                 <XCircle className="w-4 h-4" /> No podré asistir / Liberar cupo
               </button>
             </div>
 
-            <button type="button" onClick={() => { setDatosPersona(null); setDni(''); }} className="w-full py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 text-sm">
+            <button 
+              type="button"
+              onClick={() => { setDatosPersona(null); setDni(''); }} 
+              className="w-full py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 text-sm"
+            >
               Consultar otro DNI
             </button>
           </div>
@@ -644,236 +499,129 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
   );
 }
 
-// ============================================================================
-// MÓDULO C: CONTROL DE ACCESO EN PUERTA
-// ============================================================================
-function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, notify }) {
-  const [busqueda, setBusqueda] = useState('');
-  const [codigoManualQr, setCodigoManualQr] = useState('');
-  const [egresadoSeleccionado, setEgresadoSeleccionado] = useState(null);
+// ==========================================
+// 2. CONTROL DE PUERTA
+// ==========================================
+function PanelPuerta() {
+  const [busquedaManual, setBusquedaManual] = useState('');
+  const [ultimoEscaneo, setUltimoEscaneo] = useState(null);
 
-  const validarCodigoEntrada = async (codigoRaw) => {
-    const code = String(codigoRaw || '').trim().toUpperCase();
-    if (!code) return;
-
-    const inv = invitados.find((i) => String(i.numero_entrada || '').toUpperCase() === code);
-    if (!inv) {
-      notify(`Código inválido o inexistente: ${code}`, 'error');
-      return;
-    }
-
-    if (inv.asistio) {
-      notify(`¡ALERTA DUPLICADO! La entrada ${inv.numero_entrada} (${inv.nombre_completo}) ya ingresó.`, 'error');
-      return;
-    }
-
-    await supabase.from('invitados').update({ asistio: true, hora_ingreso: new Date().toISOString() }).eq('id', inv.id);
-    await recargar();
-    notify(`INGRESO PERMITIDO: ${inv.nombre_completo} (DNI ${inv.dni})`);
+  const registrarIngreso = (nombrePersona, tipo) => {
+    setUltimoEscaneo({ nombre: nombrePersona, tipo, hora: new Date().toLocaleTimeString() });
+    setTimeout(() => setUltimoEscaneo(null), 2000);
   };
 
-  const termino = busqueda.trim().toLowerCase();
-  const egresadosCoincidentes = termino ? egresados.filter((e) => (e.nombre_completo || '').toLowerCase().includes(termino) || e.dni.includes(termino)) : [];
-  const docentesCoincidentes = termino ? docentes.filter((d) => (d.nombre_completo || '').toLowerCase().includes(termino) || d.dni.includes(termino)) : [];
-
   return (
-    <div className="max-w-xl mx-auto space-y-5">
-      <div className="bg-slate-900 text-white rounded-2xl p-5 space-y-4 shadow-md">
-        <div>
-          <h2 className="font-bold text-lg">Control de Acceso en Puerta</h2>
-          <p className="text-xs text-slate-400">Escaneá el pase QR o buscá por Nombre o DNI</p>
+    <div className="p-6 max-w-2xl mx-auto">
+      <h2 className="text-2xl font-bold text-[#6B1D2F] mb-4">Control de Puerta — ESRN N° 005</h2>
+      
+      {ultimoEscaneo ? (
+        <div className="p-6 bg-green-100 border-2 border-green-500 rounded-xl text-center mb-6 shadow-lg animate-bounce">
+          <span className="text-4xl">✅</span>
+          <h3 className="text-xl font-bold text-green-800 mt-2">¡Ingreso Habilitado!</h3>
+          <p className="text-lg text-green-700 font-semibold">{ultimoEscaneo.nombre}</p>
         </div>
-        <form onSubmit={(e) => { e.preventDefault(); validarCodigoEntrada(codigoManualQr); setCodigoManualQr(''); }} className="flex gap-2">
-          <input type="text" placeholder="Código de entrada (ej: ENT-...)" value={codigoManualQr} onChange={(e) => setCodigoManualQr(e.target.value)} className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white outline-none" />
-          <button type="submit" className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs">Validar</button>
-        </form>
-      </div>
-
-      <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-4">
-        <div className="relative">
-          <Search className="w-5 h-5 text-slate-400 absolute left-3.5 top-3" />
-          <input type="text" placeholder="Buscar invitado, egresado, docente o DNI..." value={busqueda} onChange={(e) => { setBusqueda(e.target.value); setEgresadoSeleccionado(null); }} className="w-full pl-11 pr-4 py-2.5 rounded-xl border border-slate-300 text-sm outline-none" />
+      ) : (
+        <div className="p-10 bg-gray-900 text-white rounded-2xl text-center mb-6 shadow-md">
+          <div className="w-16 h-16 border-4 border-dashed border-[#6B1D2F] rounded-full mx-auto flex items-center justify-center mb-3 animate-spin">📷</div>
+          <p className="font-bold text-lg">Escáner Continuo Activo</p>
+          <p className="text-xs text-gray-400 mt-1">Listo para escanear QRs (Egresados, Grupos y Docentes)</p>
         </div>
+      )}
 
-        {egresadoSeleccionado ? (
-          <div className="space-y-3">
-            <button onClick={() => setEgresadoSeleccionado(null)} className="text-xs font-bold text-indigo-600 hover:underline">← Volver</button>
-            <div className="p-4 rounded-xl bg-slate-50 border">
-              <p className="font-bold text-slate-900">{egresadoSeleccionado.nombre_completo}</p>
-              <p className="text-xs text-slate-500">DNI: {egresadoSeleccionado.dni}</p>
-            </div>
-            <div className="space-y-2">
-              <p className="text-xs font-bold uppercase text-slate-500">Familiares Habilitados:</p>
-              {invitados.filter((i) => i.egresado_id === egresadoSeleccionado.id).map((inv) => (
-                <div key={inv.id} className="p-3 rounded-xl border flex items-center justify-between">
-                  <div>
-                    <p className="font-bold text-sm">{inv.nombre_completo}</p>
-                    <p className="text-xs text-slate-500">DNI: {inv.dni} · <strong>{inv.numero_entrada}</strong></p>
-                  </div>
-                  <button onClick={async () => { await supabase.from('invitados').update({ asistio: !inv.asistio }).eq('id', inv.id); await recargar(); }} className={`px-3 py-1.5 rounded-xl text-xs font-bold ${inv.asistio ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-800'}`}>
-                    {inv.asistio ? '✓ Asistió' : 'Marcar Ingreso'}
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {egresadosCoincidentes.map((egr) => (
-              <button key={egr.id} onClick={() => setEgresadoSeleccionado(egr)} className="w-full text-left p-3 rounded-xl border hover:border-emerald-500 flex items-center justify-between">
-                <div>
-                  <p className="font-bold text-sm">{egr.nombre_completo}</p>
-                  <p className="text-xs text-slate-500">DNI: {egr.dni}</p>
-                </div>
-                <ArrowRight className="w-4 h-4 text-slate-400" />
-              </button>
-            ))}
-            {docentesCoincidentes.map((doc) => (
-              <div key={doc.id} className="p-3 rounded-xl border flex items-center justify-between">
-                <div>
-                  <span className="text-[10px] font-bold uppercase text-indigo-600">Docente</span>
-                  <p className="font-bold text-sm">{doc.nombre_completo}</p>
-                  <p className="text-xs text-slate-500">DNI: {doc.dni}</p>
-                </div>
-                <button onClick={async () => { await supabase.from('docentes').update({ asistio: !doc.asistio }).eq('id', doc.id); await recargar(); }} className={`px-3 py-1.5 rounded-xl text-xs font-bold ${doc.asistio ? 'bg-emerald-600 text-white' : 'bg-slate-100'}`}>
-                  {doc.asistio ? '✓ Asistió' : 'Marcar Ingreso'}
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
+      <div className="bg-white p-5 rounded-xl border shadow-sm">
+        <h4 className="font-semibold text-sm text-gray-800 mb-2">Plan B: Búsqueda Manual en Puerta</h4>
+        <div className="flex gap-2">
+          <input 
+            type="text" 
+            placeholder="DNI o Apellido..." 
+            value={busquedaManual}
+            onChange={(e) => setBusquedaManual(e.target.value)}
+            className="flex-1 px-3 py-2 border rounded-lg text-sm"
+          />
+          <button 
+            onClick={() => {
+              if(busquedaManual) {
+                registrarIngreso(`Asistente Manual (${busquedaManual})`, 'Plan B');
+                setBusquedaManual('');
+              }
+            }}
+            className="px-4 py-2 bg-[#6B1D2F] text-white rounded-lg text-sm font-medium"
+          >
+            Validar
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
-// ============================================================================
-// MÓDULO A: PANEL DE ADMINISTRACIÓN Y COORDINACIÓN
-// ============================================================================
-function PanelAdministracion({ perfilStaff, config, egresados, invitados, docentes, especiales, solicitudes, usuariosSistema, totalEgresados, totalDocentes, totalEspeciales, totalCuposFamiliares, vacantesLibres, recargar, notify }) {
-  const [tab, setTab] = useState('egresados');
-  const fileEgrRef = useRef(null);
+// ==========================================
+// 3. PANEL DE ADMINISTRACIÓN
+// ==========================================
+function PanelAdmin() {
+  const [whatsappActivo, setWhatsappActivo] = useState(true);
+  const [egresadosEjemplo, setEgresadosEjemplo] = useState([
+    { id: 1, nombre: 'Juan Pérez', dni: '41234567', celular: '2996326617', activo: true },
+    { id: 2, nombre: 'Lucía Gómez', dni: '41987654', celular: '2994444444', activo: false }
+  ]);
 
-  const cambiarEtapaGlobal = async (nuevaEtapa) => {
-    if (config.id) {
-      await supabase.from('configuracion').update({ estado_etapa: nuevaEtapa }).eq('id', config.id);
-    } else {
-      await supabase.from('configuracion').insert({ estado_etapa: nuevaEtapa, cupo_base: CUPO_BASE_DEFECTO });
-    }
-    await recargar();
-    notify(`Etapa actualizada a: ${nuevaEtapa.toUpperCase()}`);
-  };
-
-  const handleImportarCSVEgresados = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const text = await file.text();
-      const rows = parseCSV(text);
-      const registros = rows.map((r) => ({
-        dni: sanitizeDNI(r[0]),
-        nombre_completo: (r[1] || '').toUpperCase(),
-        cupo_asignado: CUPO_BASE_DEFECTO,
-        cerrado: false,
-      })).filter(x => x.dni.length >= 7 && x.nombre_completo);
-
-      await supabase.from('egresados').upsert(registros, { onConflict: 'dni' });
-      await recargar();
-      notify(`Importados ${registros.length} egresados.`);
-    } catch (err) {
-      notify('Error importando CSV: ' + err.message, 'error');
-    }
-  };
-
-  const resolverSolicitud = async (sol, aprobar) => {
-    if (aprobar) {
-      const egr = egresados.find((e) => e.id === sol.egresado_id);
-      await supabase.from('egresados').update({ cupo_asignado: Number(egr.cupo_asignado) + Number(sol.cantidad_solicitada) }).eq('id', egr.id);
-    }
-    await supabase.from('solicitudes_butacas').update({ estado: aprobar ? 'aprobada' : 'rechazada' }).eq('id', sol.id);
-    await recargar();
-    notify(aprobar ? 'Solicitud aprobada.' : 'Solicitud rechazada.');
+  const toggleActivo = (id) => {
+    setEgresadosEjemplo(egresadosEjemplo.map(e => e.id === id ? { ...e, activo: !e.activo } : e));
   };
 
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-        <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Egresados</p><p className="text-2xl font-extrabold">{totalEgresados}</p></div>
-        <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Docentes</p><p className="text-2xl font-extrabold">{totalDocentes}</p></div>
-        <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Especiales / VIP</p><p className="text-2xl font-extrabold">{totalEspeciales}</p></div>
-        <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Cupos Familiares</p><p className="text-2xl font-extrabold">{totalCuposFamiliares}</p></div>
-        <div className={`col-span-2 sm:col-span-1 p-4 rounded-2xl border ${vacantesLibres < 0 ? 'bg-rose-50 text-rose-700' : 'bg-emerald-50 text-emerald-700'}`}>
-          <p className="text-xs font-semibold">Vacantes Libres (525 máx)</p><p className="text-2xl font-extrabold">{vacantesLibres}</p>
-        </div>
-      </div>
+    <div className="p-6 max-w-5xl mx-auto">
+      <h2 className="text-2xl font-bold text-[#6B1D2F] mb-1">Panel de Gestión — ESRN N° 005</h2>
+      <p className="text-xs text-gray-500 mb-6">Aforo total: 525 butacas | Liberación automática de cupos por inasistencia</p>
 
-      <div className="bg-white p-4 rounded-2xl border flex flex-wrap items-center justify-between gap-4">
+      <div className="bg-white p-4 rounded-xl shadow-sm border mb-6 flex justify-between items-center">
         <div>
-          <p className="text-xs font-bold uppercase text-slate-500">Etapa Global de Carga</p>
+          <h3 className="font-bold text-sm text-gray-800">Sistema de Notificaciones por WhatsApp</h3>
+          <p className="text-xs text-gray-500">Habilita o deshabilita los botones de aviso rápido `wa.me`</p>
         </div>
-        <div className="flex gap-2">
-          <button onClick={() => cambiarEtapaGlobal('abierta')} className={`px-3 py-1.5 rounded-xl text-xs font-bold ${config.estado_etapa === 'abierta' ? 'bg-[#6B1D2F] text-white' : 'bg-slate-100'}`}>Abierta</button>
-          <button onClick={() => cambiarEtapaGlobal('cierre_parcial')} className={`px-3 py-1.5 rounded-xl text-xs font-bold ${config.estado_etapa === 'cierre_parcial' ? 'bg-amber-600 text-white' : 'bg-slate-100'}`}>Cierre Parcial</button>
-          <button onClick={() => cambiarEtapaGlobal('cierre_definitivo')} className={`px-3 py-1.5 rounded-xl text-xs font-bold ${config.estado_etapa === 'cierre_definitivo' ? 'bg-rose-600 text-white' : 'bg-slate-100'}`}>Definitivo</button>
-        </div>
+        <label className="relative inline-flex items-center cursor-pointer">
+          <input 
+            type="checkbox" 
+            checked={whatsappActivo} 
+            onChange={() => setWhatsappActivo(!whatsappActivo)}
+            className="sr-only peer" 
+          />
+          <div className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
+        </label>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        <button onClick={() => setTab('egresados')} className={`px-4 py-2 rounded-xl text-xs font-bold ${tab === 'egresados' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Egresados ({egresados.length})</button>
-        <button onClick={() => setTab('solicitudes')} className={`px-4 py-2 rounded-xl text-xs font-bold ${tab === 'solicitudes' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Solicitudes Butacas</button>
-        <button onClick={() => setTab('docentes')} className={`px-4 py-2 rounded-xl text-xs font-bold ${tab === 'docentes' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Docentes y VIP</button>
-        <button onClick={() => setTab('reportes')} className={`px-4 py-2 rounded-xl text-xs font-bold ${tab === 'reportes' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Acreditación en Vivo</button>
-      </div>
+      <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+        <div className="px-6 py-4 border-b bg-gray-50 font-bold text-gray-800 text-sm">Padrón de Egresados</div>
+        <div className="divide-y">
+          {egresadosEjemplo.map(estudiante => {
+            const numLimpio = estudiante.celular ? estudiante.celular.replace(/\D/g, '') : '';
+            const linkWp = `https://wa.me/549${numLimpio}?text=Hola%20${encodeURIComponent(estudiante.nombre)},%20te%20informamos%20desde%20la%20ESRN%20N°%20005%20que%20se%20han%20actualizado%20tus%20plazas.`;
 
-      {tab === 'egresados' && (
-        <div className="bg-white rounded-2xl border p-5 space-y-4">
-          <div className="flex justify-between items-center">
-            <h3 className="font-bold">Padrón de Egresados</h3>
-            <input ref={fileEgrRef} type="file" accept=".csv,.txt" onChange={handleImportarCSVEgresados} className="hidden" />
-            <button onClick={() => fileEgrRef.current?.click()} className="px-3 py-2 bg-indigo-50 text-indigo-700 border rounded-xl text-xs font-bold flex items-center gap-1">
-              <Upload className="w-4 h-4" /> Importar CSV Egresados
-            </button>
-          </div>
-          <div className="max-h-96 overflow-y-auto divide-y">
-            {egresados.map((e) => (
-              <div key={e.id} className="py-2.5 flex justify-between items-center text-sm">
-                <div><span className="font-semibold">{e.nombre_completo}</span> <span className="text-xs text-slate-500">({e.dni})</span></div>
-                <span className="text-xs font-bold">Cupo: {e.cupo_asignado}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {tab === 'solicitudes' && (
-        <div className="bg-white rounded-2xl border p-5 space-y-3">
-          <h3 className="font-bold">Bandeja de Solicitudes</h3>
-          {solicitudes.map((s) => (
-            <div key={s.id} className="p-3 border rounded-xl flex justify-between items-center">
-              <div>
-                <p className="font-bold text-sm">{s.egresado_nombre} (+{s.cantidad_solicitada})</p>
-                <p className="text-xs text-slate-500">{s.observacion}</p>
-              </div>
-              {s.estado === 'pendiente' ? (
-                <div className="flex gap-2">
-                  <button onClick={() => resolverSolicitud(s, true)} className="px-3 py-1 bg-emerald-600 text-white rounded text-xs font-bold">Aprobar</button>
-                  <button onClick={() => resolverSolicitud(s, false)} className="px-3 py-1 bg-rose-100 text-rose-700 rounded text-xs font-bold">Rechazar</button>
+            return (
+              <div key={estudiante.id} className="p-4 flex flex-col md:flex-row justify-between items-center gap-4">
+                <div>
+                  <h4 className="font-bold text-gray-900">{estudiante.nombre}</h4>
+                  <p className="text-xs text-gray-500">DNI: {estudiante.dni} | Cel: {estudiante.celular || 'No registrado'}</p>
                 </div>
-              ) : (
-                <span className="text-xs font-bold uppercase">{s.estado}</span>
-              )}
-            </div>
-          ))}
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => toggleActivo(estudiante.id)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${estudiante.activo ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}
+                  >
+                    {estudiante.activo ? '🚫 Marcar "No Asiste"' : '✅ Reactivar'}
+                  </button>
+                  {whatsappActivo && estudiante.celular && estudiante.activo && (
+                    <a href={linkWp} target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-medium">
+                      💬 Avisar
+                    </a>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
-      )}
-
-      {tab === 'reportes' && (
-        <div className="bg-white rounded-2xl border p-5 space-y-4">
-          <h3 className="font-bold">Reporte de Asistencia General</h3>
-          <p className="text-sm text-slate-600">Egresados presentes: {egresados.filter(e => e.asistio).length} / {egresados.length}</p>
-          <p className="text-sm text-slate-600">Invitados presentes: {invitados.filter(i => i.asistio).length} / {invitados.length}</p>
-        </div>
-      )}
+      </div>
     </div>
   );
 }
