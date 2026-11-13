@@ -137,7 +137,7 @@ function PortalPrincipalDNI() {
     }
   };
 
-  // Función robusta de descarga para generar la tarjeta 1080x1920 con el nombre real
+  // Función robusta de descarga para generar la tarjeta 1080x1920 extrayendo el nombre correctamente
   const descargarTarjeta1080x1920 = () => {
     const svgElement = qrRef.current?.querySelector('svg');
     if (!svgElement) {
@@ -190,13 +190,13 @@ function PortalPrincipalDNI() {
           ctx.strokeStyle = '#E5E7EB';
           ctx.stroke();
 
-          // 4. Datos reales del titular dentro de la tarjeta
-          const nombreTitular = datosPersona.nombre || datosPersona.name || datosPersona.apellido || 'DOCENTE ESRN N° 005';
+          // 4. Extracción robusta del nombre del docente / egresado de Supabase
+          const nombreTitular = datosPersona.nombre || datosPersona.name || datosPersona.apellido || datosPersona.docente || datosPersona.profesor || 'DOCENTE ESRN N° 005';
           const dniTitular = datosPersona.dni || dni;
 
           ctx.fillStyle = '#111827';
-          ctx.font = 'bold 50px sans-serif';
-          ctx.fillText(nombreTitular.toUpperCase(), 540, 580);
+          ctx.font = 'bold 44px sans-serif';
+          ctx.fillText(String(nombreTitular).toUpperCase(), 540, 580);
 
           ctx.fillStyle = '#4B5563';
           ctx.font = '32px sans-serif';
@@ -245,7 +245,8 @@ function PortalPrincipalDNI() {
     }
   };
 
-  const valorQRTexto = datosPersona ? `ESRN005-${tipoUsuario.toUpperCase()}-${datosPersona.dni || dni}-${datosPersona.nombre || 'Docente'}` : '';
+  const nombreMostrado = datosPersona ? (datosPersona.nombre || datosPersona.name || datosPersona.apellido || datosPersona.docente || datosPersona.profesor || 'Docente') : '';
+  const valorQRTexto = datosPersona ? `ESRN005-${tipoUsuario.toUpperCase()}-${datosPersona.dni || dni}-${nombreMostrado}` : '';
 
   return (
     <div className="max-w-md mx-auto px-4 space-y-4">
@@ -303,7 +304,7 @@ function PortalPrincipalDNI() {
         ) : (
           <div className="space-y-4 text-left">
             <div className="p-4 bg-gray-50 rounded-lg border text-center">
-              <h3 className="font-bold text-lg text-gray-800">{datosPersona.nombre || datosPersona.name || 'Docente'}</h3>
+              <h3 className="font-bold text-lg text-gray-800">{nombreMostrado}</h3>
               <p className="text-xs text-gray-500">DNI: {datosPersona.dni || dni}</p>
               <p className="text-[11px] uppercase tracking-wider text-[#6B1D2F] font-semibold mt-1">
                 {tipoUsuario === 'egresado' ? 'Egresado / Titulado' : 'Personal Docente ESRN N° 005'}
