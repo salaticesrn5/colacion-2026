@@ -102,7 +102,6 @@ function PortalPrincipalDNI() {
       return;
     }
 
-    console.log("Datos recuperados de Supabase:", data);
     setDatosPersona(data);
     if (tipoUsuario === 'egresado') {
       if (data.celular) setCelular(data.celular);
@@ -144,28 +143,7 @@ function PortalPrincipalDNI() {
     }
   };
 
-  // Función infalible para extraer exactamente 'nombre_completo' o cualquier variante de nombre de Supabase
-  const obtenerNombreReal = (obj) => {
-    if (!obj) return '';
-    return (
-      obj.nombre_completo || 
-      obj.nombre || 
-      obj.name || 
-      obj.apellido || 
-      obj.docente || 
-      obj.profesor || 
-      obj.fullname || 
-      obj.full_name || 
-      obj.docente_nombre || 
-      obj.egresado || 
-      obj.persona || 
-      obj.titular || 
-      (obj.apellidos ? `${obj.apellidos}, ${obj.nombre}` : '') ||
-      ''
-    );
-  };
-
-  // Función de descarga para generar la tarjeta 1080x1920 con depuración directa
+  // Función de descarga para generar la tarjeta 1080x1920 con el nombre real arriba y el rol correspondiente abajo
   const descargarTarjeta1080x1920 = () => {
     const svgElement = qrRef.current?.querySelector('svg');
     if (!svgElement) {
@@ -218,8 +196,20 @@ function PortalPrincipalDNI() {
           ctx.strokeStyle = '#E5E7EB';
           ctx.stroke();
 
-          // 4. Extracción exacta del nombre y DNI
-          const nombreTitular = obtenerNombreReal(datosPersona) || 'ASISTENTE ESRN N° 005';
+          // 4. Extracción robusta del nombre (Arriba) y Rol aclarado abajo
+          const nombreTitular = (
+            datosPersona.nombre || 
+            datosPersona.name || 
+            datosPersona.apellido || 
+            datosPersona.docente || 
+            datosPersona.profesor || 
+            datosPersona.fullname || 
+            datosPersona.full_name || 
+            datosPersona.docente_nombre || 
+            datosPersona.egresado || 
+            (datosPersona.apellidos ? `${datosPersona.apellidos}, ${datosPersona.nombre}` : '') || 
+            'ASISTENTE ESRN N° 005'
+          );
           const dniTitular = datosPersona.dni || dni;
 
           // Nombre grande y destacado arriba
@@ -231,7 +221,7 @@ function PortalPrincipalDNI() {
           ctx.font = '32px sans-serif';
           ctx.fillText(`DNI: ${dniTitular}`, 540, 650);
 
-          // Rol aclarado abajo
+          // Rol aclarado abajo (DOCENTE, VIP o EGRESADO)
           ctx.fillStyle = '#6B1D2F';
           ctx.font = 'bold 28px sans-serif';
           let textoRol = 'EGRESADO / TITULADO';
@@ -278,7 +268,20 @@ function PortalPrincipalDNI() {
     }
   };
 
-  const nombreMostrado = obtenerNombreReal(datosPersona);
+  const nombreMostrado = datosPersona ? (
+    datosPersona.nombre || 
+    datosPersona.name || 
+    datosPersona.apellido || 
+    datosPersona.docente || 
+    datosPersona.profesor || 
+    datosPersona.fullname || 
+    datosPersona.full_name || 
+    datosPersona.docente_nombre || 
+    datosPersona.egresado || 
+    (datosPersona.apellidos ? `${datosPersona.apellidos}, ${datosPersona.nombre}` : '') || 
+    'Asistente'
+  ) : '';
+
   const valorQRTexto = datosPersona ? `ESRN005-${tipoUsuario.toUpperCase()}-${datosPersona.dni || dni}-${nombreMostrado}` : '';
 
   return (
@@ -344,7 +347,7 @@ function PortalPrincipalDNI() {
         ) : (
           <div className="space-y-4 text-left">
             <div className="p-4 bg-gray-50 rounded-lg border text-center">
-              <h3 className="font-bold text-lg text-gray-800">{nombreMostrado || 'Nombre no especificado en tabla'}</h3>
+              <h3 className="font-bold text-lg text-gray-800">{nombreMostrado}</h3>
               <p className="text-xs text-gray-500">DNI: {datosPersona.dni || dni}</p>
               <p className="text-[11px] uppercase tracking-wider text-[#6B1D2F] font-semibold mt-1">
                 {tipoUsuario === 'egresado' ? 'Egresado / Titulado' : tipoUsuario === 'docente' ? 'Docente' : 'Invitado VIP / Autoridad'}
@@ -507,7 +510,7 @@ function PanelAdmin() {
       <h2 className="text-2xl font-bold text-[#6B1D2F] mb-1">Panel de Gestión — ESRN N° 005</h2>
       <p className="text-xs text-gray-500 mb-6">Aforo total: 525 butacas | Liberación automática de cupos por inasistencia</p>
 
-      <div className="badge-whatsapp bg-white p-4 rounded-xl shadow-sm border mb-6 flex justify-between items-center">
+      <div className="bg-white p-4 rounded-xl shadow-sm border mb-6 flex justify-between items-center">
         <div>
           <h3 className="font-bold text-sm text-gray-800">Sistema de Notificaciones por WhatsApp</h3>
           <p className="text-xs text-gray-500">Habilita o deshabilita los botones de aviso rápido `wa.me`</p>
