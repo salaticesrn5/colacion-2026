@@ -7,7 +7,7 @@ import {
 import { QRCodeSVG } from 'qrcode.react';
 
 // ==========================================
-// CONFIGURACIÓN DE SUPABASE (Variables de entorno seguras)
+// CONFIGURACIÓN DE SUPABASE
 // ==========================================
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -85,7 +85,6 @@ function PortalPrincipalDNI() {
   const [datosPersona, setDatosPersona] = useState(null);
   const [error, setError] = useState('');
   const [celular, setCelular] = useState('');
-  const [tipoIngreso, setTipoIngreso] = useState('individual');
   const [invitados, setInvitados] = useState([
     { id: 1, nombre: '', dni: '', grupal: false },
     { id: 2, nombre: '', dni: '', grupal: false },
@@ -122,7 +121,6 @@ function PortalPrincipalDNI() {
     setDatosPersona(data);
     if (tipoUsuario === 'egresado') {
       if (data.celular) setCelular(data.celular);
-      if (data.tipo_ingreso) setTipoIngreso(data.tipo_ingreso);
     }
   };
 
@@ -133,7 +131,6 @@ function PortalPrincipalDNI() {
   };
 
   const guardarDatosEstudiante = async () => {
-    // Validación previa para asegurar que los datos estén bien ingresados
     for (let i = 0; i < invitados.length; i++) {
       const inv = invitados[i];
       if ((inv.nombre && !inv.dni) || (!inv.nombre && inv.dni)) {
@@ -144,13 +141,13 @@ function PortalPrincipalDNI() {
 
     const { error: updateErr } = await supabase
       .from('egresados')
-      .update({ celular, tipo_ingreso: tipoIngreso })
+      .update({ celular })
       .eq('id', datosPersona.id);
 
     if (updateErr) {
       alert('Error al guardar los cambios.');
     } else {
-      alert('¡Datos, invitados y modalidad guardados con éxito! Recuerde revisar bien los datos antes del acto.');
+      alert('¡Datos e invitados guardados con éxito! Recuerde revisar bien los datos antes del acto.');
     }
   };
 
@@ -290,7 +287,6 @@ function PortalPrincipalDNI() {
   const nombreMostrado = obtenerNombreReal(datosPersona);
   const valorQRPrincipal = datosPersona ? `ESRN005-${tipoUsuario.toUpperCase()}-${datosPersona.dni || dni}-${nombreMostrado}` : '';
 
-  // Agrupar invitados por grupo si tienen el tilde de grupal
   const gruposInvitados = invitados.reduce((acc, inv) => {
     if (!inv.nombre) return acc;
     const claveGrupo = inv.grupal ? 'Grupo General' : `Individual-${inv.nombre}`;
@@ -305,7 +301,11 @@ function PortalPrincipalDNI() {
       <div className="bg-gradient-to-r from-[#6B1D2F] to-[#8a253c] text-white rounded-xl shadow-md p-5 text-center">
         <h2 className="text-xl font-bold mb-1">¡Bienvenidos al Acto de Colación 2026! 🎉</h2>
         <p className="text-xs text-rose-100 leading-relaxed">
-          Seleccioná tu rol e ingresá tu DNI. Egresados: carguen sus 4 invitados, revisen bien los datos, tilden si entran en grupo o individual y descarguen sus pases QR.
+          {tipoUsuario === 'egresado' 
+            ? 'Ingresá tu DNI, descargá tu QR personal justo abajo de tu nombre, cargá tus 4 invitados revisando bien los datos y tildá si entran en grupo o individual.'
+            : tipoUsuario === 'docente'
+            ? 'Ingresá tu DNI docente para consultar tu estado y descargar tu pase QR nominal.'
+            : 'Ingresá tu DNI VIP para consultar y descargar tu pase institucional.'}
         </p>
       </div>
 
@@ -361,12 +361,29 @@ function PortalPrincipalDNI() {
           </form>
         ) : (
           <div className="space-y-4 text-left">
-            <div className="p-4 bg-gray-50 rounded-lg border text-center">
-              <h3 className="font-bold text-lg text-gray-800">{nombreMostrado || 'Asistente ESRN N° 005'}</h3>
-              <p className="text-xs text-gray-500">DNI: {datosPersona.dni || dni}</p>
-              <p className="text-[11px] uppercase tracking-wider text-[#6B1D2F] font-semibold mt-1">
-                {tipoUsuario === 'egresado' ? 'Egresado / Titulado' : tipoUsuario === 'docente' ? 'Docente' : 'Invitado VIP / Autoridad'}
-              </p>
+            {/* Tarjeta de Identidad y QR Justo Abajo del Nombre */}
+            <div className="p-4 bg-gray-50 rounded-lg border text-center space-y-3">
+              <div>
+                <h3 className="font-bold text-lg text-gray-800">{nombreMostrado || 'Asistente ESRN N° 005'}</h3>
+                <p className="text-xs text-gray-500">DNI: {datosPersona.dni || dni}</p>
+                <p className="text-[11px] uppercase tracking-wider text-[#6B1D2F] font-semibold mt-1">
+                  {tipoUsuario === 'egresado' ? 'Egresado / Titulado' : tipoUsuario === 'docente' ? 'Docente' : 'Invitado VIP / Autoridad'}
+                </p>
+              </div>
+
+              {/* Botón de descarga del QR personal justo abajo del nombre */}
+              <button 
+                type="button"
+                onClick={() => descargarTarjeta1080x1920(nombreMostrado, `DNI: ${datosPersona.dni || dni}`, valorQRPrincipal)}
+                className="w-full py-2.5 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 shadow cursor-pointer"
+              >
+                <Download className="w-4 h-4" /> Descargar Mi QR Personal
+              </button>
+            </div>
+
+            {/* QR Oculto para canvas */}
+            <div className="hidden" ref={qrRef}>
+              <QRCodeSVG value={valorQRPrincipal} size={300} level="H" includeMargin={true} />
             </div>
 
             {tipoUsuario === 'egresado' && (
@@ -378,13 +395,13 @@ function PortalPrincipalDNI() {
                     placeholder="Ej: 2994444444"
                     value={celular}
                     onChange={(e) => setCelular(e.target.value)}
-                    className="w-full px-3 py-2 border rounded-lg text-sm"
+                    className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
                   />
                   <p className="text-xs text-gray-400 mt-0.5">Para recibir avisos institucionales.</p>
                 </div>
 
-                {/* Carga de los 4 invitados base con tilde para grupal/individual */}
-                <div className="border-t pt-4 space-y-3">
+                {/* Carga de los 4 invitados base con tilde para grupal/individual, recomendación y destacado visual */}
+                <div className="border-2 border-rose-200 bg-gradient-to-br from-rose-50/70 to-white p-4 rounded-xl space-y-3 shadow-sm">
                   <div className="bg-amber-50 border border-amber-200 p-3 rounded-lg">
                     <p className="text-xs font-bold text-amber-800">⚠️ Recomendación Importante</p>
                     <p className="text-[11px] text-amber-700 mt-0.5">
@@ -394,7 +411,7 @@ function PortalPrincipalDNI() {
 
                   <h4 className="font-bold text-sm text-[#6B1D2F]">Carga de Invitados (Máximo 4)</h4>
                   {invitados.map((inv, idx) => (
-                    <div key={inv.id} className="p-3 bg-gray-50 border rounded-lg space-y-2">
+                    <div key={inv.id} className="p-3 bg-white border rounded-lg space-y-2 shadow-xs">
                       <div className="flex justify-between items-center">
                         <span className="text-xs font-bold text-gray-700">Invitado #{idx + 1}</span>
                         <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
@@ -431,43 +448,29 @@ function PortalPrincipalDNI() {
                 >
                   Guardar Datos e Invitados
                 </button>
+
+                {/* Botones de Descarga de Pases QR para Invitados */}
+                {Object.keys(gruposInvitados).length > 0 && (
+                  <div className="space-y-2 pt-2 border-t">
+                    <h4 className="font-bold text-xs text-gray-700 uppercase tracking-wider">Pases QR de Invitados:</h4>
+                    {Object.entries(gruposInvitados).map(([grupo, lista], i) => (
+                      <button 
+                        key={i}
+                        type="button"
+                        onClick={() => descargarTarjeta1080x1920(
+                          grupo.startsWith('Individual') ? lista[0].nombre : `Grupo de ${nombreMostrado} (${lista.length} pers.)`,
+                          grupo.startsWith('Individual') ? `DNI: ${lista[0].dni}` : `Integrantes: ${lista.map(x => x.nombre).join(', ')}`,
+                          `GRUPO-${grupo}-${dni}`
+                        )}
+                        className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 shadow cursor-pointer"
+                      >
+                        <Download className="w-4 h-4" /> Descargar QR ({grupo.startsWith('Individual') ? lista[0].nombre : `Entrada Grupal (${lista.length} inv.)`})
+                      </button>
+                    ))}
+                  </div>
+                )}
               </>
             )}
-
-            {/* QR Oculto para canvas */}
-            <div className="hidden" ref={qrRef}>
-              <QRCodeSVG value={valorQRPrincipal} size={300} level="H" includeMargin={true} />
-            </div>
-
-            {/* Botones de Descarga de Pases QR (Egresado + Grupos/Individuales) */}
-            <div className="space-y-2 pt-2 border-t">
-              <h4 className="font-bold text-xs text-gray-700 uppercase tracking-wider">Tus Pases QR Listos para Descargar:</h4>
-              
-              {/* QR Personal Egresado */}
-              <button 
-                type="button"
-                onClick={() => descargarTarjeta1080x1920(nombreMostrado, `DNI: ${datosPersona.dni || dni}`, valorQRPrincipal)}
-                className="w-full py-2 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 shadow"
-              >
-                <Download className="w-4 h-4" /> Descargar Mi QR Personal ({nombreMostrado})
-              </button>
-
-              {/* QRs de Invitados (Individuales o Grupos) */}
-              {Object.entries(gruposInvitados).map(([grupo, lista], i) => (
-                <button 
-                  key={i}
-                  type="button"
-                  onClick={() => descargarTarjeta1080x1920(
-                    grupo.startsWith('Individual') ? lista[0].nombre : `Grupo de ${nombreMostrado} (${lista.length} pers.)`,
-                    grupo.startsWith('Individual') ? `DNI: ${lista[0].dni}` : `Integrantes: ${lista.map(x => x.nombre).join(', ')}`,
-                    `GRUPO-${grupo}-${dni}`
-                  )}
-                  className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 shadow"
-                >
-                  <Download className="w-4 h-4" /> Descargar QR ({grupo.startsWith('Individual') ? lista[0].nombre : `Entrada Grupal (${lista.length} inv.)`})
-                </button>
-              ))}
-            </div>
 
             {/* Botón de No Asistiré / Liberar Cupo */}
             <div className="pt-2 border-t">
