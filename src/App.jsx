@@ -1135,13 +1135,102 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
         </div>
       )}
 
-      {tab === 'reportes' && (
-        <div className="bg-white rounded-2xl border p-5 space-y-4">
-          <h3 className="font-bold">Reporte de Asistencia General</h3>
-          <p className="text-sm text-slate-600">Egresados presentes: {egresados.filter(e => e.asistio).length} / {egresados.length}</p>
-          <p className="text-sm text-slate-600">Invitados presentes: {invitados.filter(i => i.asistio).length} / {invitados.length}</p>
-        </div>
-      )}
+      {tab === 'reportes' && (() => {
+        const [filtroCeremonial, setFiltroCeremonial] = useState('TODOS');
+        const [busquedaCeremonial, setBusquedaCeremonial] = useState('');
+
+        const egresadosFiltradosCeremonial = egresados.filter((e) => {
+          const matchTexto = (e.nombre_completo || '').toLowerCase().includes(busquedaCeremonial.toLowerCase()) || (e.dni || '').includes(busquedaCeremonial);
+          if (filtroCeremonial === 'PRESENTES') return matchTexto && e.asistio;
+          if (filtroCeremonial === 'PENDIENTES') return matchTexto && !e.asistio;
+          return matchTexto;
+        });
+
+        const totalEgresadosCount = egresados.length || 1;
+        const presentesCount = egresados.filter(e => e.asistio).length;
+        const porcentajeAsistencia = Math.round((presentesCount / totalEgresadosCount) * 100);
+
+        return (
+          <div className="bg-white rounded-2xl border p-5 space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4">
+              <div>
+                <h3 className="font-bold text-base text-[#6B1D2F]">Acreditación en Vivo — Ceremonial</h3>
+                <p className="text-xs text-slate-500">Control en tiempo real de egresados presentes en sala.</p>
+              </div>
+              <div className="flex items-center gap-2 bg-slate-100 p-2 rounded-xl text-xs font-bold">
+                <span>Porcentaje de Ingreso:</span>
+                <span className="text-emerald-700 font-mono text-sm">{porcentajeAsistencia}% ({presentesCount}/{egresados.length})</span>
+              </div>
+            </div>
+
+            {/* Métricas rápidas */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200">
+                <p className="text-[11px] text-emerald-700 font-bold">Egresados Presentes</p>
+                <p className="text-xl font-extrabold text-emerald-900">{presentesCount} / {egresados.length}</p>
+              </div>
+              <div className="p-3.5 rounded-xl bg-sky-50 border border-sky-200">
+                <p className="text-[11px] text-sky-700 font-bold">Familiares Ingresados</p>
+                <p className="text-xl font-extrabold text-sky-900">{invitados.filter(i => i.asistio).length} / {invitados.length}</p>
+              </div>
+              <div className="p-3.5 rounded-xl bg-indigo-50 border border-indigo-200">
+                <p className="text-[11px] text-indigo-700 font-bold">Docentes Presentes</p>
+                <p className="text-xl font-extrabold text-indigo-900">{docentes.filter(d => d.asistio).length} / {docentes.length}</p>
+              </div>
+              <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200">
+                <p className="text-[11px] text-amber-700 font-bold">VIP / Autoridades</p>
+                <p className="text-xl font-extrabold text-amber-900">{especiales.filter(v => v.asistio).length} / {especiales.length}</p>
+              </div>
+            </div>
+
+            {/* Controles de Filtro y Buscador */}
+            <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
+              <div className="relative w-full sm:w-72">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                <input
+                  type="text"
+                  placeholder="Buscar egresado en ceremonial..."
+                  value={busquedaCeremonial}
+                  onChange={(e) => setBusquedaCeremonial(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2 rounded-xl border text-xs outline-none focus:border-[#6B1D2F]"
+                />
+              </div>
+              <div className="flex gap-1.5 w-full sm:w-auto">
+                {['TODOS', 'PRESENTES', 'PENDIENTES'].map((f) => (
+                  <button
+                    key={f}
+                    onClick={() => setFiltroCeremonial(f)}
+                    className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-xs font-bold border transition ${
+                      filtroCeremonial === f ? 'bg-[#6B1D2F] text-white border-[#6B1D2F]' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    {f}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Listado */}
+            <div className="max-h-96 overflow-y-auto border rounded-xl divide-y text-xs">
+              {egresadosFiltradosCeremonial.length === 0 ? (
+                <p className="text-center text-slate-400 py-8">No se encontraron egresados con los filtros seleccionados.</p>
+              ) : (
+                egresadosFiltradosCeremonial.map((e) => (
+                  <div key={e.id} className="p-3 flex items-center justify-between hover:bg-slate-50">
+                    <div>
+                      <p className="font-bold text-slate-900 text-sm">{e.nombre_completo}</p>
+                      <p className="text-slate-500">DNI: {e.dni} · Cupo: {e.cupo_asignado} lugares</p>
+                    </div>
+                    <span className={`px-3 py-1 rounded-full font-bold uppercase ${e.asistio ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'}`}>
+                      {e.asistio ? '✓ Presente' : 'Pendiente'}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {tab === 'usuarios' && perfilStaff?.rol === 'admin' && (
         <div className="bg-white rounded-2xl border p-5 space-y-5">
