@@ -4,7 +4,7 @@ import {
   Users, UserCheck, Shield, QrCode, Upload, Trash2, Plus, Search,
   CheckCircle2, XCircle, AlertTriangle, Lock, Unlock, Download,
   LogOut, Eye, EyeOff, Edit3, Save, X, RefreshCw, MessageCircle, Award,
-  UserPlus, FileSpreadsheet, Check, ArrowRight, Building2, Phone, Eye as EyeIcon
+  UserPlus, FileSpreadsheet, Check, ArrowRight, Building2, Phone, Eye as EyeIcon, Edit2
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 
@@ -727,7 +727,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
               <button key={egr.id} onClick={() => setEgresadoSeleccionado(egr)} className="w-full text-left p-3 rounded-xl border hover:border-emerald-500 hover:bg-emerald-50/40 transition flex items-center justify-between">
                 <div>
                   <p className="font-bold text-sm">{egr.nombre_completo}</p>
-                  <p className="text-xs text-slate-500">DNI: {egr.dni}</p>
+                  <p className="text-xs text-slate-500">DNI Egresado: {egr.dni}</p>
                 </div>
                 <ArrowRight className="w-4 h-4 text-slate-400" />
               </button>
@@ -757,9 +757,16 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
 function PanelAdministracion({ perfilStaff, config, egresados, invitados, docentes, especiales, solicitudes, usuariosSistema, totalEgresados, totalDocentes, totalEspeciales, totalCuposFamiliares, vacantesLibres, recargar, notify }) {
   const [tab, setTab] = useState('egresados');
   const [filtroEgresado, setFiltroEgresado] = useState('');
-  const [modalInvitadosEgr, setModalInvitadosEgr] = useState(null); // Egresado seleccionado para ver sus invitados
+  const [modalEditarEgr, setModalEditarEgr] = useState(null); // Egresado en edición completa
   
-  // Estados para la solapa de reportes (Acreditación en Vivo) definidos CORRECTAMENTE a nivel de componente
+  // Estados de edición del modal
+  const [editNombre, setEditNombre] = useState('');
+  const [editDni, setEditDni] = useState('');
+  const [editCelular, setEditCelular] = useState('');
+  const [editCupo, setEditCupo] = useState(4);
+  const [guardandoEdicion, setGuardandoEdicion] = useState(false);
+
+  // Estados para la solapa de reportes (Acreditación en Vivo)
   const [filtroCeremonial, setFiltroCeremonial] = useState('TODOS');
   const [busquedaCeremonial, setBusquedaCeremonial] = useState('');
 
@@ -772,6 +779,40 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
   const [nuevoPassUsr, setNuevoPassUsr] = useState('');
   const [nuevoRolUsr, setNuevoRolUsr] = useState('puerta');
   const [showPassUsr, setShowPassUsr] = useState(false);
+
+  const abrirModalEditar = (egr) => {
+    setModalEditarEgr(egr);
+    setEditNombre(egr.nombre_completo || '');
+    setEditDni(egr.dni || '');
+    setEditCelular(egr.celular || '');
+    setEditCupo(egr.cupo_asignado || 4);
+  };
+
+  const guardarEdicionEgresado = async (e) => {
+    e.preventDefault();
+    if (!modalEditarEgr) return;
+    setGuardandoEdicion(true);
+    try {
+      const { error } = await supabase
+        .from('egresados')
+        .update({
+          nombre_completo: editNombre.trim().toUpperCase(),
+          dni: sanitizeDNI(editDni),
+          celular: editCelular.trim(),
+          cupo_asignado: Number(editCupo)
+        })
+        .eq('id', modalEditarEgr.id);
+
+      if (error) throw error;
+      notify('Datos del egresado actualizados correctamente.');
+      setModalEditarEgr(null);
+      await recargar();
+    } catch (err) {
+      notify('Error al actualizar: ' + err.message, 'error');
+    } finally {
+      setGuardandoEdicion(false);
+    }
+  };
 
   const cambiarEtapaGlobal = async (nuevaEtapa) => {
     if (config.id) {
@@ -1003,15 +1044,15 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                 <div key={e.id} className="py-3 flex flex-wrap justify-between items-center gap-3 text-sm">
                   <div>
                     <span className="font-semibold">{e.nombre_completo}</span> <span className="text-xs text-slate-500">({e.dni})</span>
-                    <p className="text-xs text-slate-400">Invitados cargados: <b>{misInvitados.length} / {e.cupo_asignado}</b></p>
+                    <p className="text-xs text-slate-400">Invitados cargados: <b>{misInvitados.length} / {e.cupo_asignado}</b> · Cel: {e.celular || 'Sin registrar'}</p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
-                    {/* Botón Ver Invitados Modal */}
+                    {/* Botón Editar Completo */}
                     <button
-                      onClick={() => setModalInvitadosEgr(e)}
-                      className="px-3 py-1.5 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 rounded-lg text-xs font-bold flex items-center gap-1"
+                      onClick={() => abrirModalEditar(e)}
+                      className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-lg text-xs font-bold flex items-center gap-1"
                     >
-                      <EyeIcon className="w-3.5 h-3.5" /> Ver Invitados ({misInvitados.length})
+                      <Edit2 className="w-3.5 h-3.5" /> Editar
                     </button>
 
                     {/* Botón Enviar Mensaje WhatsApp para Adicionales */}
@@ -1021,9 +1062,9 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                         target="_blank"
                         rel="noreferrer"
                         className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-xs"
-                        title="Enviar WhatsApp para adicionales"
+                        title="Enviar WhatsApp"
                       >
-                        <MessageCircle className="w-3.5 h-3.5" /> WhatsApp Adicionales
+                        <MessageCircle className="w-3.5 h-3.5" /> WhatsApp
                       </a>
                     )}
 
@@ -1050,47 +1091,112 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
         </div>
       )}
 
-      {/* MODAL PARA VER LOS INVITADOS DE UN EGRESADO */}
-      {modalInvitadosEgr && (
+      {/* MODAL DE EDICIÓN COMPLETA DEL EGRESADO */}
+      {modalEditarEgr && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl">
             <div className="flex justify-between items-start border-b pb-3">
               <div>
-                <h3 className="font-bold text-base text-[#6B1D2F]">Listado de Invitados</h3>
-                <p className="text-xs text-slate-500">Egresado/a: <b>{modalInvitadosEgr.nombre_completo}</b> (DNI: {modalInvitadosEgr.dni})</p>
+                <h3 className="font-bold text-base text-[#6B1D2F]">Editar Egresado y Acompañantes</h3>
+                <p className="text-xs text-slate-500">Actualizá los datos personales y el cupo.</p>
               </div>
-              <button onClick={() => setModalInvitadosEgr(null)} className="p-1 rounded-lg text-slate-400 hover:bg-slate-100">
+              <button onClick={() => setModalEditarEgr(null)} className="p-1 rounded-lg text-slate-400 hover:bg-slate-100">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="space-y-2.5 max-h-80 overflow-y-auto">
-              {invitados.filter((i) => i.egresado_id === modalInvitadosEgr.id).length === 0 ? (
-                <p className="text-xs text-slate-400 text-center py-6">Este egresado aún no tiene invitados cargados.</p>
-              ) : (
-                invitados.filter((i) => i.egresado_id === modalInvitadosEgr.id).map((inv, idx) => (
-                  <div key={inv.id} className="p-3 bg-slate-50 border rounded-xl flex items-center justify-between text-xs">
-                    <div>
-                      <span className="font-mono bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded font-bold">{inv.numero_entrada || 'ENT-...'}</span>
-                      <p className="font-bold text-slate-900 mt-1">{idx + 1}. {inv.nombre_completo}</p>
-                      <p className="text-slate-500">DNI: {inv.dni}</p>
-                    </div>
-                    <span className={`px-2.5 py-1 rounded-full font-bold uppercase ${inv.asistio ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
-                      {inv.asistio ? 'Presente' : 'Pendiente ingreso'}
-                    </span>
-                  </div>
-                ))
-              )}
-            </div>
+            <form onSubmit={guardarEdicionEgresado} className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Nombre y Apellido</label>
+                <input
+                  type="text"
+                  required
+                  value={editNombre}
+                  onChange={(e) => setEditNombre(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-xl text-sm outline-none focus:border-[#6B1D2F]"
+                />
+              </div>
 
-            <div className="pt-3 border-t flex justify-end">
-              <button
-                onClick={() => setModalInvitadosEgr(null)}
-                className="px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold"
-              >
-                Cerrar
-              </button>
-            </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">DNI (8 dígitos)</label>
+                <input
+                  type="text"
+                  required
+                  maxLength={8}
+                  value={editDni}
+                  onChange={(e) => setEditDni(sanitizeDNI(e.target.value))}
+                  className="w-full px-3 py-2 border rounded-xl text-sm font-mono outline-none focus:border-[#6B1D2F]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Celular / WhatsApp de contacto</label>
+                <input
+                  type="text"
+                  value={editCelular}
+                  onChange={(e) => setEditCelular(e.target.value)}
+                  placeholder="Ej: 2994444444"
+                  className="w-full px-3 py-2 border rounded-xl text-sm outline-none focus:border-[#6B1D2F]"
+                />
+                {editCelular && (
+                  <a
+                    href={`https://wa.me/549${editCelular.replace(/\D/g, '')}?text=Hola%20${encodeURIComponent(editNombre)},%20te%20escribimos%20desde%20la%20ESRN%20N°%20005.`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 text-[11px] text-green-700 font-bold mt-1 hover:underline"
+                  >
+                    <MessageCircle className="w-3.5 h-3.5" /> Abrir chat de WhatsApp directo
+                  </a>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Cupo Asignado de Familiares</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="10"
+                  required
+                  value={editCupo}
+                  onChange={(e) => setEditCupo(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-xl text-sm outline-none focus:border-[#6B1D2F]"
+                />
+              </div>
+
+              {/* Listado rápido de invitados cargados en el modal */}
+              <div className="pt-2 border-t">
+                <p className="text-xs font-bold text-slate-700 mb-2">Invitados cargados actualmente:</p>
+                <div className="max-h-36 overflow-y-auto space-y-1.5 bg-slate-50 p-2 rounded-xl border text-xs">
+                  {invitados.filter((i) => i.egresado_id === modalEditarEgr.id).length === 0 ? (
+                    <p className="text-slate-400 text-center py-2">Sin invitados cargados.</p>
+                  ) : (
+                    invitados.filter((i) => i.egresado_id === modalEditarEgr.id).map((inv, i) => (
+                      <div key={inv.id} className="flex justify-between items-center bg-white p-2 rounded border">
+                        <span><b>#{i+1}</b> {inv.nombre_completo} (DNI: {inv.dni})</span>
+                        <span className="font-mono font-bold text-slate-600">{inv.numero_entrada}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-3 border-t">
+                <button
+                  type="button"
+                  onClick={() => setModalEditarEgr(null)}
+                  className="flex-1 py-2.5 border rounded-xl text-xs font-semibold"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={guardandoEdicion}
+                  className="flex-1 py-2.5 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-xl text-xs font-bold shadow"
+                >
+                  {guardandoEdicion ? 'Guardando...' : 'Guardar Cambios'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
