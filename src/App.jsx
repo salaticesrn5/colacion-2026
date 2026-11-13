@@ -764,7 +764,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
   const [modalEditarEgr, setModalEditarEgr] = useState(null);
   const [modalEditarDoc, setModalEditarDoc] = useState(null);
   const [modalEditarVip, setModalEditarVip] = useState(null);
-  const [modalEditarUsr, setModalEditarUsr] = useState(null); // Modal Editar Usuario del Sistema
+  const [modalEditarUsr, setModalEditarUsr] = useState(null);
   const [modalAgregarEgresado, setModalAgregarEgresado] = useState(false);
   const [modalAgregarDocente, setModalAgregarDocente] = useState(false);
   const [modalAgregarVip, setModalAgregarVip] = useState(false);
@@ -1264,7 +1264,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
         <button onClick={() => setTab('egresados')} className={`px-4 py-2 rounded-xl text-xs font-bold ${tab === 'egresados' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Egresados ({egresados.length})</button>
         <button onClick={() => setTab('docentes')} className={`px-4 py-2 rounded-xl text-xs font-bold ${tab === 'docentes' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Docentes ({docentes.length})</button>
         <button onClick={() => setTab('vip')} className={`px-4 py-2 rounded-xl text-xs font-bold ${tab === 'vip' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Invitados VIP ({especiales.length})</button>
-        <button onClick={() => setTab('solicitudes')} className={`px-4 py-2 rounded-xl text-xs font-bold ${tab === 'solicitudes' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Solicitudes Butacas</button>
+        <button onClick={() => setTab('solicitudes')} className={`px-4 py-2 rounded-xl text-xs font-bold ${tab === 'solicitudes' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Solicitudes Butacas ({solicitudes.length})</button>
         <button onClick={() => setTab('reportes')} className={`px-4 py-2 rounded-xl text-xs font-bold ${tab === 'reportes' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Acreditación en Vivo</button>
         {perfilStaff?.rol === 'admin' && (
           <button onClick={() => setTab('usuarios')} className={`px-4 py-2 rounded-xl text-xs font-bold ${tab === 'usuarios' ? 'bg-emerald-600 text-white' : 'bg-white border'}`}>Usuarios del Sistema ({usuariosSistema.length})</button>
@@ -1294,7 +1294,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
             </div>
           </div>
 
-          {/* Buscador en tiempo real para egresados */}
           <div className="relative">
             <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
             <input
@@ -1321,7 +1320,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                     <p className="text-xs text-slate-400">Invitados cargados: <b>{misInvitados.length} / {e.cupo_asignado}</b> · Cel: {e.celular || 'Sin registrar'}</p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
-                    {/* Botón Editar Completo */}
                     <button
                       onClick={() => abrirModalEditar(e)}
                       className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-lg text-xs font-bold flex items-center gap-1"
@@ -1329,7 +1327,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                       <Edit2 className="w-3.5 h-3.5" /> Editar
                     </button>
 
-                    {/* Botón Enviar Mensaje WhatsApp para Adicionales */}
                     {numeroWp && (
                       <a
                         href={linkWpAdicionales}
@@ -1342,7 +1339,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                       </a>
                     )}
 
-                    {/* Controles de Cupo +1 / -1 */}
                     <div className="flex items-center gap-1 bg-slate-100 px-2.5 py-1 rounded-lg">
                       <span className="text-xs font-bold">Cupo: {e.cupo_asignado}</span>
                       <button onClick={() => ajustarCupoEgresado(e, -1)} className="px-1.5 py-0.5 bg-white border rounded text-xs font-bold hover:bg-slate-50" title="Restar butaca">-1</button>
@@ -1365,7 +1361,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
         </div>
       )}
 
-      {/* MODAL AGREGAR EGRESADO (Bordó y blanco) */}
+      {/* MODAL AGREGAR EGRESADO */}
       {modalAgregarEgresado && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl overflow-hidden border">
@@ -1408,7 +1404,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
         </div>
       )}
 
-      {/* MODAL DE EDICIÓN COMPLETA DEL EGRESADO (Cabecera Bordó, campos blancos) */}
+      {/* MODAL EDITAR EGRESADO */}
       {modalEditarEgr && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl overflow-hidden border">
@@ -1455,16 +1451,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                   placeholder="Ej: 2994444444"
                   className="w-full px-3 py-2 bg-white border rounded-xl text-sm outline-none focus:border-[#6B1D2F]"
                 />
-                {editCelular && (
-                  <a
-                    href={`https://wa.me/549${editCelular.replace(/\D/g, '')}?text=Hola%20${encodeURIComponent(editNombre)},%20te%20escribimos%20desde%20la%20ESRN%20N°%20005.`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1 text-[11px] text-green-700 font-bold mt-1 hover:underline"
-                  >
-                    <MessageCircle className="w-3.5 h-3.5" /> Abrir chat de WhatsApp directo
-                  </a>
-                )}
               </div>
 
               <div>
@@ -1480,7 +1466,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                 />
               </div>
 
-              {/* Listado rápido de invitados cargados en el modal */}
               <div className="pt-2 border-t">
                 <p className="text-xs font-bold text-slate-700 mb-2">Invitados cargados actualmente:</p>
                 <div className="max-h-36 overflow-y-auto space-y-1.5 bg-slate-50 p-2 rounded-xl border text-xs">
@@ -1498,18 +1483,8 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
               </div>
 
               <div className="flex gap-2 pt-3 border-t">
-                <button
-                  type="button"
-                  onClick={() => setModalEditarEgr(null)}
-                  className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold hover:bg-slate-50"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={guardandoEdicion}
-                  className="flex-1 py-2.5 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-xl text-xs font-bold shadow"
-                >
+                <button type="button" onClick={() => setModalEditarEgr(null)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold">Cancelar</button>
+                <button type="submit" disabled={guardandoEdicion} className="flex-1 py-2.5 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold shadow">
                   {guardandoEdicion ? 'Guardando...' : 'Guardar Cambios'}
                 </button>
               </div>
@@ -1541,7 +1516,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
             </div>
           </div>
 
-          {/* Buscador de docentes */}
           <div className="relative">
             <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
             <input
@@ -1564,7 +1538,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                     <span className="text-xs text-slate-500 ml-1">({d.dni})</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    {/* Botón Editar Docente */}
                     <button
                       onClick={() => abrirModalEditarDocente(d)}
                       className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-lg text-xs font-bold flex items-center gap-1"
@@ -1631,7 +1604,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
         </div>
       )}
 
-      {/* MODAL DE EDICIÓN DE DOCENTE */}
+      {/* MODAL EDITAR DOCENTE */}
       {modalEditarDoc && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl overflow-hidden border">
@@ -1670,18 +1643,8 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
               </div>
 
               <div className="flex gap-2 pt-3 border-t">
-                <button
-                  type="button"
-                  onClick={() => setModalEditarDoc(null)}
-                  className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold hover:bg-slate-50"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={guardandoDocente}
-                  className="flex-1 py-2.5 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-xl text-xs font-bold shadow"
-                >
+                <button type="button" onClick={() => setModalEditarDoc(null)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold hover:bg-slate-50">Cancelar</button>
+                <button type="submit" disabled={guardandoDocente} className="flex-1 py-2.5 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-xl text-xs font-bold shadow">
                   {guardandoDocente ? 'Guardando...' : 'Guardar Cambios'}
                 </button>
               </div>
@@ -1714,7 +1677,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
             </div>
           </div>
 
-          {/* Buscador VIP */}
           <div className="relative">
             <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
             <input
@@ -1802,7 +1764,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
         </div>
       )}
 
-      {/* MODAL DE EDICIÓN VIP */}
+      {/* MODAL EDICIÓN VIP */}
       {modalEditarVip && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl overflow-hidden border">
@@ -1840,18 +1802,8 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
               </div>
 
               <div className="flex gap-2 pt-3 border-t">
-                <button
-                  type="button"
-                  onClick={() => setModalEditarVip(null)}
-                  className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold hover:bg-slate-50"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={guardandoVip}
-                  className="flex-1 py-2.5 bg-amber-600 hover:bg-opacity-90 text-white rounded-xl text-xs font-bold shadow"
-                >
+                <button type="button" onClick={() => setModalEditarVip(null)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold hover:bg-slate-50">Cancelar</button>
+                <button type="submit" disabled={guardandoVip} className="flex-1 py-2.5 bg-amber-600 hover:bg-opacity-90 text-white rounded-xl text-xs font-bold shadow">
                   {guardandoVip ? 'Guardando...' : 'Guardar Cambios'}
                 </button>
               </div>
@@ -1860,25 +1812,71 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
         </div>
       )}
 
+      {/* SECCIÓN SOLICITUD DE BUTACAS */}
       {tab === 'solicitudes' && (
-        <div className="bg-white rounded-2xl border p-5 space-y-3">
-          <h3 className="font-bold">Bandeja de Solicitudes</h3>
-          {solicitudes.map((s) => (
-            <div key={s.id} className="p-3 border rounded-xl flex justify-between items-center">
-              <div>
-                <p className="font-bold text-sm">{s.egresado_nombre} (+{s.cantidad_solicitada})</p>
-                <p className="text-xs text-slate-500">{s.observacion}</p>
-              </div>
-              {s.estado === 'pendiente' ? (
-                <div className="flex gap-2">
-                  <button onClick={() => resolverSolicitud(s, true)} className="px-3 py-1 bg-emerald-600 text-white rounded text-xs font-bold">Aprobar</button>
-                  <button onClick={() => resolverSolicitud(s, false)} className="px-3 py-1 bg-rose-100 text-rose-700 rounded text-xs font-bold">Rechazar</button>
-                </div>
-              ) : (
-                <span className="text-xs font-bold uppercase">{s.estado}</span>
-              )}
-            </div>
-          ))}
+        <div className="bg-white rounded-2xl border p-5 space-y-4">
+          <div className="border-b pb-3">
+            <h3 className="font-bold text-base text-[#6B1D2F]">Bandeja de Solicitudes de Butacas Extra</h3>
+            <p className="text-xs text-slate-500">Aprobá o rechazá las peticiones de lugares adicionales de los egresados.</p>
+          </div>
+
+          <div className="max-h-96 overflow-y-auto space-y-3">
+            {solicitudes.length === 0 ? (
+              <p className="text-center text-slate-400 py-8">No hay solicitudes de butacas pendientes.</p>
+            ) : (
+              solicitudes.map((s) => {
+                const egr = egresados.find((e) => e.id === s.egresado_id);
+                const numeroWp = egr?.celular ? egr.celular.replace(/\D/g, '') : '';
+                const linkWpAprobado = numeroWp
+                  ? `https://wa.me/549${numeroWp}?text=Hola%20${encodeURIComponent(s.egresado_nombre)},%20tu%20solicitud%20de%20+${s.cantidad_solicitada}%20butaca(s)%20extra%20para%20la%20Colación%202026%20fue%20APROBADA.%20Ya%20podes%20ingresar%20al%20portal%20a%20cargar%20a%20tus%20invitados.`
+                  : '';
+
+                return (
+                  <div key={s.id} className="p-4 border rounded-2xl flex flex-wrap justify-between items-center gap-3 bg-slate-50/50">
+                    <div>
+                      <p className="font-bold text-sm text-slate-900">{s.egresado_nombre} <span className="text-indigo-600 font-extrabold">(+{s.cantidad_solicitada} butacas)</span></p>
+                      <p className="text-xs text-slate-500">DNI: {s.egresado_dni} · Motivo: <i>{s.observacion || 'Sin observación'}</i></p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {s.estado === 'pendiente' ? (
+                        <>
+                          <button
+                            onClick={() => resolverSolicitud(s, true)}
+                            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs"
+                          >
+                            ✓ Aprobar y Asignar
+                          </button>
+                          <button
+                            onClick={() => resolverSolicitud(s, false)}
+                            className="px-3.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold"
+                          >
+                            Rechazar
+                          </button>
+                        </>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <span className={`px-3 py-1 rounded-full font-bold uppercase text-xs ${s.estado === 'aprobada' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                            {s.estado}
+                          </span>
+                          {s.estado === 'aprobada' && numeroWp && (
+                            <a
+                              href={linkWpAprobado}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-xs"
+                            >
+                              <MessageCircle className="w-3.5 h-3.5" /> Notificar WhatsApp
+                            </a>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
         </div>
       )}
 
@@ -1895,7 +1893,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
             </div>
           </div>
 
-          {/* Métricas rápidas */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200">
               <p className="text-[11px] text-emerald-700 font-bold">Egresados Presentes</p>
@@ -1915,7 +1912,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
             </div>
           </div>
 
-          {/* Controles de Filtro y Buscador */}
           <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
             <div className="relative w-full sm:w-72">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
@@ -1942,7 +1938,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
             </div>
           </div>
 
-          {/* Listado */}
           <div className="max-h-96 overflow-y-auto border rounded-xl divide-y text-xs">
             {egresadosFiltradosCeremonial.length === 0 ? (
               <p className="text-center text-slate-400 py-8">No se encontraron egresados con los filtros seleccionados.</p>
@@ -1985,7 +1980,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
             <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs">+ Crear Usuario</button>
           </form>
 
-          {/* Modal flotante para cambiar contraseña de usuario */}
           {modalCambiarClaveUsr && (
             <div className="bg-amber-50 border border-amber-300 p-4 rounded-xl flex flex-wrap items-center justify-between gap-3">
               <span className="text-xs font-bold text-amber-900">Nueva contraseña para <b>{modalCambiarClaveUsr.nombre}</b> ({modalCambiarClaveUsr.email}):</span>
@@ -2008,7 +2002,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
             </div>
           )}
 
-          {/* Modal para Editar Usuario del Sistema */}
           {modalEditarUsr && (
             <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
               <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl overflow-hidden border">
@@ -2075,7 +2068,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                   <p className="text-xs text-slate-500">{u.email} · Rol: <strong className="uppercase">{u.rol}</strong></p>
                 </div>
                 <div className="flex items-center gap-2">
-                  {/* Botón Editar Usuario del Sistema */}
                   <button
                     onClick={() => abrirModalEditarUsuario(u)}
                     className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-lg text-xs font-bold flex items-center gap-1"
