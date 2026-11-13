@@ -17,7 +17,7 @@ export default function App() {
   const [vistaActual, setVistaActual] = useState('egresado'); // 'egresado', 'puerta', 'admin'
 
   return (
-    <div className="min-h-screen bg-gray-100 font-sans text-gray-900 relative">
+    <div className="min-h-screen bg-gray-100 font-sans text-gray-900">
       {/* Encabezado Institucional ESRN N° 005 */}
       <header className="bg-[#6B1D2F] text-white shadow-md">
         <div className="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center">
@@ -31,8 +31,8 @@ export default function App() {
             </div>
           </div>
           
-          {/* Accesos de navegación y Panel Administrativo claramente visible */}
-          <div className="flex gap-1.5 text-xs items-center">
+          {/* Accesos secundarios discretos */}
+          <div className="flex gap-1.5 text-xs">
             <button 
               onClick={() => setVistaActual('egresado')} 
               className={`px-2.5 py-1 rounded transition ${vistaActual === 'egresado' ? 'bg-white text-[#6B1D2F] font-bold' : 'text-rose-200 hover:text-white'}`}
@@ -47,31 +47,20 @@ export default function App() {
             </button>
             <button 
               onClick={() => setVistaActual('admin')} 
-              className={`px-3 py-1 rounded bg-amber-500 hover:bg-amber-600 text-white font-bold shadow transition ${vistaActual === 'admin' ? 'ring-2 ring-white' : ''}`}
+              className={`px-2.5 py-1 rounded transition ${vistaActual === 'admin' ? 'bg-amber-500 text-white font-bold' : 'text-rose-200 hover:text-white'}`}
             >
-              Administración
+              Admin
             </button>
           </div>
         </div>
       </header>
 
       {/* Contenido Dinámico */}
-      <main className="py-8 pb-20">
+      <main className="py-8">
         {vistaActual === 'egresado' && <PortalPrincipalDNI />}
         {vistaActual === 'puerta' && <PanelPuerta />}
         {vistaActual === 'admin' && <PanelAdmin />}
       </main>
-
-      {/* Botón Flotante de Ayuda por WhatsApp */}
-      <a
-        href="https://wa.me/5492996326617?text=Hola,%20necesito%20ayuda%20con%20el%20sistema%20de%20acceso%20de%20la%20Colación%20ESRN%20N°%20005."
-        target="_blank"
-        rel="noopener noreferrer"
-        className="fixed bottom-6 right-6 z-50 bg-green-600 hover:bg-green-700 text-white p-3.5 rounded-full shadow-2xl flex items-center justify-center transition-transform hover:scale-110 cursor-pointer"
-        title="¿Necesitas ayuda? Escribinos por WhatsApp"
-      >
-        <Phone className="w-6 h-6" />
-      </a>
     </div>
   );
 }
@@ -85,12 +74,7 @@ function PortalPrincipalDNI() {
   const [datosPersona, setDatosPersona] = useState(null);
   const [error, setError] = useState('');
   const [celular, setCelular] = useState('');
-  const [invitados, setInvitados] = useState([
-    { id: 1, nombre: '', dni: '', grupal: false },
-    { id: 2, nombre: '', dni: '', grupal: false },
-    { id: 3, nombre: '', dni: '', grupal: false },
-    { id: 4, nombre: '', dni: '', grupal: false }
-  ]);
+  const [tipoIngreso, setTipoIngreso] = useState('individual');
   const qrRef = useRef(null);
 
   const buscarPorDNI = async (e) => {
@@ -102,21 +86,11 @@ function PortalPrincipalDNI() {
     if (tipoUsuario === 'docente') tabla = 'docentes';
     if (tipoUsuario === 'vip') tabla = 'vip';
 
-    let { data, error: err } = await supabase
+    const { data, error: err } = await supabase
       .from(tabla)
       .select('*')
       .eq('dni', dni.trim())
       .single();
-
-    if ((err || !data) && tipoUsuario === 'vip') {
-      const resAlt = await supabase
-        .from('invitados_especiales')
-        .select('*')
-        .eq('dni', dni.trim())
-        .single();
-      data = resAlt.data;
-      err = resAlt.error;
-    }
 
     if (err || !data) {
       setError(`No se encontró ningún registro con ese DNI en ${tipoUsuario.toUpperCase()}.`);
@@ -132,33 +106,20 @@ function PortalPrincipalDNI() {
     setDatosPersona(data);
     if (tipoUsuario === 'egresado') {
       if (data.celular) setCelular(data.celular);
+      if (data.tipo_ingreso) setTipoIngreso(data.tipo_ingreso);
     }
-  };
-
-  const actualizarInvitado = (index, campo, valor) => {
-    const nuevosInvitados = [...invitados];
-    nuevosInvitados[index][campo] = valor;
-    setInvitados(nuevosInvitados);
   };
 
   const guardarDatosEstudiante = async () => {
-    for (let i = 0; i < invitados.length; i++) {
-      const inv = invitados[i];
-      if ((inv.nombre && !inv.dni) || (!inv.nombre && inv.dni)) {
-        alert(`Por favor revise el invitado #${i + 1}: complete tanto el nombre como el DNI, o déjelos vacíos.`);
-        return;
-      }
-    }
-
     const { error: updateErr } = await supabase
       .from('egresados')
-      .update({ celular })
+      .update({ celular, tipo_ingreso: tipoIngreso })
       .eq('id', datosPersona.id);
 
     if (updateErr) {
       alert('Error al guardar los cambios.');
     } else {
-      alert('¡Datos e invitados guardados con éxito! Recuerde revisar bien los datos antes del acto.');
+      alert('¡Datos guardados con éxito!');
     }
   };
 
@@ -183,6 +144,7 @@ function PortalPrincipalDNI() {
     }
   };
 
+  // Función infalible para extraer exactamente 'nombre_completo' o cualquier variante de nombre de Supabase
   const obtenerNombreReal = (obj) => {
     if (!obj) return '';
     return (
@@ -203,7 +165,8 @@ function PortalPrincipalDNI() {
     );
   };
 
-  const descargarTarjeta1080x1920 = (nombreQR, subtituloQR, textoRolQR) => {
+  // Función de descarga para generar la tarjeta 1080x1920 con depuración directa
+  const descargarTarjeta1080x1920 = () => {
     const svgElement = qrRef.current?.querySelector('svg');
     if (!svgElement) {
       alert('No se pudo generar la imagen del QR.');
@@ -224,12 +187,15 @@ function PortalPrincipalDNI() {
           canvas.height = 1920;
           const ctx = canvas.getContext('2d');
 
+          // 1. Fondo general gris claro
           ctx.fillStyle = '#F3F4F6';
           ctx.fillRect(0, 0, 1080, 1920);
 
+          // 2. Encabezado institucional Borgoña (#6B1D2F)
           ctx.fillStyle = '#6B1D2F';
           ctx.fillRect(0, 0, 1080, 380);
 
+          // Texto de cabecera
           ctx.fillStyle = '#FFFFFF';
           ctx.font = 'bold 42px sans-serif';
           ctx.textAlign = 'center';
@@ -239,6 +205,7 @@ function PortalPrincipalDNI() {
           ctx.font = '26px sans-serif';
           ctx.fillText('Acto de Colación 2026 — Pase Oficial de Ingreso', 540, 180);
 
+          // 3. Tarjeta blanca central con bordes redondeados
           ctx.fillStyle = '#FFFFFF';
           ctx.beginPath();
           if (typeof ctx.roundRect === 'function') {
@@ -251,36 +218,48 @@ function PortalPrincipalDNI() {
           ctx.strokeStyle = '#E5E7EB';
           ctx.stroke();
 
+          // 4. Extracción exacta del nombre y DNI
+          const nombreTitular = obtenerNombreReal(datosPersona) || 'ASISTENTE ESRN N° 005';
+          const dniTitular = datosPersona.dni || dni;
+
+          // Nombre grande y destacado arriba
           ctx.fillStyle = '#111827';
           ctx.font = 'bold 44px sans-serif';
-          ctx.fillText(String(nombreQR).toUpperCase(), 540, 580);
+          ctx.fillText(String(nombreTitular).toUpperCase(), 540, 580);
 
           ctx.fillStyle = '#4B5563';
           ctx.font = '32px sans-serif';
-          ctx.fillText(subtituloQR, 540, 650);
+          ctx.fillText(`DNI: ${dniTitular}`, 540, 650);
 
+          // Rol aclarado abajo
           ctx.fillStyle = '#6B1D2F';
           ctx.font = 'bold 28px sans-serif';
-          ctx.fillText(textoRolQR, 540, 710);
+          let textoRol = 'EGRESADO / TITULADO';
+          if (tipoUsuario === 'docente') textoRol = 'DOCENTE';
+          if (tipoUsuario === 'vip') textoRol = 'INVITADO VIP / AUTORIDAD';
+          ctx.fillText(textoRol, 540, 710);
 
+          // 5. Dibujar el Código QR centrado (500x500 px)
           ctx.drawImage(qrImage, 290, 780, 500, 500);
 
+          // 6. Información de modalidad
           ctx.fillStyle = '#374151';
           ctx.font = 'bold 30px sans-serif';
-          ctx.fillText('Pase Autorizado para Ingreso', 540, 1370);
+          ctx.fillText(tipoUsuario === 'egresado' ? `Modalidad: Ingreso ${tipoIngreso.toUpperCase()}` : `Pase Nominal ${tipoUsuario.toUpperCase()}`, 540, 1370);
 
           ctx.fillStyle = '#6B7280';
           ctx.font = '24px sans-serif';
-          ctx.fillText('Presentar en puerta (digital o impreso)', 540, 1430);
+          ctx.fillText('Válido para el ingreso al establecimiento', 540, 1430);
 
+          // 7. Pie de página institucional
           ctx.fillStyle = '#9CA3AF';
           ctx.font = '24px sans-serif';
-          ctx.fillText('ESRN N° 005 — Cipolletti', 540, 1810);
+          ctx.fillText('Presentar este pase en puerta (digital o impreso)', 540, 1810);
 
           const pngUrl = canvas.toDataURL('image/png');
           const downloadLink = document.createElement('a');
           downloadLink.href = pngUrl;
-          downloadLink.download = `Pase-Oficial-${nombreQR.replace(/\s+/g, '-')}.png`;
+          downloadLink.download = `Pase-Oficial-ESRN005-${dniTitular}.png`;
           document.body.appendChild(downloadLink);
           downloadLink.click();
           document.body.removeChild(downloadLink);
@@ -289,23 +268,18 @@ function PortalPrincipalDNI() {
           alert('Hubo un error al procesar la imagen del pase.');
         }
       };
+      qrImage.onerror = () => {
+        alert('Error al cargar la imagen del código QR.');
+      };
       qrImage.src = blobURL;
     } catch (err) {
       console.error('Error en descarga:', err);
+      alert('No se pudo iniciar la descarga de la tarjeta.');
     }
   };
 
   const nombreMostrado = obtenerNombreReal(datosPersona);
-  const valorQRPrincipal = datosPersona ? `ESRN005-${tipoUsuario.toUpperCase()}-${datosPersona.dni || dni}-${nombreMostrado}` : '';
-  const textoRolTarjeta = tipoUsuario === 'egresado' ? 'EGRESADO' : tipoUsuario === 'docente' ? 'DOCENTE' : 'INVITADO VIP';
-
-  const gruposInvitados = invitados.reduce((acc, inv) => {
-    if (!inv.nombre) return acc;
-    const claveGrupo = inv.grupal ? 'Grupo General' : `Individual-${inv.nombre}`;
-    if (!acc[claveGrupo]) acc[claveGrupo] = [];
-    acc[claveGrupo].push(inv);
-    return acc;
-  }, {});
+  const valorQRTexto = datosPersona ? `ESRN005-${tipoUsuario.toUpperCase()}-${datosPersona.dni || dni}-${nombreMostrado}` : '';
 
   return (
     <div className="max-w-md mx-auto px-4 space-y-4">
@@ -313,11 +287,7 @@ function PortalPrincipalDNI() {
       <div className="bg-gradient-to-r from-[#6B1D2F] to-[#8a253c] text-white rounded-xl shadow-md p-5 text-center">
         <h2 className="text-xl font-bold mb-1">¡Bienvenidos al Acto de Colación 2026! 🎉</h2>
         <p className="text-xs text-rose-100 leading-relaxed">
-          {tipoUsuario === 'egresado' 
-            ? 'Ingresá tu DNI, descargá tu QR personal justo abajo de tu nombre, cargá tus 4 invitados revisando bien los datos y tildá si entran en grupo o individual.'
-            : tipoUsuario === 'docente'
-            ? 'Ingresá tu DNI docente para consultar tu estado y descargar tu pase QR nominal.'
-            : 'Ingresá tu DNI VIP para consultar y descargar tu pase institucional.'}
+          Seleccioná tu rol (Egresado, Docente o VIP) e ingresá tu número de DNI para gestionar tu acceso, verificar plazas, registrar tu WhatsApp y descargar tu tarjeta de pase QR en alta resolución (1080x1920) para la entrada.
         </p>
       </div>
 
@@ -326,7 +296,7 @@ function PortalPrincipalDNI() {
         <h3 className="text-lg font-bold text-[#6B1D2F] mb-1 text-center">Portal de Acceso por DNI</h3>
         <p className="text-xs text-gray-500 text-center mb-4">Seleccioná tu rol y consultá tu pase</p>
 
-        {/* Selector de Pestañas */}
+        {/* Selector de Pestañas Egresados / Docentes / VIP */}
         <div className="flex gap-1 mb-6 bg-gray-100 p-1 rounded-lg">
           <button 
             type="button"
@@ -373,118 +343,68 @@ function PortalPrincipalDNI() {
           </form>
         ) : (
           <div className="space-y-4 text-left">
-            {/* Tarjeta de Identidad y QR Justo Abajo del Nombre */}
-            <div className="p-4 bg-gray-50 rounded-lg border text-center space-y-3">
-              <div>
-                <h3 className="font-bold text-lg text-gray-800">{nombreMostrado || 'Asistente ESRN N° 005'}</h3>
-                <p className="text-xs text-gray-500">DNI: {datosPersona.dni || dni}</p>
-                <p className="text-[11px] uppercase tracking-wider text-[#6B1D2F] font-semibold mt-1">
-                  {textoRolTarjeta}
-                </p>
-              </div>
-
-              {/* Botón de descarga del QR personal justo abajo del nombre */}
-              <button 
-                type="button"
-                onClick={() => descargarTarjeta1080x1920(nombreMostrado, `DNI: ${datosPersona.dni || dni}`, textoRolTarjeta)}
-                className="w-full py-2.5 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 shadow cursor-pointer"
-              >
-                <Download className="w-4 h-4" /> Descargar Mi QR Personal
-              </button>
-            </div>
-
-            {/* QR Oculto para canvas */}
-            <div className="hidden" ref={qrRef}>
-              <QRCodeSVG value={valorQRPrincipal} size={300} level="H" includeMargin={true} />
+            <div className="p-4 bg-gray-50 rounded-lg border text-center">
+              <h3 className="font-bold text-lg text-gray-800">{nombreMostrado || 'Nombre no especificado en tabla'}</h3>
+              <p className="text-xs text-gray-500">DNI: {datosPersona.dni || dni}</p>
+              <p className="text-[11px] uppercase tracking-wider text-[#6B1D2F] font-semibold mt-1">
+                {tipoUsuario === 'egresado' ? 'Egresado / Titulado' : tipoUsuario === 'docente' ? 'Docente' : 'Invitado VIP / Autoridad'}
+              </p>
             </div>
 
             {tipoUsuario === 'egresado' && (
               <>
-                {/* Campo de WhatsApp / Celular Resaltado en Verde Fuerte */}
-                <div className="border-2 border-emerald-500 bg-emerald-50 p-4 rounded-xl space-y-2 shadow-sm">
-                  <label className="block text-xs font-bold text-emerald-900 uppercase tracking-wide">📱 Tu Celular / WhatsApp</label>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Celular / WhatsApp</label>
                   <input 
                     type="text"
                     placeholder="Ej: 2994444444"
                     value={celular}
                     onChange={(e) => setCelular(e.target.value)}
-                    className="w-full px-3 py-2 border-2 border-emerald-500 rounded-lg text-sm bg-white focus:ring-2 focus:ring-emerald-700 outline-none font-semibold text-emerald-900"
+                    className="w-full px-3 py-2 border rounded-lg text-sm"
                   />
-                  <p className="text-[11px] text-emerald-800 font-medium">Necesario para recibir notificaciones institucionales y avisos de plazas extra.</p>
+                  <p className="text-xs text-gray-400 mt-0.5">Para recibir avisos institucionales.</p>
                 </div>
 
-                {/* Formulario de Invitados Resaltado en Bordó */}
-                <div className="border-2 border-[#6B1D2F] bg-rose-50/40 p-4 rounded-xl space-y-3 shadow-sm">
-                  {/* Advertencia en Amarillo Intenso */}
-                  <div className="bg-amber-100 border-2 border-amber-400 p-3 rounded-lg shadow-xs">
-                    <p className="text-xs font-bold text-amber-900">⚠️ Recomendación Importante</p>
-                    <p className="text-[11px] text-amber-900 mt-0.5 font-medium">
-                      Por favor, <strong>revise bien los datos</strong> de los invitados antes de guardar. Si tilda la casilla lateral, ingresarán juntos en grupo; si la deja sin tilde, ingresarán de forma individual con su propio QR.
-                    </p>
-                  </div>
-
-                  <h4 className="font-bold text-sm text-[#6B1D2F]">Carga de Invitados (Máximo 4)</h4>
-                  {invitados.map((inv, idx) => (
-                    <div key={inv.id} className="p-3 bg-white border border-[#6B1D2F]/30 rounded-lg space-y-2 shadow-xs">
-                      <div className="flex justify-between items-center">
-                        <span className="text-xs font-bold text-[#6B1D2F]">Invitado #{idx + 1}</span>
-                        <label className="flex items-center gap-1.5 text-xs text-gray-700 font-medium cursor-pointer">
-                          <input 
-                            type="checkbox"
-                            checked={inv.grupal}
-                            onChange={(e) => actualizarInvitado(idx, 'grupal', e.target.checked)}
-                            className="rounded text-[#6B1D2F] focus:ring-[#6B1D2F]"
-                          />
-                          <span>Entrada Grupal</span>
-                        </label>
-                      </div>
-                      <input 
-                        type="text"
-                        placeholder="Nombre y Apellido"
-                        value={inv.nombre}
-                        onChange={(e) => actualizarInvitado(idx, 'nombre', e.target.value)}
-                        className="w-full px-2.5 py-1.5 border rounded text-xs bg-white"
-                      />
-                      <input 
-                        type="text"
-                        placeholder="DNI"
-                        value={inv.dni}
-                        onChange={(e) => actualizarInvitado(idx, 'dni', e.target.value)}
-                        className="w-full px-2.5 py-1.5 border rounded text-xs bg-white"
-                      />
-                    </div>
-                  ))}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Modalidad de Ingreso</label>
+                  <select 
+                    value={tipoIngreso} 
+                    onChange={(e) => setTipoIngreso(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
+                  >
+                    <option value="individual">🪪 Individual (Cada invitado con su QR)</option>
+                    <option value="grupal">👥 Grupal (Un solo QR para todo el grupo)</option>
+                  </select>
                 </div>
 
                 <button 
                   onClick={guardarDatosEstudiante}
-                  className="w-full py-2 bg-[#6B1D2F] text-white rounded-lg text-sm font-medium hover:bg-opacity-90 shadow"
+                  className="w-full py-1.5 bg-gray-800 text-white rounded-lg text-sm font-medium hover:bg-gray-700"
                 >
-                  Guardar Datos e Invitados
+                  Guardar Cambios
                 </button>
-
-                {/* Botones de Descarga de Pases QR para Invitados */}
-                {Object.keys(gruposInvitados).length > 0 && (
-                  <div className="space-y-2 pt-2 border-t">
-                    <h4 className="font-bold text-xs text-gray-700 uppercase tracking-wider">Pases QR de Invitados:</h4>
-                    {Object.entries(gruposInvitados).map(([grupo, lista], i) => (
-                      <button 
-                        key={i}
-                        type="button"
-                        onClick={() => descargarTarjeta1080x1920(
-                          grupo.startsWith('Individual') ? lista[0].nombre : `Grupo de ${nombreMostrado} (${lista.length} pers.)`,
-                          grupo.startsWith('Individual') ? `DNI: ${lista[0].dni}` : `Integrantes: ${lista.map(x => x.nombre).join(', ')}`,
-                          'INVITADO FAMILIAR'
-                        )}
-                        className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 shadow cursor-pointer"
-                      >
-                        <Download className="w-4 h-4" /> Descargar QR ({grupo.startsWith('Individual') ? lista[0].nombre : `Entrada Grupal (${lista.length} inv.)`})
-                      </button>
-                    ))}
-                  </div>
-                )}
               </>
             )}
+
+            {/* Visualización del código QR (oculta para el canvas) y Botón de Descarga 1080x1920 */}
+            <div className="p-4 bg-white border-2 border-dashed border-gray-300 rounded-xl text-center space-y-3">
+              <div ref={qrRef} className="w-36 h-36 bg-white mx-auto flex items-center justify-center p-1 rounded border hidden">
+                <QRCodeSVG value={valorQRTexto} size={130} level="H" includeMargin={true} />
+              </div>
+              
+              <div className="p-3 bg-gray-50 rounded-lg border">
+                <p className="text-xs font-bold text-[#6B1D2F] mb-1">Pase Oficial Generado</p>
+                <p className="text-[11px] text-gray-500">Incluye el nombre del titular, DNI, institución y código QR en formato vertical (1080x1920).</p>
+              </div>
+
+              <button 
+                type="button"
+                onClick={descargarTarjeta1080x1920}
+                className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-semibold flex items-center justify-center gap-2 shadow cursor-pointer"
+              >
+                <Download className="w-4 h-4" /> Descargar Tarjeta Pase (1080x1920)
+              </button>
+            </div>
 
             {/* Botón de No Asistiré / Liberar Cupo */}
             <div className="pt-2 border-t">
@@ -537,7 +457,7 @@ function PanelPuerta() {
         <div className="p-10 bg-gray-900 text-white rounded-2xl text-center mb-6 shadow-md">
           <div className="w-16 h-16 border-4 border-dashed border-[#6B1D2F] rounded-full mx-auto flex items-center justify-center mb-3 animate-spin">📷</div>
           <p className="font-bold text-lg">Escáner Continuo Activo</p>
-          <p className="text-xs text-gray-400 mt-1">Listo para escanear QRs (Egresados, Grupos y Docentes)</p>
+          <p className="text-xs text-gray-400 mt-1">Listo para escanear QRs (Egresados, Docentes y VIP)</p>
         </div>
       )}
 
@@ -587,7 +507,7 @@ function PanelAdmin() {
       <h2 className="text-2xl font-bold text-[#6B1D2F] mb-1">Panel de Gestión — ESRN N° 005</h2>
       <p className="text-xs text-gray-500 mb-6">Aforo total: 525 butacas | Liberación automática de cupos por inasistencia</p>
 
-      <div className="bg-white p-4 rounded-xl shadow-sm border mb-6 flex justify-between items-center">
+      <div className="badge-whatsapp bg-white p-4 rounded-xl shadow-sm border mb-6 flex justify-between items-center">
         <div>
           <h3 className="font-bold text-sm text-gray-800">Sistema de Notificaciones por WhatsApp</h3>
           <p className="text-xs text-gray-500">Habilita o deshabilita los botones de aviso rápido `wa.me`</p>
