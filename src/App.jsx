@@ -66,11 +66,11 @@ export default function App() {
 }
 
 // ==========================================
-// 1. PORTAL PRINCIPAL UNIFICADO POR DNI (Egresados, Docentes y VIP)
+// 1. PORTAL PRINCIPAL UNIFICADO POR DNI (Egresados y Docentes)
 // ==========================================
 function PortalPrincipalDNI() {
   const [dni, setDni] = useState('');
-  const [tipoUsuario, setTipoUsuario] = useState('egresado'); // 'egresado', 'docente', 'vip'
+  const [tipoUsuario, setTipoUsuario] = useState('egresado'); // 'egresado' o 'docente'
   const [datosPersona, setDatosPersona] = useState(null);
   const [error, setError] = useState('');
   const [celular, setCelular] = useState('');
@@ -82,10 +82,7 @@ function PortalPrincipalDNI() {
     setError('');
     setDatosPersona(null);
 
-    let tabla = 'egresados';
-    if (tipoUsuario === 'docente') tabla = 'docentes';
-    if (tipoUsuario === 'vip') tabla = 'vip';
-
+    const tabla = tipoUsuario === 'egresado' ? 'egresados' : 'docentes';
     const { data, error: err } = await supabase
       .from(tabla)
       .select('*')
@@ -93,7 +90,7 @@ function PortalPrincipalDNI() {
       .single();
 
     if (err || !data) {
-      setError(`No se encontró ningún registro con ese DNI en ${tipoUsuario.toUpperCase()}.`);
+      setError(`No se encontró ningún registro con ese DNI en ${tipoUsuario === 'egresado' ? 'Egresados' : 'Docentes'}.`);
       return;
     }
 
@@ -123,12 +120,9 @@ function PortalPrincipalDNI() {
   };
 
   const marcarNoAsistire = async () => {
-    if (!window.confirm('¿Estás seguro de que no asistirás? Esto liberará tu lugar.')) return;
+    if (!window.confirm('¿Estás seguro de que no asistirás? Esto liberará tu lugar y el de tus invitados.')) return;
 
-    let tabla = 'egresados';
-    if (tipoUsuario === 'docente') tabla = 'docentes';
-    if (tipoUsuario === 'vip') tabla = 'vip';
-
+    const tabla = tipoUsuario === 'egresado' ? 'egresados' : 'docentes';
     const { error: updateErr } = await supabase
       .from(tabla)
       .update({ activo: false })
@@ -143,7 +137,7 @@ function PortalPrincipalDNI() {
     }
   };
 
-  // Función de descarga para generar la tarjeta 1080x1920 con el nombre real arriba y el rol correspondiente abajo
+  // Función robusta de descarga para generar la tarjeta 1080x1920 extrayendo el nombre correctamente
   const descargarTarjeta1080x1920 = () => {
     const svgElement = qrRef.current?.querySelector('svg');
     if (!svgElement) {
@@ -196,23 +190,10 @@ function PortalPrincipalDNI() {
           ctx.strokeStyle = '#E5E7EB';
           ctx.stroke();
 
-          // 4. Extracción robusta del nombre (Arriba) y Rol aclarado abajo
-          const nombreTitular = (
-            datosPersona.nombre || 
-            datosPersona.name || 
-            datosPersona.apellido || 
-            datosPersona.docente || 
-            datosPersona.profesor || 
-            datosPersona.fullname || 
-            datosPersona.full_name || 
-            datosPersona.docente_nombre || 
-            datosPersona.egresado || 
-            (datosPersona.apellidos ? `${datosPersona.apellidos}, ${datosPersona.nombre}` : '') || 
-            'ASISTENTE ESRN N° 005'
-          );
+          // 4. Extracción robusta del nombre del docente / egresado de Supabase
+          const nombreTitular = datosPersona.nombre || datosPersona.name || datosPersona.apellido || datosPersona.docente || datosPersona.profesor || 'DOCENTE ESRN N° 005';
           const dniTitular = datosPersona.dni || dni;
 
-          // Nombre grande y destacado arriba
           ctx.fillStyle = '#111827';
           ctx.font = 'bold 44px sans-serif';
           ctx.fillText(String(nombreTitular).toUpperCase(), 540, 580);
@@ -221,13 +202,9 @@ function PortalPrincipalDNI() {
           ctx.font = '32px sans-serif';
           ctx.fillText(`DNI: ${dniTitular}`, 540, 650);
 
-          // Rol aclarado abajo (DOCENTE, VIP o EGRESADO)
           ctx.fillStyle = '#6B1D2F';
           ctx.font = 'bold 28px sans-serif';
-          let textoRol = 'EGRESADO / TITULADO';
-          if (tipoUsuario === 'docente') textoRol = 'DOCENTE';
-          if (tipoUsuario === 'vip') textoRol = 'INVITADO VIP / AUTORIDAD';
-          ctx.fillText(textoRol, 540, 710);
+          ctx.fillText(tipoUsuario === 'egresado' ? 'EGRESADO / TITULADO' : 'PERSONAL DOCENTE', 540, 710);
 
           // 5. Dibujar el Código QR centrado (500x500 px)
           ctx.drawImage(qrImage, 290, 780, 500, 500);
@@ -235,7 +212,7 @@ function PortalPrincipalDNI() {
           // 6. Información de modalidad
           ctx.fillStyle = '#374151';
           ctx.font = 'bold 30px sans-serif';
-          ctx.fillText(tipoUsuario === 'egresado' ? `Modalidad: Ingreso ${tipoIngreso.toUpperCase()}` : `Pase Nominal ${tipoUsuario.toUpperCase()}`, 540, 1370);
+          ctx.fillText(tipoUsuario === 'egresado' ? `Modalidad: Ingreso ${tipoIngreso.toUpperCase()}` : 'Pase Nominal Docente', 540, 1370);
 
           ctx.fillStyle = '#6B7280';
           ctx.font = '24px sans-serif';
@@ -268,20 +245,7 @@ function PortalPrincipalDNI() {
     }
   };
 
-  const nombreMostrado = datosPersona ? (
-    datosPersona.nombre || 
-    datosPersona.name || 
-    datosPersona.apellido || 
-    datosPersona.docente || 
-    datosPersona.profesor || 
-    datosPersona.fullname || 
-    datosPersona.full_name || 
-    datosPersona.docente_nombre || 
-    datosPersona.egresado || 
-    (datosPersona.apellidos ? `${datosPersona.apellidos}, ${datosPersona.nombre}` : '') || 
-    'Asistente'
-  ) : '';
-
+  const nombreMostrado = datosPersona ? (datosPersona.nombre || datosPersona.name || datosPersona.apellido || datosPersona.docente || datosPersona.profesor || 'Docente') : '';
   const valorQRTexto = datosPersona ? `ESRN005-${tipoUsuario.toUpperCase()}-${datosPersona.dni || dni}-${nombreMostrado}` : '';
 
   return (
@@ -290,7 +254,7 @@ function PortalPrincipalDNI() {
       <div className="bg-gradient-to-r from-[#6B1D2F] to-[#8a253c] text-white rounded-xl shadow-md p-5 text-center">
         <h2 className="text-xl font-bold mb-1">¡Bienvenidos al Acto de Colación 2026! 🎉</h2>
         <p className="text-xs text-rose-100 leading-relaxed">
-          Seleccioná tu rol (Egresado, Docente o VIP) e ingresá tu número de DNI para gestionar tu acceso, verificar plazas, registrar tu WhatsApp y descargar tu tarjeta de pase QR en alta resolución (1080x1920) para la entrada.
+          Seleccioná tu rol (Egresado o Docente) e ingresá tu número de DNI para gestionar tu acceso, verificar plazas, registrar tu WhatsApp, configurar tu modalidad y descargar tu tarjeta de pase QR en alta resolución (1080x1920) para la entrada.
         </p>
       </div>
 
@@ -299,8 +263,8 @@ function PortalPrincipalDNI() {
         <h3 className="text-lg font-bold text-[#6B1D2F] mb-1 text-center">Portal de Acceso por DNI</h3>
         <p className="text-xs text-gray-500 text-center mb-4">Seleccioná tu rol y consultá tu pase</p>
 
-        {/* Selector de Pestañas Egresados / Docentes / VIP */}
-        <div className="flex gap-1 mb-6 bg-gray-100 p-1 rounded-lg">
+        {/* Selector de Pestañas Egresados / Docentes */}
+        <div className="flex gap-2 mb-6 bg-gray-100 p-1 rounded-lg">
           <button 
             type="button"
             onClick={() => { setTipoUsuario('egresado'); setDatosPersona(null); setError(''); }}
@@ -315,20 +279,13 @@ function PortalPrincipalDNI() {
           >
             📚 Docente
           </button>
-          <button 
-            type="button"
-            onClick={() => { setTipoUsuario('vip'); setDatosPersona(null); setError(''); }}
-            className={`flex-1 py-2 rounded-md font-medium text-xs transition ${tipoUsuario === 'vip' ? 'bg-amber-600 text-white shadow' : 'text-gray-600 hover:text-gray-900'}`}
-          >
-            ⭐ VIP
-          </button>
         </div>
 
         {!datosPersona ? (
           <form onSubmit={buscarPorDNI} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                DNI de {tipoUsuario.toUpperCase()}
+                DNI de {tipoUsuario === 'egresado' ? 'Egresado' : 'Docente'}
               </label>
               <input 
                 type="text" 
@@ -350,7 +307,7 @@ function PortalPrincipalDNI() {
               <h3 className="font-bold text-lg text-gray-800">{nombreMostrado}</h3>
               <p className="text-xs text-gray-500">DNI: {datosPersona.dni || dni}</p>
               <p className="text-[11px] uppercase tracking-wider text-[#6B1D2F] font-semibold mt-1">
-                {tipoUsuario === 'egresado' ? 'Egresado / Titulado' : tipoUsuario === 'docente' ? 'Docente' : 'Invitado VIP / Autoridad'}
+                {tipoUsuario === 'egresado' ? 'Egresado / Titulado' : 'Personal Docente ESRN N° 005'}
               </p>
             </div>
 
@@ -397,7 +354,7 @@ function PortalPrincipalDNI() {
               
               <div className="p-3 bg-gray-50 rounded-lg border">
                 <p className="text-xs font-bold text-[#6B1D2F] mb-1">Pase Oficial Generado</p>
-                <p className="text-[11px] text-gray-500">Incluye el nombre del titular, DNI, institución y código QR en formato vertical (1080x1920).</p>
+                <p className="text-[11px] text-gray-500">Incluye datos del titular, DNI, institución y código QR en formato vertical (1080x1920).</p>
               </div>
 
               <button 
@@ -460,7 +417,7 @@ function PanelPuerta() {
         <div className="p-10 bg-gray-900 text-white rounded-2xl text-center mb-6 shadow-md">
           <div className="w-16 h-16 border-4 border-dashed border-[#6B1D2F] rounded-full mx-auto flex items-center justify-center mb-3 animate-spin">📷</div>
           <p className="font-bold text-lg">Escáner Continuo Activo</p>
-          <p className="text-xs text-gray-400 mt-1">Listo para escanear QRs (Egresados, Docentes y VIP)</p>
+          <p className="text-xs text-gray-400 mt-1">Listo para escanear QRs (Egresados y Docentes)</p>
         </div>
       )}
 
