@@ -388,34 +388,35 @@ function PortalPrincipalDNI() {
 
             {tipoUsuario === 'egresado' && (
               <>
-                {/* Campo de WhatsApp / Celular Destacado */}
-                <div className="border-2 border-emerald-300 bg-emerald-50/60 p-4 rounded-xl space-y-2 shadow-sm">
+                {/* Campo de WhatsApp / Celular Resaltado en Verde Fuerte */}
+                <div className="border-2 border-emerald-500 bg-emerald-50 p-4 rounded-xl space-y-2 shadow-sm">
                   <label className="block text-xs font-bold text-emerald-900 uppercase tracking-wide">📱 Tu Celular / WhatsApp</label>
                   <input 
                     type="text"
                     placeholder="Ej: 2994444444"
                     value={celular}
                     onChange={(e) => setCelular(e.target.value)}
-                    className="w-full px-3 py-2 border border-emerald-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-emerald-600 outline-none"
+                    className="w-full px-3 py-2 border-2 border-emerald-500 rounded-lg text-sm bg-white focus:ring-2 focus:ring-emerald-700 outline-none font-semibold text-emerald-900"
                   />
-                  <p className="text-[11px] text-emerald-700">Necesario para recibir notificaciones institucionales y avisos de plazas extra.</p>
+                  <p className="text-[11px] text-emerald-800 font-medium">Necesario para recibir notificaciones institucionales y avisos de plazas extra.</p>
                 </div>
 
-                {/* Carga de los 4 invitados base con tilde para grupal/individual, recomendación y destacado visual */}
-                <div className="border-2 border-rose-200 bg-gradient-to-br from-rose-50/70 to-white p-4 rounded-xl space-y-3 shadow-sm">
-                  <div className="bg-amber-50 border border-amber-200 p-3 rounded-lg">
-                    <p className="text-xs font-bold text-amber-800">⚠️ Recomendación Importante</p>
-                    <p className="text-[11px] text-amber-700 mt-0.5">
+                {/* Formulario de Invitados Resaltado en Bordó */}
+                <div className="border-2 border-[#6B1D2F] bg-rose-50/40 p-4 rounded-xl space-y-3 shadow-sm">
+                  {/* Advertencia en Amarillo Intenso */}
+                  <div className="bg-amber-100 border-2 border-amber-400 p-3 rounded-lg shadow-xs">
+                    <p className="text-xs font-bold text-amber-900">⚠️ Recomendación Importante</p>
+                    <p className="text-[11px] text-amber-900 mt-0.5 font-medium">
                       Por favor, <strong>revise bien los datos</strong> de los invitados antes de guardar. Si tilda la casilla lateral, ingresarán juntos en grupo; si la deja sin tilde, ingresarán de forma individual con su propio QR.
                     </p>
                   </div>
 
                   <h4 className="font-bold text-sm text-[#6B1D2F]">Carga de Invitados (Máximo 4)</h4>
                   {invitados.map((inv, idx) => (
-                    <div key={inv.id} className="p-3 bg-white border rounded-lg space-y-2 shadow-xs">
+                    <div key={inv.id} className="p-3 bg-white border border-[#6B1D2F]/30 rounded-lg space-y-2 shadow-xs">
                       <div className="flex justify-between items-center">
-                        <span className="text-xs font-bold text-gray-700">Invitado #{idx + 1}</span>
-                        <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
+                        <span className="text-xs font-bold text-[#6B1D2F]">Invitado #{idx + 1}</span>
+                        <label className="flex items-center gap-1.5 text-xs text-gray-700 font-medium cursor-pointer">
                           <input 
                             type="checkbox"
                             checked={inv.grupal}
@@ -445,7 +446,7 @@ function PortalPrincipalDNI() {
 
                 <button 
                   onClick={guardarDatosEstudiante}
-                  className="w-full py-2 bg-gray-800 text-white rounded-lg text-sm font-medium hover:bg-gray-700 shadow"
+                  className="w-full py-2 bg-[#6B1D2F] text-white rounded-lg text-sm font-medium hover:bg-opacity-90 shadow"
                 >
                   Guardar Datos e Invitados
                 </button>
