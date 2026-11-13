@@ -531,15 +531,10 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
 
   return (
     <div className="max-w-md mx-auto space-y-4">
-      {/* Tarjeta de Bienvenida Instructiva */}
-      <div className="bg-gradient-to-r from-[#6B1D2F] to-[#8a253c] text-white rounded-xl shadow-md p-5 text-center space-y-2">
-        <h2 className="text-xl font-bold">¡Bienvenidos al Acto de Colación 2026! 🎉</h2>
+      <div className="bg-gradient-to-r from-[#6B1D2F] to-[#8a253c] text-white rounded-xl shadow-md p-5 text-center">
+        <h2 className="text-xl font-bold mb-1">¡Bienvenidos al Acto de Colación 2026! 🎉</h2>
         <p className="text-xs text-rose-100 leading-relaxed">
-          {tipoUsuario === 'egresado'
-            ? 'Ingresá tu DNI, descargá tu QR personal justo abajo de tu nombre, cargá tus invitados revisando bien los datos y tildá si entran en grupo o individual.'
-            : tipoUsuario === 'docente'
-            ? 'Ingresá tu DNI docente para consultar tu estado y descargar tu pase QR nominal.'
-            : 'Ingresá tu DNI VIP para consultar y descargar tu pase institucional.'}
+          Seleccioná tu rol e ingresá tu DNI para consultar tu pase QR institucional.
         </p>
       </div>
 
