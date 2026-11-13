@@ -144,10 +144,11 @@ function PortalPrincipalDNI() {
     }
   };
 
-  // Función infalible para extraer el nombre de cualquier columna posible en Supabase
+  // Función infalible para extraer exactamente 'nombre_completo' o cualquier variante de nombre de Supabase
   const obtenerNombreReal = (obj) => {
     if (!obj) return '';
     return (
+      obj.nombre_completo || 
       obj.nombre || 
       obj.name || 
       obj.apellido || 
@@ -506,7 +507,7 @@ function PanelAdmin() {
       <h2 className="text-2xl font-bold text-[#6B1D2F] mb-1">Panel de Gestión — ESRN N° 005</h2>
       <p className="text-xs text-gray-500 mb-6">Aforo total: 525 butacas | Liberación automática de cupos por inasistencia</p>
 
-      <div className="bg-white p-4 rounded-xl shadow-sm border mb-6 flex justify-between items-center">
+      <div className="badge-whatsapp bg-white p-4 rounded-xl shadow-sm border mb-6 flex justify-between items-center">
         <div>
           <h3 className="font-bold text-sm text-gray-800">Sistema de Notificaciones por WhatsApp</h3>
           <p className="text-xs text-gray-500">Habilita o deshabilita los botones de aviso rápido `wa.me`</p>
@@ -533,7 +534,7 @@ function PanelAdmin() {
               <div key={estudiante.id} className="p-4 flex flex-col md:flex-row justify-between items-center gap-4">
                 <div>
                   <h4 className="font-bold text-gray-900">{estudiante.nombre}</h4>
-                  <p className="text-xs text-gray-500">DNI: {estudiante.dni} | Cel: {estudiante.celular || 'No registrado'}`;</p>
+                  <p className="text-xs text-gray-500">DNI: {estudiante.dni} | Cel: {estudiante.celular || 'No registrado'}</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <button 
@@ -542,7 +543,7 @@ function PanelAdmin() {
                   >
                     {estudiante.activo ? '🚫 Marcar "No Asiste"' : '✅ Reactivar'}
                   </button>
-                  {whatsapp_activo && estudiante.celular && estudiante.activo && (
+                  {whatsappActivo && estudiante.celular && estudiante.activo && (
                     <a href={linkWp} target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-medium">
                       💬 Avisar
                     </a>
