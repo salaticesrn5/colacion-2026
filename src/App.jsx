@@ -757,14 +757,22 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
 function PanelAdministracion({ perfilStaff, config, egresados, invitados, docentes, especiales, solicitudes, usuariosSistema, totalEgresados, totalDocentes, totalEspeciales, totalCuposFamiliares, vacantesLibres, recargar, notify }) {
   const [tab, setTab] = useState('egresados');
   const [filtroEgresado, setFiltroEgresado] = useState('');
-  const [modalEditarEgr, setModalEditarEgr] = useState(null); // Egresado en edición completa
+  const [filtroDocente, setFiltroDocente] = useState('');
   
-  // Estados de edición del modal
+  const [modalEditarEgr, setModalEditarEgr] = useState(null); // Egresado en edición completa
+  const [modalEditarDoc, setModalEditarDoc] = useState(null); // Docente en edición completa
+  
+  // Estados de edición Egresado
   const [editNombre, setEditNombre] = useState('');
   const [editDni, setEditDni] = useState('');
   const [editCelular, setEditCelular] = useState('');
   const [editCupo, setEditCupo] = useState(4);
   const [guardandoEdicion, setGuardandoEdicion] = useState(false);
+
+  // Estados de edición Docente
+  const [editDocNombre, setEditDocNombre] = useState('');
+  const [editDocDni, setEditDocDni] = useState('');
+  const [guardandoDocente, setGuardandoDocente] = useState(false);
 
   // Estados para la solapa de reportes (Acreditación en Vivo)
   const [filtroCeremonial, setFiltroCeremonial] = useState('TODOS');
@@ -811,6 +819,36 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
       notify('Error al actualizar: ' + err.message, 'error');
     } finally {
       setGuardandoEdicion(false);
+    }
+  };
+
+  const abrirModalEditarDocente = (doc) => {
+    setModalEditarDoc(doc);
+    setEditDocNombre(doc.nombre_completo || '');
+    setEditDocDni(doc.dni || '');
+  };
+
+  const guardarEdicionDocente = async (e) => {
+    e.preventDefault();
+    if (!modalEditarDoc) return;
+    setGuardandoDocente(true);
+    try {
+      const { error } = await supabase
+        .from('docentes')
+        .update({
+          nombre_completo: editDocNombre.trim().toUpperCase(),
+          dni: sanitizeDNI(editDocDni)
+        })
+        .eq('id', modalEditarDoc.id);
+
+      if (error) throw error;
+      notify('Docente actualizado correctamente.');
+      setModalEditarDoc(null);
+      await recargar();
+    } catch (err) {
+      notify('Error al actualizar docente: ' + err.message, 'error');
+    } finally {
+      setGuardandoDocente(false);
     }
   };
 
@@ -959,6 +997,11 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     (e.dni || '').includes(filtroEgresado)
   );
 
+  const docentesFiltrados = docentes.filter((d) =>
+    (d.nombre_completo || '').toLowerCase().includes(filtroDocente.toLowerCase()) ||
+    (d.dni || '').includes(filtroDocente)
+  );
+
   const egresadosFiltradosCeremonial = egresados.filter((e) => {
     const matchTexto = (e.nombre_completo || '').toLowerCase().includes(busquedaCeremonial.toLowerCase()) || (e.dni || '').includes(busquedaCeremonial);
     if (filtroCeremonial === 'PRESENTES') return matchTexto && e.asistio;
@@ -1091,21 +1134,21 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
         </div>
       )}
 
-      {/* MODAL DE EDICIÓN COMPLETA DEL EGRESADO */}
+      {/* MODAL DE EDICIÓN COMPLETA DEL EGRESADO (Cabecera Bordó, campos blancos) */}
       {modalEditarEgr && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl">
-            <div className="flex justify-between items-start border-b pb-3">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl overflow-hidden border">
+            <div className="bg-[#6B1D2F] text-white p-4 flex justify-between items-center">
               <div>
-                <h3 className="font-bold text-base text-[#6B1D2F]">Editar Egresado y Acompañantes</h3>
-                <p className="text-xs text-slate-500">Actualizá los datos personales y el cupo.</p>
+                <h3 className="font-bold text-base">Editar Egresado y Acompañantes</h3>
+                <p className="text-xs text-rose-100">Modificá datos personales, celular y cupo.</p>
               </div>
-              <button onClick={() => setModalEditarEgr(null)} className="p-1 rounded-lg text-slate-400 hover:bg-slate-100">
+              <button onClick={() => setModalEditarEgr(null)} className="p-1.5 rounded-lg text-white/80 hover:bg-white/10">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={guardarEdicionEgresado} className="space-y-3.5">
+            <form onSubmit={guardarEdicionEgresado} className="p-5 space-y-3.5">
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">Nombre y Apellido</label>
                 <input
@@ -1113,7 +1156,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                   required
                   value={editNombre}
                   onChange={(e) => setEditNombre(e.target.value)}
-                  className="w-full px-3 py-2 border rounded-xl text-sm outline-none focus:border-[#6B1D2F]"
+                  className="w-full px-3 py-2 bg-white border rounded-xl text-sm outline-none focus:border-[#6B1D2F]"
                 />
               </div>
 
@@ -1125,7 +1168,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                   maxLength={8}
                   value={editDni}
                   onChange={(e) => setEditDni(sanitizeDNI(e.target.value))}
-                  className="w-full px-3 py-2 border rounded-xl text-sm font-mono outline-none focus:border-[#6B1D2F]"
+                  className="w-full px-3 py-2 bg-white border rounded-xl text-sm font-mono outline-none focus:border-[#6B1D2F]"
                 />
               </div>
 
@@ -1136,7 +1179,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                   value={editCelular}
                   onChange={(e) => setEditCelular(e.target.value)}
                   placeholder="Ej: 2994444444"
-                  className="w-full px-3 py-2 border rounded-xl text-sm outline-none focus:border-[#6B1D2F]"
+                  className="w-full px-3 py-2 bg-white border rounded-xl text-sm outline-none focus:border-[#6B1D2F]"
                 />
                 {editCelular && (
                   <a
@@ -1159,7 +1202,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                   required
                   value={editCupo}
                   onChange={(e) => setEditCupo(e.target.value)}
-                  className="w-full px-3 py-2 border rounded-xl text-sm outline-none focus:border-[#6B1D2F]"
+                  className="w-full px-3 py-2 bg-white border rounded-xl text-sm outline-none focus:border-[#6B1D2F]"
                 />
               </div>
 
@@ -1184,7 +1227,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                 <button
                   type="button"
                   onClick={() => setModalEditarEgr(null)}
-                  className="flex-1 py-2.5 border rounded-xl text-xs font-semibold"
+                  className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold hover:bg-slate-50"
                 >
                   Cancelar
                 </button>
@@ -1204,7 +1247,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
       {tab === 'docentes' && (
         <div className="bg-white rounded-2xl border p-5 space-y-4">
           <div className="flex flex-wrap justify-between items-center gap-2">
-            <h3 className="font-bold">Padrón de Docentes</h3>
+            <h3 className="font-bold">Padrón de Docentes ({docentes.length})</h3>
             <div className="flex gap-2">
               <input ref={fileDocRef} type="file" accept=".csv,.txt" onChange={handleImportarCSVDocentes} className="hidden" />
               <button onClick={() => fileDocRef.current?.click()} className="px-3 py-2 bg-indigo-50 text-indigo-700 border rounded-xl text-xs font-bold flex items-center gap-1">
@@ -1217,20 +1260,109 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
               )}
             </div>
           </div>
+
+          {/* Buscador de docentes */}
+          <div className="relative">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+            <input
+              type="text"
+              placeholder="Filtrar docentes por nombre o DNI..."
+              value={filtroDocente}
+              onChange={(e) => setFiltroDocente(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 rounded-xl border text-sm outline-none focus:border-[#6B1D2F]"
+            />
+          </div>
+
           <div className="max-h-96 overflow-y-auto divide-y">
-            {docentes.map((d) => (
-              <div key={d.id} className="py-2.5 flex justify-between items-center text-sm">
-                <div><span className="font-semibold">{d.nombre_completo}</span> <span className="text-xs text-slate-500">({d.dni})</span></div>
-                <button onClick={async () => {
-                  const nuevoActivo = d.activo === false ? true : false;
-                  await supabase.from('docentes').update({ activo: nuevoActivo }).eq('id', d.id);
-                  await recargar();
-                  notify(nuevoActivo ? 'Docente reactivado.' : 'Docente marcado como No Asiste.');
-                }} className={`px-2.5 py-1 rounded text-xs font-semibold ${d.activo === false ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
-                  {d.activo === false ? 'Reactivar' : 'Marcar No Asiste'}
+            {docentesFiltrados.length === 0 ? (
+              <p className="text-center text-slate-400 py-6">No se encontraron docentes.</p>
+            ) : (
+              docentesFiltrados.map((d) => (
+                <div key={d.id} className="py-2.5 flex justify-between items-center text-sm">
+                  <div>
+                    <span className="font-semibold">{d.nombre_completo}</span> 
+                    <span className="text-xs text-slate-500 ml-1">({d.dni})</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {/* Botón Editar Docente */}
+                    <button
+                      onClick={() => abrirModalEditarDocente(d)}
+                      className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-lg text-xs font-bold flex items-center gap-1"
+                    >
+                      <Edit2 className="w-3 h-3" /> Editar
+                    </button>
+
+                    <button onClick={async () => {
+                      const nuevoActivo = d.activo === false ? true : false;
+                      await supabase.from('docentes').update({ activo: nuevoActivo }).eq('id', d.id);
+                      await recargar();
+                      notify(nuevoActivo ? 'Docente reactivado.' : 'Docente marcado como No Asiste.');
+                    }} className={`px-2.5 py-1 rounded text-xs font-semibold ${d.activo === false ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                      {d.activo === false ? 'Reactivar' : 'Marcar No Asiste'}
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE EDICIÓN DE DOCENTE (Cabecera Bordó, campos blancos) */}
+      {modalEditarDoc && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl overflow-hidden border">
+            <div className="bg-[#6B1D2F] text-white p-4 flex justify-between items-center">
+              <div>
+                <h3 className="font-bold text-base">Editar Docente</h3>
+                <p className="text-xs text-rose-100">Actualizar datos institucionales.</p>
+              </div>
+              <button onClick={() => setModalEditarDoc(null)} className="p-1.5 rounded-lg text-white/80 hover:bg-white/10">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={guardarEdicionDocente} className="p-5 space-y-3.5">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Nombre y Apellido</label>
+                <input
+                  type="text"
+                  required
+                  value={editDocNombre}
+                  onChange={(e) => setEditDocNombre(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border rounded-xl text-sm outline-none focus:border-[#6B1D2F]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">DNI (8 dígitos)</label>
+                <input
+                  type="text"
+                  required
+                  maxLength={8}
+                  value={editDocDni}
+                  onChange={(e) => setEditDocDni(sanitizeDNI(e.target.value))}
+                  className="w-full px-3 py-2 bg-white border rounded-xl text-sm font-mono outline-none focus:border-[#6B1D2F]"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-3 border-t">
+                <button
+                  type="button"
+                  onClick={() => setModalEditarDoc(null)}
+                  className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold hover:bg-slate-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={guardandoDocente}
+                  className="flex-1 py-2.5 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-xl text-xs font-bold shadow"
+                >
+                  {guardandoDocente ? 'Guardando...' : 'Guardar Cambios'}
                 </button>
               </div>
-            ))}
+            </form>
           </div>
         </div>
       )}
