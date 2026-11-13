@@ -4,7 +4,7 @@ import {
   Users, UserCheck, Shield, QrCode, Upload, Trash2, Plus, Search,
   CheckCircle2, XCircle, AlertTriangle, Lock, Unlock, Download,
   LogOut, Eye, Edit3, Save, X, RefreshCw, MessageCircle, Award,
-  UserPlus, FileSpreadsheet, Check, ArrowRight, Building2
+  UserPlus, FileSpreadsheet, Check, ArrowRight, Building2, KeyRound, Power
 } from 'lucide-react';
 
 // ============================================================================
@@ -120,6 +120,14 @@ export default function App() {
         .maybeSingle();
 
       if (data) {
+        if (data.activo === false) {
+          await supabase.auth.signOut();
+          setPerfilStaff(null);
+          setSession(null);
+          setVista('login');
+          notify('Tu cuenta se encuentra desactivada. Contactá al Administrador.', 'error');
+          return;
+        }
         setPerfilStaff(data);
         setVista(data.rol === 'puerta' ? 'puerta' : 'admin');
       } else {
@@ -932,11 +940,20 @@ function PanelAdministracion({
   const [nuevoVipCargo, setNuevoVipCargo] = useState('');
   const [nuevoVipDni, setNuevoVipDni] = useState('');
 
+  // Estados para Usuarios del Sistema (Alta, Edición, Activar/Desactivar, Contraseña)
   const [usrNombre, setUsrNombre] = useState('');
   const [usrEmail, setUsrEmail] = useState('');
   const [usrPass, setUsrPass] = useState('');
   const [usrRol, setUsrRol] = useState('puerta');
   const [creandoUsr, setCreandoUsr] = useState(false);
+
+  const [editandoUsrId, setEditandoUsrId] = useState(null);
+  const [editUsrNombre, setEditUsrNombre] = useState('');
+  const [editUsrRol, setEditUsrRol] = useState('puerta');
+
+  const [passModalUsr, setPassModalUsr] = useState(null);
+  const [nuevaPassInput, setNuevaPassInput] = useState('');
+  const [cambiandoPass, setCambiandoPass] = useState(false);
 
   const cambiarEtapaGlobal = async (nuevaEtapa) => {
     try {
@@ -1271,6 +1288,9 @@ function PanelAdministracion({
     }
   };
 
+  // ==========================================================================
+  // GESTIÓN COMPLETA DE USUARIOS DEL SISTEMA
+  // ==========================================================================
   const crearUsuarioSistema = async (e) => {
     e.preventDefault();
     if (!esAdmin) return;
@@ -1316,8 +1336,86 @@ function PanelAdministracion({
     }
   };
 
+  const iniciarEdicionUsuario = (u) => {
+    setEditandoUsrId(u.id);
+    setEditUsrNombre(u.nombre || '');
+    setEditUsrRol(u.rol || 'puerta');
+  };
+
+  const guardarEdicionUsuario = async (u) => {
+    if (!editUsrNombre.trim()) {
+      notify('El nombre del usuario no puede quedar vacío.', 'error');
+      return;
+    }
+    try {
+      const { error } = await supabase
+        .from('usuarios_sistema')
+        .update({
+          nombre: editUsrNombre.trim(),
+          rol: editUsrRol,
+        })
+        .eq('id', u.id);
+
+      if (error) throw error;
+      setEditandoUsrId(null);
+      await recargar();
+      notify(`Datos de ${editUsrNombre.trim()} actualizados.`);
+    } catch (err) {
+      notify('Error al actualizar usuario: ' + err.message, 'error');
+    }
+  };
+
+  const toggleActivoUsuario = async (u) => {
+    if (u.email === perfilStaff?.email) {
+      notify('No podés desactivar tu propia cuenta de Administrador en uso.', 'warning');
+      return;
+    }
+    const nuevoEstado = u.activo === false ? true : false;
+    try {
+      const { error } = await supabase
+        .from('usuarios_sistema')
+        .update({ activo: nuevoEstado })
+        .eq('id', u.id);
+
+      if (error) throw error;
+      await recargar();
+      notify(
+        nuevoEstado
+          ? `Usuario ${u.nombre} ACTIVADO.`
+          : `Usuario ${u.nombre} DESACTIVADO (bloqueado para ingresar).`
+      );
+    } catch (err) {
+      notify('Error al cambiar estado del usuario: ' + err.message, 'error');
+    }
+  };
+
+  const handleCambiarPasswordUsuario = async (e) => {
+    e.preventDefault();
+    if (!passModalUsr) return;
+    if (nuevaPassInput.length < 6) {
+      notify('La nueva contraseña debe tener al menos 6 caracteres.', 'error');
+      return;
+    }
+    setCambiandoPass(true);
+    try {
+      const { error } = await supabase.rpc('admin_cambiar_password', {
+        target_email: passModalUsr.email,
+        nueva_password: nuevaPassInput,
+      });
+      if (error) throw error;
+
+      notify(`Contraseña actualizada correctamente para ${passModalUsr.nombre}.`);
+      setPassModalUsr(null);
+      setNuevaPassInput('');
+    } catch (err) {
+      notify('Error cambiando contraseña: ' + err.message, 'error');
+    } finally {
+      setCambiandoPass(false);
+    }
+  };
+
   const eliminarUsuarioSistema = async (id) => {
-    if (!window.confirm('¿Eliminar este acceso del sistema?')) return;
+    if (!window.confirm('¿Eliminar definitivamente este acceso del sistema?')) return;
     await supabase.from('usuarios_sistema').delete().eq('id', id);
     await recargar();
     notify('Usuario eliminado.');
@@ -1903,7 +2001,7 @@ function PanelAdministracion({
           <div>
             <h3 className="font-bold text-slate-900">Gestión de Usuarios y Roles</h3>
             <p className="text-xs text-slate-500">
-              Creá cuentas para Coordinadores y personal de Control de Acceso (Puerta) sin cerrar tu sesión.
+              Creá, editá, activá/desactivá o cambiá la contraseña de Administradores, Coordinadores y Personal de Puerta.
             </p>
           </div>
 
@@ -1954,25 +2052,166 @@ function PanelAdministracion({
             </button>
           </form>
 
-          <div className="divide-y divide-slate-100 text-sm">
-            {usuariosSistema.map((u) => (
-              <div key={u.id} className="py-3 flex items-center justify-between">
-                <div>
-                  <p className="font-bold text-slate-900">{u.nombre}</p>
-                  <p className="text-xs text-slate-500">
-                    {u.email} · Rol: <strong className="uppercase">{u.rol}</strong>
-                  </p>
-                </div>
-                {u.email !== perfilStaff?.email && (
-                  <button
-                    onClick={() => eliminarUsuarioSistema(u.id)}
-                    className="text-rose-500 hover:text-rose-700 p-1.5"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                )}
+          {passModalUsr && (
+            <form
+              onSubmit={handleCambiarPasswordUsuario}
+              className="p-4 rounded-xl bg-amber-50 border border-amber-300 flex flex-wrap items-center justify-between gap-3"
+            >
+              <div className="text-sm text-amber-950">
+                Nueva contraseña para <strong>{passModalUsr.nombre}</strong> ({passModalUsr.email}):
               </div>
-            ))}
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="password"
+                  required
+                  minLength={6}
+                  placeholder="Mínimo 6 caracteres"
+                  value={nuevaPassInput}
+                  onChange={(e) => setNuevaPassInput(e.target.value)}
+                  className="px-3 py-2 rounded-xl border border-amber-400 bg-white text-sm"
+                />
+                <button
+                  type="submit"
+                  disabled={cambiandoPass}
+                  className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs"
+                >
+                  {cambiandoPass ? 'Guardando...' : 'Guardar Clave'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPassModalUsr(null);
+                    setNuevaPassInput('');
+                  }}
+                  className="px-3 py-2 rounded-xl bg-white border border-slate-300 text-xs font-semibold text-slate-700"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </form>
+          )}
+
+          <div className="divide-y divide-slate-100 text-sm">
+            {usuariosSistema.map((u) => {
+              const estaEditando = editandoUsrId === u.id;
+              const estaActivo = u.activo !== false;
+
+              return (
+                <div
+                  key={u.id}
+                  className={`py-3.5 flex flex-wrap items-center justify-between gap-3 ${
+                    !estaActivo ? 'opacity-60' : ''
+                  }`}
+                >
+                  {estaEditando ? (
+                    <div className="flex flex-wrap items-center gap-2 flex-1">
+                      <input
+                        type="text"
+                        value={editUsrNombre}
+                        onChange={(e) => setEditUsrNombre(e.target.value)}
+                        className="px-3 py-1.5 rounded-lg border border-slate-300 text-sm font-medium"
+                      />
+                      <select
+                        value={editUsrRol}
+                        onChange={(e) => setEditUsrRol(e.target.value)}
+                        className="px-3 py-1.5 rounded-lg border border-slate-300 text-sm bg-white"
+                      >
+                        <option value="puerta">Control de Acceso (Puerta)</option>
+                        <option value="coordinador">Coordinador</option>
+                        <option value="admin">Administrador</option>
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => guardarEdicionUsuario(u)}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-bold"
+                      >
+                        <Save className="w-3.5 h-3.5" />
+                        Guardar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditandoUsrId(null)}
+                        className="px-2.5 py-1.5 rounded-lg bg-slate-100 text-slate-700 text-xs font-semibold"
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  ) : (
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <p className="font-bold text-slate-900">{u.nombre}</p>
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[11px] font-bold uppercase ${
+                            estaActivo
+                              ? 'bg-emerald-100 text-emerald-700'
+                              : 'bg-rose-100 text-rose-700'
+                          }`}
+                        >
+                          {estaActivo ? 'Activo' : 'Inactivo'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500">
+                        {u.email} · Rol: <strong className="uppercase">{u.rol}</strong>
+                      </p>
+                    </div>
+                  )}
+
+                  {!estaEditando && (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => iniciarEdicionUsuario(u)}
+                        title="Modificar nombre o rol"
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                        Editar
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPassModalUsr(u);
+                          setNuevaPassInput('');
+                        }}
+                        title="Cambiar contraseña"
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-semibold"
+                      >
+                        <KeyRound className="w-3.5 h-3.5" />
+                        Clave
+                      </button>
+
+                      {u.email !== perfilStaff?.email && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => toggleActivoUsuario(u)}
+                            title={estaActivo ? 'Desactivar usuario' : 'Activar usuario'}
+                            className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold border ${
+                              estaActivo
+                                ? 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+                                : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'
+                            }`}
+                          >
+                            <Power className="w-3.5 h-3.5" />
+                            {estaActivo ? 'Desactivar' : 'Activar'}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => eliminarUsuarioSistema(u.id)}
+                            title="Eliminar usuario"
+                            className="text-rose-500 hover:text-rose-700 p-1.5"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
