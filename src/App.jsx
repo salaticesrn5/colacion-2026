@@ -2270,3 +2270,5 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
     </div>
   );
 }
+
+
