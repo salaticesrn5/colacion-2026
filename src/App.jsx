@@ -3,8 +3,8 @@ import { createClient } from '@supabase/supabase-js';
 import {
   Users, UserCheck, Shield, QrCode, Upload, Trash2, Plus, Search,
   CheckCircle2, XCircle, AlertTriangle, Lock, Unlock, Download,
-  LogOut, Eye, EyeOff, Edit3, Save, X, RefreshCw, MessageCircle, Award,
-  UserPlus, FileSpreadsheet, Check, ArrowRight, Building2, KeyRound, Power
+  LogOut, Eye, Edit3, Save, X, RefreshCw, MessageCircle, Award,
+  UserPlus, FileSpreadsheet, Check, ArrowRight, Building2
 } from 'lucide-react';
 
 // ============================================================================
@@ -34,36 +34,6 @@ const CUPO_BASE_DEFECTO = 4;
 
 const getQrImageUrl = (code) =>
   `https://api.qrserver.com/v1/create-qr-code/?size=240x240&margin=10&data=${encodeURIComponent(code)}`;
-
-// Logo institucional ESRN N° 005 (colocar archivo public/logo-esrn5.png) con respaldo automático
-function LogoEscuela({ size = 'md' }) {
-  const [imgError, setImgError] = useState(false);
-  const dim = size === 'lg' ? 'w-16 h-16' : 'w-10 h-10';
-  const iconDim = size === 'lg' ? 'w-8 h-8' : 'w-6 h-6';
-
-  if (imgError) {
-    return (
-      <div
-        className={`${dim} flex items-center justify-center bg-[#800020]/30 border border-amber-300/40 rounded-xl shrink-0`}
-      >
-        <Award className={`${iconDim} text-amber-300`} />
-      </div>
-    );
-  }
-
-  return (
-    <div
-      className={`${dim} flex items-center justify-center bg-white/95 p-1 rounded-xl shadow-sm border border-amber-300/40 overflow-hidden shrink-0`}
-    >
-      <img
-        src="/logo-esrn5.png"
-        alt="Escudo ESRN N° 005"
-        onError={() => setImgError(true)}
-        className="w-full h-full object-contain"
-      />
-    </div>
-  );
-}
 
 // Parser robusto para archivos CSV (coma o punto y coma, con o sin comillas)
 const parseCSV = (text) => {
@@ -150,14 +120,6 @@ export default function App() {
         .maybeSingle();
 
       if (data) {
-        if (data.activo === false) {
-          await supabase.auth.signOut();
-          setPerfilStaff(null);
-          setSession(null);
-          setVista('login');
-          notify('Tu cuenta se encuentra desactivada. Contactá al Administrador.', 'error');
-          return;
-        }
         setPerfilStaff(data);
         setVista(data.rol === 'puerta' ? 'puerta' : 'admin');
       } else {
@@ -218,14 +180,10 @@ export default function App() {
     setVista('portal');
   };
 
-  // Cálculo dinámico de aforo considerando solo Egresados y Docentes ACTIVOS
-  const egresadosActivos = egresados.filter((e) => e.activo !== false);
-  const docentesActivos = docentes.filter((d) => d.activo !== false);
-
-  const totalEgresados = egresadosActivos.length;
-  const totalDocentes = docentesActivos.length;
+  const totalEgresados = egresados.length;
+  const totalDocentes = docentes.length;
   const totalEspeciales = especiales.length;
-  const totalCuposFamiliares = egresadosActivos.reduce(
+  const totalCuposFamiliares = egresados.reduce(
     (acc, e) => acc + (Number(e.cupo_asignado) || 0),
     0
   );
@@ -234,12 +192,12 @@ export default function App() {
   const vacantesLibres = CAPACIDAD_MAXIMA - totalOcupado;
 
   return (
-    <div className="min-h-screen bg-[#fdf8f9] text-slate-900 font-sans">
+    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
       {toast && (
         <div
           className={`fixed bottom-5 right-5 z-50 flex items-center gap-3 px-5 py-3.5 rounded-xl shadow-xl text-white text-sm font-medium transition-all ${
             toast.type === 'error'
-              ? 'bg-rose-700'
+              ? 'bg-rose-600'
               : toast.type === 'warning'
               ? 'bg-amber-600'
               : 'bg-emerald-600'
@@ -254,17 +212,18 @@ export default function App() {
         </div>
       )}
 
-      {/* HEADER INSTITUCIONAL EN COLOR BORDÓ */}
-      <header className="bg-[#561122] text-white border-b border-[#3d0a16] sticky top-0 z-40 shadow-md">
+      <header className="bg-slate-900 text-white border-b border-slate-800 sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <LogoEscuela size="md" />
+            <div className="bg-emerald-500/20 border border-emerald-400/30 p-2 rounded-xl">
+              <Award className="w-6 h-6 text-emerald-400" />
+            </div>
             <div>
-              <h1 className="font-bold text-base sm:text-lg leading-tight tracking-tight text-white">
+              <h1 className="font-bold text-base sm:text-lg leading-tight tracking-tight">
                 Colación 2026 — ESRN N° 005
               </h1>
-              <p className="text-xs text-rose-200/90">
-                Cipolletti · Aforo Máximo: {CAPACIDAD_MAXIMA} butacas · Tiempo Real
+              <p className="text-xs text-slate-400">
+                Aforo Máximo: {CAPACIDAD_MAXIMA} butacas · Tiempo Real
               </p>
             </div>
           </div>
@@ -274,20 +233,20 @@ export default function App() {
               <>
                 <button
                   onClick={() => setVista('portal')}
-                  className={`px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition ${
+                  className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition ${
                     vista === 'portal'
-                      ? 'bg-white text-[#561122] shadow-sm'
-                      : 'bg-[#72182e] text-rose-100 hover:bg-[#881d38]'
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
                   }`}
                 >
                   Portal Egresados
                 </button>
                 <button
                   onClick={() => setVista('login')}
-                  className={`px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition ${
+                  className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition ${
                     vista === 'login'
-                      ? 'bg-amber-400 text-[#3d0a16] shadow-sm'
-                      : 'bg-[#72182e] text-rose-100 hover:bg-[#881d38]'
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
                   }`}
                 >
                   Acceso Personal / Puerta
@@ -295,15 +254,15 @@ export default function App() {
               </>
             ) : (
               <>
-                <span className="hidden sm:inline-flex items-center gap-1.5 bg-[#3d0a16]/90 border border-rose-300/30 text-rose-100 px-3 py-1 rounded-full text-xs font-medium">
-                  <Shield className="w-3.5 h-3.5 text-amber-300" />
+                <span className="hidden sm:inline-flex items-center gap-1.5 bg-emerald-950/80 border border-emerald-700/50 text-emerald-300 px-3 py-1 rounded-full text-xs font-medium">
+                  <Shield className="w-3.5 h-3.5" />
                   {perfilStaff?.nombre} ({perfilStaff?.rol?.toUpperCase()})
                 </span>
 
                 {(perfilStaff?.rol === 'admin' || perfilStaff?.rol === 'coordinador') && (
                   <button
                     onClick={() => setVista(vista === 'admin' ? 'puerta' : 'admin')}
-                    className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-400 hover:bg-amber-300 text-[#3d0a16] transition shadow-sm"
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition"
                   >
                     {vista === 'admin' ? 'Vista Puerta' : 'Panel Gestión'}
                   </button>
@@ -311,7 +270,7 @@ export default function App() {
 
                 <button
                   onClick={handleLogout}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#8a1c37] hover:bg-[#a12241] border border-rose-300/20 text-white transition"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white transition"
                 >
                   <LogOut className="w-3.5 h-3.5" />
                   Salir
@@ -324,7 +283,7 @@ export default function App() {
 
       <main className="max-w-7xl mx-auto px-4 py-6">
         {loadingAuth ? (
-          <div className="flex justify-center items-center py-24 text-[#6B1D2F] gap-2">
+          <div className="flex justify-center items-center py-24 text-slate-500 gap-2">
             <RefreshCw className="w-5 h-5 animate-spin" />
             <span>Cargando sistema...</span>
           </div>
@@ -373,12 +332,11 @@ export default function App() {
 }
 
 // ============================================================================
-// LOGIN PERSONAL (Con ícono de ojo para ver contraseña)
+// LOGIN PERSONAL
 // ============================================================================
 function LoginStaff({ onSuccess, notify }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [verPassword, setVerPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const handleLogin = async (e) => {
@@ -400,9 +358,9 @@ function LoginStaff({ onSuccess, notify }) {
   };
 
   return (
-    <div className="max-w-md mx-auto mt-10 bg-white rounded-2xl shadow-sm border border-rose-200/80 p-6 sm:p-8">
+    <div className="max-w-md mx-auto mt-10 bg-white rounded-2xl shadow-sm border border-slate-200 p-6 sm:p-8">
       <div className="flex items-center gap-3 mb-6">
-        <div className="bg-[#6B1D2F]/10 text-[#6B1D2F] p-3 rounded-xl">
+        <div className="bg-indigo-100 text-indigo-600 p-3 rounded-xl">
           <Lock className="w-6 h-6" />
         </div>
         <div>
@@ -424,7 +382,7 @@ function LoginStaff({ onSuccess, notify }) {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="usuario@esrn5.edu.ar"
-            className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#6B1D2F] focus:border-[#6B1D2F] outline-none text-sm"
+            className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none text-sm"
           />
         </div>
 
@@ -432,30 +390,20 @@ function LoginStaff({ onSuccess, notify }) {
           <label className="block text-xs font-semibold text-slate-700 mb-1">
             Contraseña
           </label>
-          <div className="relative">
-            <input
-              type={verPassword ? 'text' : 'password'}
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              className="w-full pl-3.5 pr-10 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-[#6B1D2F] focus:border-[#6B1D2F] outline-none text-sm"
-            />
-            <button
-              type="button"
-              onClick={() => setVerPassword((v) => !v)}
-              title={verPassword ? 'Ocultar contraseña' : 'Ver contraseña'}
-              className="absolute right-3 top-2.5 text-slate-400 hover:text-[#6B1D2F]"
-            >
-              {verPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-            </button>
-          </div>
+          <input
+            type="password"
+            required
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="••••••••"
+            className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none text-sm"
+          />
         </div>
 
         <button
           type="submit"
           disabled={loading}
-          className="w-full py-3 rounded-xl bg-[#6B1D2F] hover:bg-[#561122] text-white font-semibold text-sm transition disabled:opacity-50 shadow-sm"
+          className="w-full py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-sm transition disabled:opacity-50"
         >
           {loading ? 'Verificando...' : 'Ingresar al Sistema'}
         </button>
@@ -481,14 +429,6 @@ function PortalEgresados({ config, egresados, invitados, solicitudes, recargar, 
     if (egresadoActivo) {
       const actualizado = egresados.find((e) => e.id === egresadoActivo.id);
       if (actualizado) {
-        if (actualizado.activo === false) {
-          setEgresadoActivo(null);
-          notify(
-            'Tu registro figura como No Asiste / Inactivo. Si es un error, comunicate con Dirección.',
-            'error'
-          );
-          return;
-        }
         setEgresadoActivo(actualizado);
         prepararFilasInvitados(actualizado);
       }
@@ -533,19 +473,12 @@ function PortalEgresados({ config, egresados, invitados, solicitudes, recargar, 
       notify('El DNI ingresado no figura en el padrón de egresados 2026.', 'error');
       return;
     }
-    if (encontrado.activo === false) {
-      notify(
-        'Este DNI figura marcado como No Asiste / Inactivo. Consultá en Secretaría de la ESRN N° 005.',
-        'error'
-      );
-      return;
-    }
     setEgresadoActivo(encontrado);
     prepararFilasInvitados(encontrado);
   };
 
   const puedeEditar = () => {
-    if (!egresadoActivo || egresadoActivo.activo === false) return false;
+    if (!egresadoActivo) return false;
     if (config.estado_etapa === 'cierre_definitivo') return false;
     if (config.estado_etapa === 'cierre_parcial') {
       return Boolean(egresadoActivo.habilitado_reubicacion) && !egresadoActivo.cerrado;
@@ -662,93 +595,65 @@ function PortalEgresados({ config, egresados, invitados, solicitudes, recargar, 
     }
   };
 
-  // Pase QR descargable con identidad bordó institucional + logo de la escuela
   const descargarInvitacionPNG = (inv) => {
     const canvas = document.createElement('canvas');
-    canvas.width = 720;
-    canvas.height = 440;
+    canvas.width = 700;
+    canvas.height = 420;
     const ctx = canvas.getContext('2d');
 
-    // Fondo bordó institucional profundo
-    ctx.fillStyle = '#4a0e1d';
-    ctx.fillRect(0, 0, 720, 440);
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(0, 0, 700, 420);
 
-    // Franja superior dorada
-    ctx.fillStyle = '#f59e0b';
-    ctx.fillRect(0, 0, 720, 14);
-
-    // Franja inferior decorativa
-    ctx.fillStyle = '#6B1D2F';
-    ctx.fillRect(0, 340, 720, 100);
+    ctx.fillStyle = '#10b981';
+    ctx.fillRect(0, 0, 700, 14);
 
     ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 24px sans-serif';
+    ctx.font = 'bold 26px sans-serif';
     ctx.fillText('ACTO DE COLACIÓN 2026 — ESRN N° 005', 32, 62);
 
-    ctx.fillStyle = '#fecdd3';
-    ctx.font = '15px sans-serif';
-    ctx.fillText('CIPOLLETTI · PASE DE ACCESO NOMINAL · BUTACA SIN NUMERAR', 32, 88);
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '16px sans-serif';
+    ctx.fillText('PASE DE ACCESO NOMINAL · BUTACA SIN NUMERAR', 32, 90);
 
-    ctx.fillStyle = '#fcd34d';
-    ctx.font = 'bold 16px sans-serif';
+    ctx.fillStyle = '#34d399';
+    ctx.font = 'bold 15px sans-serif';
     ctx.fillText(`N° ENTRADA: ${inv.numero_entrada}`, 32, 138);
 
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 24px sans-serif';
-    ctx.fillText(inv.nombre_completo.toUpperCase(), 32, 184);
+    ctx.fillText(inv.nombre_completo.toUpperCase(), 32, 182);
 
-    ctx.fillStyle = '#ffe4e6';
+    ctx.fillStyle = '#cbd5e1';
     ctx.font = '18px sans-serif';
-    ctx.fillText(`DNI Invitado: ${inv.dni}`, 32, 218);
+    ctx.fillText(`DNI Invitado: ${inv.dni}`, 32, 215);
 
-    ctx.fillStyle = '#fda4af';
+    ctx.fillStyle = '#94a3b8';
     ctx.font = '15px sans-serif';
-    ctx.fillText(`Egresado/a: ${egresadoActivo.nombre_completo}`, 32, 270);
+    ctx.fillText(`Egresado/a: ${egresadoActivo.nombre_completo}`, 32, 265);
+    ctx.fillText('Presentar este código QR junto con DNI físico en puerta.', 32, 365);
 
-    ctx.fillStyle = '#ffffff';
-    ctx.font = '14px sans-serif';
-    ctx.fillText('Presentar este código QR junto con DNI físico en el ingreso al salón.', 32, 385);
-
-    const qrImg = new Image();
-    qrImg.crossOrigin = 'anonymous';
-    qrImg.onload = () => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
       ctx.fillStyle = '#ffffff';
-      ctx.fillRect(480, 118, 204, 204);
-      ctx.drawImage(qrImg, 490, 128, 184, 184);
-
-      // Intentar dibujar escudo institucional si está disponible
-      const logoImg = new Image();
-      logoImg.crossOrigin = 'anonymous';
-      logoImg.onload = () => {
-        ctx.fillStyle = '#ffffff';
-        ctx.beginPath();
-        ctx.roundRect(626, 26, 58, 58, 10);
-        ctx.fill();
-        ctx.drawImage(logoImg, 631, 31, 48, 48);
-        finalizarDescarga();
-      };
-      logoImg.onerror = () => finalizarDescarga();
-      logoImg.src = '/logo-esrn5.png';
-
-      function finalizarDescarga() {
-        const link = document.createElement('a');
-        link.download = `Entrada_${inv.numero_entrada}_${inv.dni}.png`;
-        link.href = canvas.toDataURL('image/png');
-        link.click();
-      }
+      ctx.fillRect(465, 115, 200, 200);
+      ctx.drawImage(img, 475, 125, 180, 180);
+      const link = document.createElement('a');
+      link.download = `Entrada_${inv.numero_entrada}_${inv.dni}.png`;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
     };
-    qrImg.src = getQrImageUrl(inv.numero_entrada);
+    img.src = getQrImageUrl(inv.numero_entrada);
   };
 
   if (!egresadoActivo) {
     return (
-      <div className="max-w-lg mx-auto mt-8 bg-white rounded-2xl shadow-sm border border-rose-200/80 p-6 sm:p-8">
-        <div className="flex flex-col items-center text-center mb-6">
-          <LogoEscuela size="lg" />
-          <span className="mt-3 text-xs font-bold uppercase tracking-widest text-[#6B1D2F]">
-            ESRN N° 005 · Cipolletti
-          </span>
-          <h2 className="text-2xl font-bold text-slate-900 mt-1">Portal de Egresados</h2>
+      <div className="max-w-lg mx-auto mt-8 bg-white rounded-2xl shadow-sm border border-slate-200 p-6 sm:p-8">
+        <div className="text-center mb-6">
+          <div className="inline-flex bg-emerald-100 text-emerald-700 p-3.5 rounded-2xl mb-3">
+            <Users className="w-7 h-7" />
+          </div>
+          <h2 className="text-2xl font-bold text-slate-900">Portal de Egresados</h2>
           <p className="text-sm text-slate-600 mt-1">
             Ingresá tu DNI (sin puntos ni espacios) para gestionar tus invitados y descargar tus pases QR.
           </p>
@@ -766,13 +671,13 @@ function PortalEgresados({ config, egresados, invitados, solicitudes, recargar, 
               value={dniInput}
               onChange={(e) => setDniInput(sanitizeDNI(e.target.value))}
               placeholder="Ej: 48123456"
-              className="w-full text-center text-2xl font-bold tracking-widest px-4 py-3.5 rounded-xl border-2 border-slate-300 focus:border-[#6B1D2F] outline-none"
+              className="w-full text-center text-2xl font-bold tracking-widest px-4 py-3.5 rounded-xl border-2 border-slate-300 focus:border-emerald-500 outline-none"
             />
           </div>
 
           <button
             type="submit"
-            className="w-full py-3.5 rounded-xl bg-[#6B1D2F] hover:bg-[#561122] text-white font-bold text-base transition shadow-sm"
+            className="w-full py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-base transition shadow-sm"
           >
             Ingresar con mi DNI
           </button>
@@ -795,9 +700,9 @@ function PortalEgresados({ config, egresados, invitados, solicitudes, recargar, 
         </div>
       )}
 
-      <div className="bg-white rounded-2xl border border-rose-200/80 p-5 flex flex-wrap items-center justify-between gap-4">
+      <div className="bg-white rounded-2xl border border-slate-200 p-5 flex flex-wrap items-center justify-between gap-4">
         <div>
-          <span className="text-xs font-bold uppercase tracking-wider text-[#6B1D2F]">
+          <span className="text-xs font-bold uppercase tracking-wider text-emerald-600">
             Egresado/a Verificado
           </span>
           <h2 className="text-xl font-bold text-slate-900">
@@ -833,8 +738,8 @@ function PortalEgresados({ config, egresados, invitados, solicitudes, recargar, 
       )}
 
       {editable && (
-        <div className="bg-rose-50/80 border border-rose-200 rounded-2xl p-4 flex items-start gap-3 text-[#4a0e1d] text-sm">
-          <AlertTriangle className="w-5 h-5 text-[#6B1D2F] shrink-0 mt-0.5" />
+        <div className="bg-sky-50 border border-sky-200 rounded-2xl p-4 flex items-start gap-3 text-sky-950 text-sm">
+          <AlertTriangle className="w-5 h-5 text-sky-600 shrink-0 mt-0.5" />
           <div>
             <strong>Importante antes de guardar:</strong> revisá cuidadosamente el{' '}
             <strong>Nombre Completo</strong> y el <strong>DNI (8 dígitos sin puntos)</strong> de cada
@@ -843,7 +748,7 @@ function PortalEgresados({ config, egresados, invitados, solicitudes, recargar, 
         </div>
       )}
 
-      <div className="bg-white rounded-2xl border border-rose-200/80 p-5 space-y-4">
+      <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-4">
         <h3 className="font-bold text-slate-900 text-base">
           Tus Invitados Familiares ({filasInvitados.length} lugares)
         </h3>
@@ -858,7 +763,7 @@ function PortalEgresados({ config, egresados, invitados, solicitudes, recargar, 
                 <span className="text-xs font-bold uppercase tracking-wider text-slate-600">
                   Invitado #{idx + 1}{' '}
                   {fila.numero_entrada && (
-                    <span className="ml-2 text-[#6B1D2F] bg-rose-100 px-2 py-0.5 rounded">
+                    <span className="ml-2 text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">
                       {fila.numero_entrada}
                     </span>
                   )}
@@ -867,7 +772,7 @@ function PortalEgresados({ config, egresados, invitados, solicitudes, recargar, 
                   <button
                     type="button"
                     onClick={() => descargarInvitacionPNG(fila)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#6B1D2F] hover:bg-[#561122] text-white text-xs font-semibold transition"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold transition"
                   >
                     <Download className="w-3.5 h-3.5" />
                     Descargar Pase QR
@@ -883,7 +788,7 @@ function PortalEgresados({ config, egresados, invitados, solicitudes, recargar, 
                     placeholder="Nombre y Apellido completo del familiar"
                     value={fila.nombre_completo}
                     onChange={(e) => handleCambioFila(idx, 'nombre_completo', e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white disabled:bg-slate-100 text-sm outline-none focus:border-[#6B1D2F]"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white disabled:bg-slate-100 text-sm outline-none focus:border-emerald-500"
                   />
                 </div>
                 <div>
@@ -895,7 +800,7 @@ function PortalEgresados({ config, egresados, invitados, solicitudes, recargar, 
                     placeholder="DNI (8 dígitos)"
                     value={fila.dni}
                     onChange={(e) => handleCambioFila(idx, 'dni', e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white disabled:bg-slate-100 text-sm outline-none focus:border-[#6B1D2F]"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white disabled:bg-slate-100 text-sm outline-none focus:border-emerald-500"
                   />
                 </div>
               </div>
@@ -909,7 +814,7 @@ function PortalEgresados({ config, egresados, invitados, solicitudes, recargar, 
               type="button"
               onClick={guardarInvitados}
               disabled={guardando}
-              className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-[#6B1D2F] hover:bg-[#561122] text-white font-semibold text-sm transition"
+              className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-sm transition"
             >
               <Save className="w-4 h-4" />
               {guardando ? 'Guardando...' : 'Guardar Cambios y Generar QR'}
@@ -928,7 +833,7 @@ function PortalEgresados({ config, egresados, invitados, solicitudes, recargar, 
       </div>
 
       {config.estado_etapa !== 'cierre_definitivo' && (
-        <div className="bg-white rounded-2xl border border-rose-200/80 p-5 space-y-4">
+        <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-4">
           <h3 className="font-bold text-slate-900 text-base">
             Solicitar más butacas (Sujeto a disponibilidad)
           </h3>
@@ -952,7 +857,7 @@ function PortalEgresados({ config, egresados, invitados, solicitudes, recargar, 
             <button
               type="submit"
               disabled={enviandoSol}
-              className="px-4 py-2.5 rounded-xl bg-[#6B1D2F] hover:bg-[#561122] text-white font-semibold text-sm"
+              className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm"
             >
               {enviandoSol ? 'Enviando...' : 'Solicitar'}
             </button>
@@ -1021,31 +926,17 @@ function PanelAdministracion({
 
   const [nuevoDocNombre, setNuevoDocNombre] = useState('');
   const [nuevoDocDni, setNuevoDocDni] = useState('');
-  const [filtroDoc, setFiltroDoc] = useState('');
   const fileDocRef = useRef(null);
 
   const [nuevoVipNombre, setNuevoVipNombre] = useState('');
   const [nuevoVipCargo, setNuevoVipCargo] = useState('');
   const [nuevoVipDni, setNuevoVipDni] = useState('');
 
-  // Estados para Usuarios del Sistema (Alta, Edición con mail, Activar/Desactivar, Contraseña con ojito)
   const [usrNombre, setUsrNombre] = useState('');
   const [usrEmail, setUsrEmail] = useState('');
   const [usrPass, setUsrPass] = useState('');
-  const [verUsrPass, setVerUsrPass] = useState(false);
   const [usrRol, setUsrRol] = useState('puerta');
   const [creandoUsr, setCreandoUsr] = useState(false);
-
-  const [editandoUsrId, setEditandoUsrId] = useState(null);
-  const [editUsrNombre, setEditUsrNombre] = useState('');
-  const [editUsrEmail, setEditUsrEmail] = useState('');
-  const [editUsrRol, setEditUsrRol] = useState('puerta');
-  const [guardandoEdicionUsr, setGuardandoEdicionUsr] = useState(false);
-
-  const [passModalUsr, setPassModalUsr] = useState(null);
-  const [nuevaPassInput, setNuevaPassInput] = useState('');
-  const [verNuevaPass, setVerNuevaPass] = useState(false);
-  const [cambiandoPass, setCambiandoPass] = useState(false);
 
   const cambiarEtapaGlobal = async (nuevaEtapa) => {
     try {
@@ -1073,7 +964,6 @@ function PanelAdministracion({
     if (!ok) return;
     try {
       for (const egr of egresados) {
-        if (egr.activo === false) continue;
         const cantCargada = invitados.filter((i) => i.egresado_id === egr.id).length;
         if (cantCargada < egr.cupo_asignado) {
           await supabase
@@ -1103,7 +993,6 @@ function PanelAdministracion({
         cupo_asignado: CUPO_BASE_DEFECTO,
         cerrado: false,
         habilitado_reubicacion: false,
-        activo: true,
       });
       if (error) throw error;
       setNuevoEgrNombre('');
@@ -1112,39 +1001,6 @@ function PanelAdministracion({
       notify('Egresado agregado al padrón.');
     } catch (err) {
       notify('Error al agregar egresado: ' + err.message, 'error');
-    }
-  };
-
-  // Desactivar / Activar Egresado (No Asiste -> libera su butaca + familiares)
-  const toggleActivoEgresado = async (egr) => {
-    const vaADesactivar = egr.activo !== false;
-    const cuposLiberados = 1 + (Number(egr.cupo_asignado) || 0);
-
-    if (vaADesactivar) {
-      const ok = window.confirm(
-        `¿Marcar a ${egr.nombre_completo} como NO ASISTE (Inactivo)?\n\nSe bloqueará su ingreso al portal y se liberarán ${cuposLiberados} butaca(s) (1 del egresado + ${egr.cupo_asignado} familiares) a las Vacantes Libres.`
-      );
-      if (!ok) return;
-    }
-
-    try {
-      const { error } = await supabase
-        .from('egresados')
-        .update({
-          activo: !vaADesactivar,
-          cerrado: vaADesactivar ? true : false,
-        })
-        .eq('id', egr.id);
-
-      if (error) throw error;
-      await recargar();
-      notify(
-        vaADesactivar
-          ? `${egr.nombre_completo} marcado como NO ASISTE. Se liberaron ${cuposLiberados} butaca(s).`
-          : `${egr.nombre_completo} reactivado nuevamente.`
-      );
-    } catch (err) {
-      notify('Error al cambiar estado del egresado: ' + err.message, 'error');
     }
   };
 
@@ -1202,7 +1058,6 @@ function PanelAdministracion({
             cupo_asignado: cupo,
             cerrado: false,
             habilitado_reubicacion: false,
-            activo: true,
           });
         }
       }
@@ -1227,10 +1082,6 @@ function PanelAdministracion({
   };
 
   const ajustarCupoEgresado = async (egr, delta) => {
-    if (egr.activo === false) {
-      notify('Activá primero al egresado para modificar su cupo.', 'warning');
-      return;
-    }
     const nuevoCupo = Math.max(0, (Number(egr.cupo_asignado) || 0) + delta);
     if (delta > 0 && vacantesLibres <= 0) {
       notify('No hay vacantes libres disponibles en el recinto (525 máx).', 'error');
@@ -1270,7 +1121,6 @@ function PanelAdministracion({
             cupo_asignado: nuevoCupo,
             cerrado: false,
             habilitado_reubicacion: true,
-            activo: true,
             notificacion_portal: `¡Buenas noticias! Se aprobó tu pedido de +${sol.cantidad_solicitada} butaca(s) extra. Ya podés cargar a tus nuevos invitados y descargar sus QR.`,
           })
           .eq('id', egr.id);
@@ -1300,7 +1150,6 @@ function PanelAdministracion({
         nombre_completo: nuevoDocNombre.trim().toUpperCase(),
         dni: dniLimpio,
         asistio: false,
-        activo: true,
       });
       if (error) throw error;
       setNuevoDocNombre('');
@@ -1309,27 +1158,6 @@ function PanelAdministracion({
       notify('Docente agregado al padrón.');
     } catch (err) {
       notify('Error agregando docente: ' + err.message, 'error');
-    }
-  };
-
-  // Desactivar / Activar Docente (No Asiste -> libera 1 butaca)
-  const toggleActivoDocente = async (doc) => {
-    const vaADesactivar = doc.activo !== false;
-    try {
-      const { error } = await supabase
-        .from('docentes')
-        .update({ activo: !vaADesactivar })
-        .eq('id', doc.id);
-
-      if (error) throw error;
-      await recargar();
-      notify(
-        vaADesactivar
-          ? `${doc.nombre_completo} marcado como NO ASISTE. Se liberó 1 butaca.`
-          : `${doc.nombre_completo} reactivado nuevamente.`
-      );
-    } catch (err) {
-      notify('Error al cambiar estado del docente: ' + err.message, 'error');
     }
   };
 
@@ -1380,7 +1208,6 @@ function PanelAdministracion({
             dni,
             nombre_completo: nombre.toUpperCase(),
             asistio: false,
-            activo: true,
           });
         }
       }
@@ -1444,9 +1271,6 @@ function PanelAdministracion({
     }
   };
 
-  // ==========================================================================
-  // GESTIÓN COMPLETA DE USUARIOS DEL SISTEMA (Con mail visible/editable y ojito)
-  // ==========================================================================
   const crearUsuarioSistema = async (e) => {
     e.preventDefault();
     if (!esAdmin) return;
@@ -1492,106 +1316,8 @@ function PanelAdministracion({
     }
   };
 
-  const iniciarEdicionUsuario = (u) => {
-    setEditandoUsrId(u.id);
-    setEditUsrNombre(u.nombre || '');
-    setEditUsrEmail(u.email || '');
-    setEditUsrRol(u.rol || 'puerta');
-  };
-
-  const guardarEdicionUsuario = async (u) => {
-    const nombreLimpio = editUsrNombre.trim();
-    const emailNuevo = editUsrEmail.trim().toLowerCase();
-    const emailAnterior = String(u.email || '').trim().toLowerCase();
-
-    if (!nombreLimpio || !emailNuevo || !emailNuevo.includes('@')) {
-      notify('Completá un nombre y un correo electrónico válido.', 'error');
-      return;
-    }
-
-    setGuardandoEdicionUsr(true);
-    try {
-      // Si cambió el correo electrónico, actualizar primero en auth.users vía RPC segura
-      if (emailNuevo !== emailAnterior) {
-        const { error: rpcErr } = await supabase.rpc('admin_actualizar_email', {
-          old_email: emailAnterior,
-          new_email: emailNuevo,
-        });
-        if (rpcErr) throw rpcErr;
-      }
-
-      const { error } = await supabase
-        .from('usuarios_sistema')
-        .update({
-          nombre: nombreLimpio,
-          email: emailNuevo,
-          rol: editUsrRol,
-        })
-        .eq('id', u.id);
-
-      if (error) throw error;
-      setEditandoUsrId(null);
-      await recargar();
-      notify(`Datos de ${nombreLimpio} (${emailNuevo}) actualizados.`);
-    } catch (err) {
-      notify('Error al actualizar usuario: ' + err.message, 'error');
-    } finally {
-      setGuardandoEdicionUsr(false);
-    }
-  };
-
-  const toggleActivoUsuario = async (u) => {
-    if (u.email === perfilStaff?.email) {
-      notify('No podés desactivar tu propia cuenta de Administrador en uso.', 'warning');
-      return;
-    }
-    const nuevoEstado = u.activo === false ? true : false;
-    try {
-      const { error } = await supabase
-        .from('usuarios_sistema')
-        .update({ activo: nuevoEstado })
-        .eq('id', u.id);
-
-      if (error) throw error;
-      await recargar();
-      notify(
-        nuevoEstado
-          ? `Usuario ${u.nombre} ACTIVADO.`
-          : `Usuario ${u.nombre} DESACTIVADO (bloqueado para ingresar).`
-      );
-    } catch (err) {
-      notify('Error al cambiar estado del usuario: ' + err.message, 'error');
-    }
-  };
-
-  const handleCambiarPasswordUsuario = async (e) => {
-    e.preventDefault();
-    if (!passModalUsr) return;
-    if (nuevaPassInput.length < 6) {
-      notify('La nueva contraseña debe tener al menos 6 caracteres.', 'error');
-      return;
-    }
-    setCambiandoPass(true);
-    try {
-      const { error } = await supabase.rpc('admin_cambiar_password', {
-        target_email: passModalUsr.email,
-        nueva_password: nuevaPassInput,
-      });
-      if (error) throw error;
-
-      notify(`Contraseña actualizada correctamente para ${passModalUsr.nombre}.`);
-      setPassModalUsr(null);
-      setNuevaPassInput('');
-      setVerNuevaPass(false);
-    } catch (err) {
-      notify('Error cambiando contraseña: ' + err.message, 'error');
-    } finally {
-      setCambiandoPass(false);
-    }
-  };
-
   const eliminarUsuarioSistema = async (id) => {
-    if (!window.confirm('¿Eliminar definitivamente este acceso del sistema?')) return;
+    if (!window.confirm('¿Eliminar este acceso del sistema?')) return;
     await supabase.from('usuarios_sistema').delete().eq('id', id);
     await recargar();
     notify('Usuario eliminado.');
@@ -1603,54 +1329,32 @@ function PanelAdministracion({
       e.dni.includes(filtroEgr)
   );
 
-  const docentesFiltrados = docentes.filter(
-    (d) =>
-      d.nombre_completo.toLowerCase().includes(filtroDoc.toLowerCase()) ||
-      d.dni.includes(filtroDoc)
-  );
-
   const pendientesCount = solicitudes.filter((s) => s.estado === 'pendiente').length;
-  const egresadosActivosList = egresados.filter((e) => e.activo !== false);
-  const docentesActivosList = docentes.filter((d) => d.activo !== false);
 
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-        <div className="bg-white p-4 rounded-2xl border border-rose-200/80">
-          <p className="text-xs text-slate-500 font-medium">Egresados Activos</p>
-          <p className="text-2xl font-extrabold text-[#561122] mt-1">
-            {totalEgresados}
-            {egresados.length !== totalEgresados && (
-              <span className="text-xs font-normal text-slate-400 ml-1">
-                / {egresados.length}
-              </span>
-            )}
-          </p>
+        <div className="bg-white p-4 rounded-2xl border border-slate-200">
+          <p className="text-xs text-slate-500 font-medium">Egresados</p>
+          <p className="text-2xl font-extrabold text-slate-900 mt-1">{totalEgresados}</p>
         </div>
-        <div className="bg-white p-4 rounded-2xl border border-rose-200/80">
-          <p className="text-xs text-slate-500 font-medium">Docentes Activos</p>
-          <p className="text-2xl font-extrabold text-[#561122] mt-1">
-            {totalDocentes}
-            {docentes.length !== totalDocentes && (
-              <span className="text-xs font-normal text-slate-400 ml-1">
-                / {docentes.length}
-              </span>
-            )}
-          </p>
+        <div className="bg-white p-4 rounded-2xl border border-slate-200">
+          <p className="text-xs text-slate-500 font-medium">Docentes</p>
+          <p className="text-2xl font-extrabold text-slate-900 mt-1">{totalDocentes}</p>
         </div>
-        <div className="bg-white p-4 rounded-2xl border border-rose-200/80">
+        <div className="bg-white p-4 rounded-2xl border border-slate-200">
           <p className="text-xs text-slate-500 font-medium">Especiales / VIP</p>
-          <p className="text-2xl font-extrabold text-[#561122] mt-1">{totalEspeciales}</p>
+          <p className="text-2xl font-extrabold text-slate-900 mt-1">{totalEspeciales}</p>
         </div>
-        <div className="bg-white p-4 rounded-2xl border border-rose-200/80">
+        <div className="bg-white p-4 rounded-2xl border border-slate-200">
           <p className="text-xs text-slate-500 font-medium">Cupos Familiares</p>
-          <p className="text-2xl font-extrabold text-[#561122] mt-1">{totalCuposFamiliares}</p>
+          <p className="text-2xl font-extrabold text-slate-900 mt-1">{totalCuposFamiliares}</p>
         </div>
         <div
           className={`col-span-2 sm:col-span-1 p-4 rounded-2xl border ${
             vacantesLibres < 0
-              ? 'bg-rose-50 border-rose-300 text-rose-800'
-              : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+              ? 'bg-rose-50 border-rose-300 text-rose-700'
+              : 'bg-emerald-50 border-emerald-200 text-emerald-700'
           }`}
         >
           <p className="text-xs font-semibold">Vacantes Libres (de {CAPACIDAD_MAXIMA})</p>
@@ -1658,9 +1362,9 @@ function PanelAdministracion({
         </div>
       </div>
 
-      <div className="bg-white p-4 rounded-2xl border border-rose-200/80 flex flex-wrap items-center justify-between gap-4">
+      <div className="bg-white p-4 rounded-2xl border border-slate-200 flex flex-wrap items-center justify-between gap-4">
         <div>
-          <p className="text-xs font-bold uppercase tracking-wider text-[#6B1D2F]">
+          <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
             Etapa Global de Carga
           </p>
           <p className="text-xs text-slate-600">
@@ -1672,7 +1376,7 @@ function PanelAdministracion({
             onClick={() => cambiarEtapaGlobal('abierta')}
             className={`px-3.5 py-2 rounded-xl text-xs font-bold transition ${
               config.estado_etapa === 'abierta'
-                ? 'bg-[#6B1D2F] text-white shadow-sm'
+                ? 'bg-slate-900 text-white'
                 : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
             }`}
           >
@@ -1682,7 +1386,7 @@ function PanelAdministracion({
             onClick={() => cambiarEtapaGlobal('cierre_parcial')}
             className={`px-3.5 py-2 rounded-xl text-xs font-bold transition ${
               config.estado_etapa === 'cierre_parcial'
-                ? 'bg-amber-600 text-white shadow-sm'
+                ? 'bg-amber-600 text-white'
                 : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
             }`}
           >
@@ -1692,7 +1396,7 @@ function PanelAdministracion({
             onClick={() => cambiarEtapaGlobal('cierre_definitivo')}
             className={`px-3.5 py-2 rounded-xl text-xs font-bold transition ${
               config.estado_etapa === 'cierre_definitivo'
-                ? 'bg-rose-800 text-white shadow-sm'
+                ? 'bg-rose-600 text-white'
                 : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
             }`}
           >
@@ -1709,14 +1413,13 @@ function PanelAdministracion({
         </div>
       </div>
 
-      {/* PESTAÑAS CON IDENTIDAD BORDÓ */}
       <div className="flex flex-wrap gap-2">
         <button
           onClick={() => setTab('solicitudes')}
           className={`px-4 py-2 rounded-xl text-xs font-bold transition ${
             tab === 'solicitudes'
-              ? 'bg-[#6B1D2F] text-white shadow-sm'
-              : 'bg-white border border-rose-200 text-slate-700 hover:bg-rose-50'
+              ? 'bg-emerald-600 text-white'
+              : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
           }`}
         >
           Solicitudes y Vacantes ({pendientesCount})
@@ -1725,28 +1428,28 @@ function PanelAdministracion({
           onClick={() => setTab('egresados')}
           className={`px-4 py-2 rounded-xl text-xs font-bold transition ${
             tab === 'egresados'
-              ? 'bg-[#6B1D2F] text-white shadow-sm'
-              : 'bg-white border border-rose-200 text-slate-700 hover:bg-rose-50'
+              ? 'bg-emerald-600 text-white'
+              : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
           }`}
         >
-          Egresados ({totalEgresados}/{egresados.length})
+          Egresados ({egresados.length})
         </button>
         <button
           onClick={() => setTab('docentes')}
           className={`px-4 py-2 rounded-xl text-xs font-bold transition ${
             tab === 'docentes'
-              ? 'bg-[#6B1D2F] text-white shadow-sm'
-              : 'bg-white border border-rose-200 text-slate-700 hover:bg-rose-50'
+              ? 'bg-emerald-600 text-white'
+              : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
           }`}
         >
-          Docentes ({totalDocentes}/{docentes.length}) y VIP ({especiales.length})
+          Docentes ({docentes.length}) y VIP ({especiales.length})
         </button>
         <button
           onClick={() => setTab('reportes')}
           className={`px-4 py-2 rounded-xl text-xs font-bold transition ${
             tab === 'reportes'
-              ? 'bg-[#6B1D2F] text-white shadow-sm'
-              : 'bg-white border border-rose-200 text-slate-700 hover:bg-rose-50'
+              ? 'bg-emerald-600 text-white'
+              : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
           }`}
         >
           Acreditación en Vivo
@@ -1756,8 +1459,8 @@ function PanelAdministracion({
             onClick={() => setTab('usuarios')}
             className={`px-4 py-2 rounded-xl text-xs font-bold transition ${
               tab === 'usuarios'
-                ? 'bg-[#6B1D2F] text-white shadow-sm'
-                : 'bg-white border border-rose-200 text-slate-700 hover:bg-rose-50'
+                ? 'bg-emerald-600 text-white'
+                : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
             }`}
           >
             Usuarios del Sistema ({usuariosSistema.length})
@@ -1766,7 +1469,7 @@ function PanelAdministracion({
       </div>
 
       {tab === 'egresados' && (
-        <div className="bg-white rounded-2xl border border-rose-200/80 p-5 space-y-5">
+        <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <form onSubmit={agregarEgresado} className="flex flex-wrap items-center gap-2">
               <input
@@ -1787,7 +1490,7 @@ function PanelAdministracion({
               />
               <button
                 type="submit"
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#6B1D2F] hover:bg-[#561122] text-white text-xs font-bold"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold"
               >
                 <Plus className="w-4 h-4" />
                 Agregar Egresado
@@ -1805,7 +1508,7 @@ function PanelAdministracion({
               <button
                 type="button"
                 onClick={() => fileEgrRef.current?.click()}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-[#6B1D2F] border border-rose-200 text-xs font-bold transition"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-bold transition"
               >
                 <Upload className="w-4 h-4" />
                 Importar CSV Egresados
@@ -1815,7 +1518,7 @@ function PanelAdministracion({
                 <button
                   type="button"
                   onClick={vaciarPadronEgresados}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-100 hover:bg-rose-200 text-rose-800 border border-rose-300 text-xs font-bold transition"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold transition"
                 >
                   <Trash2 className="w-4 h-4" />
                   Vaciar Padrón
@@ -1841,107 +1544,62 @@ function PanelAdministracion({
                 <tr className="border-b border-slate-200 text-xs uppercase text-slate-500">
                   <th className="py-3 px-2">Egresado</th>
                   <th className="py-3 px-2">DNI</th>
-                  <th className="py-3 px-2">Invitados / Cupo</th>
+                  <th className="py-3 px-2">Invitados Cargados / Cupo</th>
                   <th className="py-3 px-2">Reubicar Cupo</th>
-                  <th className="py-3 px-2">Asistencia / Estado</th>
-                  <th className="py-3 px-2 text-right">Acciones</th>
+                  <th className="py-3 px-2">Estado</th>
+                  <th className="py-3 px-2 text-right">Acción</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {egresadosFiltrados.map((egr) => {
                   const cargados = invitados.filter((i) => i.egresado_id === egr.id).length;
-                  const estaActivo = egr.activo !== false;
-
                   return (
-                    <tr
-                      key={egr.id}
-                      className={`hover:bg-rose-50/40 ${!estaActivo ? 'bg-slate-50/80 opacity-65' : ''}`}
-                    >
+                    <tr key={egr.id} className="hover:bg-slate-50">
                       <td className="py-3 px-2 font-semibold text-slate-900">
-                        <span className={!estaActivo ? 'line-through text-slate-500' : ''}>
-                          {egr.nombre_completo}
-                        </span>
+                        {egr.nombre_completo}
                       </td>
                       <td className="py-3 px-2 text-slate-600">{egr.dni}</td>
                       <td className="py-3 px-2">
-                        {estaActivo ? (
-                          <>
-                            <strong>{cargados}</strong> / {egr.cupo_asignado}
-                          </>
-                        ) : (
-                          <span className="text-xs font-semibold text-amber-700 bg-amber-100 px-2 py-0.5 rounded">
-                            Liberados ({1 + (Number(egr.cupo_asignado) || 0)} lugares)
-                          </span>
-                        )}
+                        <strong>{cargados}</strong> / {egr.cupo_asignado}
                       </td>
                       <td className="py-3 px-2">
                         <div className="inline-flex items-center gap-1">
                           <button
-                            disabled={!estaActivo}
                             onClick={() => ajustarCupoEgresado(egr, -1)}
-                            className="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-40 font-bold text-xs"
+                            className="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 font-bold text-xs"
                           >
                             -1
                           </button>
                           <button
-                            disabled={!estaActivo}
                             onClick={() => ajustarCupoEgresado(egr, 1)}
-                            className="px-2 py-1 rounded bg-emerald-100 hover:bg-emerald-200 disabled:opacity-40 text-emerald-800 font-bold text-xs"
+                            className="px-2 py-1 rounded bg-emerald-100 hover:bg-emerald-200 text-emerald-800 font-bold text-xs"
                           >
                             +1
                           </button>
                         </div>
                       </td>
                       <td className="py-3 px-2">
-                        {!estaActivo ? (
-                          <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800">
-                            No Asiste (Inactivo)
-                          </span>
-                        ) : (
-                          <span
-                            className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                              egr.cerrado
-                                ? 'bg-slate-200 text-slate-700'
-                                : 'bg-emerald-100 text-emerald-700'
-                            }`}
-                          >
-                            {egr.cerrado ? 'Cerrado' : 'Habilitado'}
-                          </span>
-                        )}
+                        <span
+                          className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                            egr.cerrado
+                              ? 'bg-slate-200 text-slate-700'
+                              : 'bg-emerald-100 text-emerald-700'
+                          }`}
+                        >
+                          {egr.cerrado ? 'Cerrado' : 'Habilitado'}
+                        </span>
                       </td>
                       <td className="py-3 px-2 text-right">
-                        <div className="inline-flex items-center justify-end gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => toggleActivoEgresado(egr)}
-                            title={
-                              estaActivo
-                                ? 'Desactivar (No asiste — libera cupo propio y familiar)'
-                                : 'Reactivar egresado'
-                            }
-                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold border transition ${
-                              estaActivo
-                                ? 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-200'
-                                : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'
-                            }`}
-                          >
-                            <Power className="w-3.5 h-3.5" />
-                            {estaActivo ? 'Desactivar' : 'Activar'}
-                          </button>
-
-                          <button
-                            onClick={async () => {
-                              if (!window.confirm(`¿Eliminar definitivamente a ${egr.nombre_completo}?`))
-                                return;
-                              await supabase.from('egresados').delete().eq('id', egr.id);
-                              await recargar();
-                            }}
-                            title="Eliminar del padrón"
-                            className="text-rose-600 hover:text-rose-800 p-1"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
+                        <button
+                          onClick={async () => {
+                            if (!window.confirm(`¿Eliminar a ${egr.nombre_completo}?`)) return;
+                            await supabase.from('egresados').delete().eq('id', egr.id);
+                            await recargar();
+                          }}
+                          className="text-rose-500 hover:text-rose-700 p-1"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       </td>
                     </tr>
                   );
@@ -1953,7 +1611,7 @@ function PanelAdministracion({
       )}
 
       {tab === 'solicitudes' && (
-        <div className="bg-white rounded-2xl border border-rose-200/80 p-5 space-y-4">
+        <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-4">
           <h3 className="font-bold text-slate-900">Bandeja de Solicitudes de Butacas Extra</h3>
           {solicitudes.length === 0 ? (
             <p className="text-sm text-slate-500 py-6 text-center">
@@ -2028,11 +1686,9 @@ function PanelAdministracion({
 
       {tab === 'docentes' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-white rounded-2xl border border-rose-200/80 p-5 space-y-4">
+          <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 className="font-bold text-slate-900">
-                Padrón de Docentes ({totalDocentes} activos / {docentes.length})
-              </h3>
+              <h3 className="font-bold text-slate-900">Padrón de Docentes ({docentes.length})</h3>
               <div className="flex flex-wrap items-center gap-2">
                 <input
                   ref={fileDocRef}
@@ -2044,7 +1700,7 @@ function PanelAdministracion({
                 <button
                   type="button"
                   onClick={() => fileDocRef.current?.click()}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-[#6B1D2F] border border-rose-200 text-xs font-bold"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-bold"
                 >
                   <Upload className="w-3.5 h-3.5" />
                   Importar CSV Docentes
@@ -2054,7 +1710,7 @@ function PanelAdministracion({
                   <button
                     type="button"
                     onClick={vaciarPadronDocentes}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-100 hover:bg-rose-200 text-rose-800 border border-rose-300 text-xs font-bold transition"
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold transition"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                     Vaciar Padrón
@@ -2082,88 +1738,34 @@ function PanelAdministracion({
               />
               <button
                 type="submit"
-                className="px-3.5 py-2 rounded-xl bg-[#6B1D2F] hover:bg-[#561122] text-white text-xs font-bold"
+                className="px-3.5 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold"
               >
                 + Agregar
               </button>
             </form>
 
-            <div className="relative">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-              <input
-                type="text"
-                placeholder="Buscar docente por nombre o DNI..."
-                value={filtroDoc}
-                onChange={(e) => setFiltroDoc(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 text-xs"
-              />
-            </div>
-
             <div className="max-h-96 overflow-y-auto divide-y divide-slate-100 text-sm">
-              {docentesFiltrados.map((d) => {
-                const estaActivo = d.activo !== false;
-                return (
-                  <div
-                    key={d.id}
-                    className={`py-2.5 flex items-center justify-between gap-2 ${
-                      !estaActivo ? 'opacity-60' : ''
-                    }`}
-                  >
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <p
-                          className={`font-semibold text-slate-900 ${
-                            !estaActivo ? 'line-through text-slate-500' : ''
-                          }`}
-                        >
-                          {d.nombre_completo}
-                        </p>
-                        {!estaActivo && (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800">
-                            No Asiste
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-slate-500">DNI: {d.dni}</p>
-                    </div>
-
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => toggleActivoDocente(d)}
-                        title={
-                          estaActivo
-                            ? 'Desactivar (No asiste — libera 1 butaca)'
-                            : 'Reactivar docente'
-                        }
-                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold border transition ${
-                          estaActivo
-                            ? 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-200'
-                            : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'
-                        }`}
-                      >
-                        <Power className="w-3.5 h-3.5" />
-                        {estaActivo ? 'Desactivar' : 'Activar'}
-                      </button>
-
-                      <button
-                        onClick={async () => {
-                          await supabase.from('docentes').delete().eq('id', d.id);
-                          await recargar();
-                        }}
-                        title="Eliminar docente"
-                        className="text-rose-600 hover:text-rose-800 p-1"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
+              {docentes.map((d) => (
+                <div key={d.id} className="py-2.5 flex items-center justify-between">
+                  <div>
+                    <p className="font-semibold text-slate-900">{d.nombre_completo}</p>
+                    <p className="text-xs text-slate-500">DNI: {d.dni}</p>
                   </div>
-                );
-              })}
+                  <button
+                    onClick={async () => {
+                      await supabase.from('docentes').delete().eq('id', d.id);
+                      await recargar();
+                    }}
+                    className="text-rose-500 hover:text-rose-700 p-1"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
             </div>
           </div>
 
-          <div className="bg-white rounded-2xl border border-rose-200/80 p-5 space-y-4">
+          <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 className="font-bold text-slate-900">
                 Invitados Especiales / Autoridades ({especiales.length})
@@ -2172,7 +1774,7 @@ function PanelAdministracion({
                 <button
                   type="button"
                   onClick={vaciarPadronVIP}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-100 hover:bg-rose-200 text-rose-800 border border-rose-300 text-xs font-bold transition"
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold transition"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                   Vaciar Padrón
@@ -2209,7 +1811,7 @@ function PanelAdministracion({
                 />
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-[#6B1D2F] hover:bg-[#561122] text-white text-xs font-bold"
+                  className="px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold"
                 >
                   + Agregar VIP
                 </button>
@@ -2230,7 +1832,7 @@ function PanelAdministracion({
                       await supabase.from('invitados_especiales').delete().eq('id', esp.id);
                       await recargar();
                     }}
-                    className="text-rose-600 hover:text-rose-800 p-1"
+                    className="text-rose-500 hover:text-rose-700 p-1"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -2242,12 +1844,12 @@ function PanelAdministracion({
       )}
 
       {tab === 'reportes' && (
-        <div className="bg-white rounded-2xl border border-rose-200/80 p-5 space-y-5">
+        <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-5">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200">
               <p className="text-xs text-emerald-700 font-bold">Egresados Presentes</p>
               <p className="text-2xl font-extrabold text-emerald-900">
-                {egresadosActivosList.filter((e) => e.asistio).length} / {egresadosActivosList.length}
+                {egresados.filter((e) => e.asistio).length} / {egresados.length}
               </p>
             </div>
             <div className="p-4 rounded-xl bg-sky-50 border border-sky-200">
@@ -2256,10 +1858,10 @@ function PanelAdministracion({
                 {invitados.filter((i) => i.asistio).length} / {invitados.length}
               </p>
             </div>
-            <div className="p-4 rounded-xl bg-rose-50 border border-rose-200">
-              <p className="text-xs text-[#6B1D2F] font-bold">Docentes Presentes</p>
-              <p className="text-2xl font-extrabold text-[#4a0e1d]">
-                {docentesActivosList.filter((d) => d.asistio).length} / {docentesActivosList.length}
+            <div className="p-4 rounded-xl bg-indigo-50 border border-indigo-200">
+              <p className="text-xs text-indigo-700 font-bold">Docentes Presentes</p>
+              <p className="text-2xl font-extrabold text-indigo-900">
+                {docentes.filter((d) => d.asistio).length} / {docentes.length}
               </p>
             </div>
             <div className="p-4 rounded-xl bg-amber-50 border border-amber-200">
@@ -2272,10 +1874,10 @@ function PanelAdministracion({
 
           <div>
             <h4 className="font-bold text-slate-900 text-sm mb-2">
-              Listado de Ceremonial — Egresados Activos Acreditados ("Asistió")
+              Listado de Ceremonial — Egresados Acreditados ("Asistió")
             </h4>
             <div className="max-h-96 overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100 text-sm">
-              {egresadosActivosList.map((e) => (
+              {egresados.map((e) => (
                 <div key={e.id} className="px-4 py-2.5 flex items-center justify-between">
                   <span className="font-medium text-slate-900">
                     {e.nombre_completo} <span className="text-xs text-slate-400">({e.dni})</span>
@@ -2297,17 +1899,17 @@ function PanelAdministracion({
       )}
 
       {tab === 'usuarios' && esAdmin && (
-        <div className="bg-white rounded-2xl border border-rose-200/80 p-5 space-y-5">
+        <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-5">
           <div>
             <h3 className="font-bold text-slate-900">Gestión de Usuarios y Roles</h3>
             <p className="text-xs text-slate-500">
-              Creá, editá (nombre, correo y rol), activá/desactivá o cambiá la contraseña de Administradores, Coordinadores y Personal de Puerta.
+              Creá cuentas para Coordinadores y personal de Control de Acceso (Puerta) sin cerrar tu sesión.
             </p>
           </div>
 
           <form
             onSubmit={crearUsuarioSistema}
-            className="grid grid-cols-1 sm:grid-cols-5 gap-3 bg-rose-50/50 p-4 rounded-xl border border-rose-200/80"
+            className="grid grid-cols-1 sm:grid-cols-5 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-200"
           >
             <input
               type="text"
@@ -2325,25 +1927,15 @@ function PanelAdministracion({
               onChange={(e) => setUsrEmail(e.target.value)}
               className="px-3 py-2 rounded-xl border border-slate-300 bg-white text-sm"
             />
-            <div className="relative">
-              <input
-                type={verUsrPass ? 'text' : 'password'}
-                required
-                minLength={6}
-                placeholder="Contraseña (mín. 6)"
-                value={usrPass}
-                onChange={(e) => setUsrPass(e.target.value)}
-                className="w-full pl-3 pr-9 py-2 rounded-xl border border-slate-300 bg-white text-sm"
-              />
-              <button
-                type="button"
-                onClick={() => setVerUsrPass((v) => !v)}
-                title={verUsrPass ? 'Ocultar contraseña' : 'Ver contraseña'}
-                className="absolute right-2.5 top-2.5 text-slate-400 hover:text-[#6B1D2F]"
-              >
-                {verUsrPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
+            <input
+              type="password"
+              required
+              minLength={6}
+              placeholder="Contraseña (mín. 6)"
+              value={usrPass}
+              onChange={(e) => setUsrPass(e.target.value)}
+              className="px-3 py-2 rounded-xl border border-slate-300 bg-white text-sm"
+            />
             <select
               value={usrRol}
               onChange={(e) => setUsrRol(e.target.value)}
@@ -2356,193 +1948,31 @@ function PanelAdministracion({
             <button
               type="submit"
               disabled={creandoUsr}
-              className="px-4 py-2 rounded-xl bg-[#6B1D2F] hover:bg-[#561122] text-white font-bold text-xs"
+              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs"
             >
               {creandoUsr ? 'Creando...' : '+ Crear Usuario'}
             </button>
           </form>
 
-          {passModalUsr && (
-            <form
-              onSubmit={handleCambiarPasswordUsuario}
-              className="p-4 rounded-xl bg-amber-50 border border-amber-300 flex flex-wrap items-center justify-between gap-3"
-            >
-              <div className="text-sm text-amber-950">
-                Nueva contraseña para <strong>{passModalUsr.nombre}</strong> ({passModalUsr.email}):
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="relative">
-                  <input
-                    type={verNuevaPass ? 'text' : 'password'}
-                    required
-                    minLength={6}
-                    placeholder="Mínimo 6 caracteres"
-                    value={nuevaPassInput}
-                    onChange={(e) => setNuevaPassInput(e.target.value)}
-                    className="pl-3 pr-9 py-2 rounded-xl border border-amber-400 bg-white text-sm"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setVerNuevaPass((v) => !v)}
-                    title={verNuevaPass ? 'Ocultar contraseña' : 'Ver contraseña'}
-                    className="absolute right-2.5 top-2.5 text-slate-500 hover:text-[#6B1D2F]"
-                  >
-                    {verNuevaPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
-                <button
-                  type="submit"
-                  disabled={cambiandoPass}
-                  className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs"
-                >
-                  {cambiandoPass ? 'Guardando...' : 'Guardar Clave'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPassModalUsr(null);
-                    setNuevaPassInput('');
-                    setVerNuevaPass(false);
-                  }}
-                  className="px-3 py-2 rounded-xl bg-white border border-slate-300 text-xs font-semibold text-slate-700"
-                >
-                  Cancelar
-                </button>
-              </div>
-            </form>
-          )}
-
           <div className="divide-y divide-slate-100 text-sm">
-            {usuariosSistema.map((u) => {
-              const estaEditando = editandoUsrId === u.id;
-              const estaActivo = u.activo !== false;
-
-              return (
-                <div
-                  key={u.id}
-                  className={`py-3.5 flex flex-wrap items-center justify-between gap-3 ${
-                    !estaActivo ? 'opacity-60' : ''
-                  }`}
-                >
-                  {estaEditando ? (
-                    <div className="flex flex-wrap items-center gap-2 flex-1">
-                      <input
-                        type="text"
-                        placeholder="Nombre y Apellido"
-                        value={editUsrNombre}
-                        onChange={(e) => setEditUsrNombre(e.target.value)}
-                        className="px-3 py-1.5 rounded-lg border border-slate-300 text-sm font-medium"
-                      />
-                      <input
-                        type="email"
-                        placeholder="Correo electrónico"
-                        value={editUsrEmail}
-                        onChange={(e) => setEditUsrEmail(e.target.value)}
-                        className="px-3 py-1.5 rounded-lg border border-slate-300 text-sm min-w-[220px]"
-                      />
-                      <select
-                        value={editUsrRol}
-                        onChange={(e) => setEditUsrRol(e.target.value)}
-                        className="px-3 py-1.5 rounded-lg border border-slate-300 text-sm bg-white"
-                      >
-                        <option value="puerta">Control de Acceso (Puerta)</option>
-                        <option value="coordinador">Coordinador</option>
-                        <option value="admin">Administrador</option>
-                      </select>
-                      <button
-                        type="button"
-                        disabled={guardandoEdicionUsr}
-                        onClick={() => guardarEdicionUsuario(u)}
-                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#6B1D2F] hover:bg-[#561122] text-white text-xs font-bold"
-                      >
-                        <Save className="w-3.5 h-3.5" />
-                        {guardandoEdicionUsr ? 'Guardando...' : 'Guardar'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setEditandoUsrId(null)}
-                        className="px-2.5 py-1.5 rounded-lg bg-slate-100 text-slate-700 text-xs font-semibold"
-                      >
-                        Cancelar
-                      </button>
-                    </div>
-                  ) : (
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <p className="font-bold text-slate-900">{u.nombre}</p>
-                        <span
-                          className={`px-2 py-0.5 rounded-full text-[11px] font-bold uppercase ${
-                            estaActivo
-                              ? 'bg-emerald-100 text-emerald-700'
-                              : 'bg-rose-100 text-rose-700'
-                          }`}
-                        >
-                          {estaActivo ? 'Activo' : 'Inactivo'}
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-500">
-                        {u.email} · Rol: <strong className="uppercase">{u.rol}</strong>
-                      </p>
-                    </div>
-                  )}
-
-                  {!estaEditando && (
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => iniciarEdicionUsuario(u)}
-                        title="Modificar nombre, correo o rol"
-                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold"
-                      >
-                        <Edit3 className="w-3.5 h-3.5" />
-                        Editar
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setPassModalUsr(u);
-                          setNuevaPassInput('');
-                          setVerNuevaPass(false);
-                        }}
-                        title="Cambiar contraseña"
-                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-semibold"
-                      >
-                        <KeyRound className="w-3.5 h-3.5" />
-                        Clave
-                      </button>
-
-                      {u.email !== perfilStaff?.email && (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => toggleActivoUsuario(u)}
-                            title={estaActivo ? 'Desactivar usuario' : 'Activar usuario'}
-                            className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold border ${
-                              estaActivo
-                                ? 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
-                                : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'
-                            }`}
-                          >
-                            <Power className="w-3.5 h-3.5" />
-                            {estaActivo ? 'Desactivar' : 'Activar'}
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => eliminarUsuarioSistema(u.id)}
-                            title="Eliminar usuario"
-                            className="text-rose-600 hover:text-rose-800 p-1.5"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  )}
+            {usuariosSistema.map((u) => (
+              <div key={u.id} className="py-3 flex items-center justify-between">
+                <div>
+                  <p className="font-bold text-slate-900">{u.nombre}</p>
+                  <p className="text-xs text-slate-500">
+                    {u.email} · Rol: <strong className="uppercase">{u.rol}</strong>
+                  </p>
                 </div>
-              );
-            })}
+                {u.email !== perfilStaff?.email && (
+                  <button
+                    onClick={() => eliminarUsuarioSistema(u.id)}
+                    className="text-rose-500 hover:text-rose-700 p-1.5"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -2573,13 +2003,6 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
     }
 
     const egr = egresados.find((e) => e.id === inv.egresado_id);
-    if (egr && egr.activo === false) {
-      notify(
-        `¡PASE ANULADO! El egresado/a ${egr.nombre_completo} figura como NO ASISTE.`,
-        'error'
-      );
-      return;
-    }
 
     if (inv.asistio) {
       const hora = inv.hora_ingreso
@@ -2689,7 +2112,6 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
   const termino = busqueda.trim().toLowerCase();
   const egresadosCoincidentes = termino
     ? egresados.filter((egr) => {
-        if (egr.activo === false) return false;
         const matchEgr =
           egr.nombre_completo.toLowerCase().includes(termino) || egr.dni.includes(termino);
         const matchInv = invitados.some(
@@ -2705,26 +2127,24 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
 
   const docentesCoincidentes = termino
     ? docentes.filter(
-        (d) =>
-          d.activo !== false &&
-          (d.nombre_completo.toLowerCase().includes(termino) || d.dni.includes(termino))
+        (d) => d.nombre_completo.toLowerCase().includes(termino) || d.dni.includes(termino)
       )
     : [];
 
   return (
     <div className="max-w-xl mx-auto space-y-5">
-      <div className="bg-[#561122] text-white rounded-2xl p-5 space-y-4 shadow-md">
+      <div className="bg-slate-900 text-white rounded-2xl p-5 space-y-4 shadow-md">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="font-bold text-lg">Control de Acceso en Puerta</h2>
-            <p className="text-xs text-rose-200">
+            <p className="text-xs text-slate-400">
               Escaneá el pase QR o buscá por Nombre, DNI o N° de Entrada
             </p>
           </div>
           {!escanerActivo ? (
             <button
               onClick={iniciarEscaner}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-[#3d0a16] font-bold text-sm"
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold text-sm"
             >
               <QrCode className="w-5 h-5" />
               Escanear QR
@@ -2732,7 +2152,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
           ) : (
             <button
               onClick={detenerEscaner}
-              className="px-4 py-2.5 rounded-xl bg-rose-700 text-white font-bold text-xs"
+              className="px-4 py-2.5 rounded-xl bg-rose-600 text-white font-bold text-xs"
             >
               Cerrar Cámara
             </button>
@@ -2758,7 +2178,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
             placeholder="Código de entrada (ej: ENT-4693-1-812)"
             value={codigoManualQr}
             onChange={(e) => setCodigoManualQr(e.target.value)}
-            className="flex-1 px-3.5 py-2.5 rounded-xl bg-[#3d0a16] border border-rose-300/30 text-sm text-white placeholder-rose-200/60 outline-none focus:border-amber-400"
+            className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white placeholder-slate-400 outline-none focus:border-emerald-500"
           />
           <button
             type="submit"
@@ -2769,7 +2189,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
         </form>
       </div>
 
-      <div className="bg-white rounded-2xl border border-rose-200/80 p-4 space-y-4">
+      <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-4">
         <div className="relative">
           <Search className="w-5 h-5 text-slate-400 absolute left-3.5 top-3" />
           <input
@@ -2780,7 +2200,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
               setBusqueda(e.target.value);
               setEgresadoSeleccionado(null);
             }}
-            className="w-full pl-11 pr-4 py-2.5 rounded-xl border border-slate-300 text-sm outline-none focus:border-[#6B1D2F]"
+            className="w-full pl-11 pr-4 py-2.5 rounded-xl border border-slate-300 text-sm outline-none focus:border-emerald-500"
           />
         </div>
 
@@ -2788,14 +2208,14 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
           <div className="space-y-3">
             <button
               onClick={() => setEgresadoSeleccionado(null)}
-              className="text-xs font-bold text-[#6B1D2F] hover:underline"
+              className="text-xs font-bold text-indigo-600 hover:underline"
             >
               ← Volver a resultados
             </button>
 
-            <div className="p-4 rounded-xl bg-rose-50/70 border border-rose-200 flex items-center justify-between">
+            <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
               <div>
-                <span className="text-[11px] font-bold uppercase text-[#6B1D2F]">
+                <span className="text-[11px] font-bold uppercase text-emerald-700">
                   Egresado/a Titular
                 </span>
                 <p className="font-bold text-slate-900">{egresadoSeleccionado.nombre_completo}</p>
@@ -2860,13 +2280,13 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
                 <button
                   key={egr.id}
                   onClick={() => setEgresadoSeleccionado(egr)}
-                  className="w-full text-left p-3.5 rounded-xl border border-slate-200 hover:border-[#6B1D2F] hover:bg-rose-50/40 transition flex items-center justify-between"
+                  className="w-full text-left p-3.5 rounded-xl border border-slate-200 hover:border-emerald-500 hover:bg-emerald-50/40 transition flex items-center justify-between"
                 >
                   <div>
                     <p className="font-bold text-slate-900 text-sm">{egr.nombre_completo}</p>
                     <p className="text-xs text-slate-500">DNI Egresado: {egr.dni}</p>
                     {invCoincidente && (
-                      <p className="text-xs text-[#6B1D2F] font-medium mt-0.5">
+                      <p className="text-xs text-emerald-700 font-medium mt-0.5">
                         Coincide invitado: {invCoincidente.nombre_completo} (DNI{' '}
                         {invCoincidente.dni})
                       </p>
@@ -2883,7 +2303,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
                 className="p-3.5 rounded-xl border border-slate-200 flex items-center justify-between"
               >
                 <div>
-                  <span className="text-[10px] font-bold uppercase text-[#6B1D2F]">Docente</span>
+                  <span className="text-[10px] font-bold uppercase text-indigo-600">Docente</span>
                   <p className="font-bold text-slate-900 text-sm">{doc.nombre_completo}</p>
                   <p className="text-xs text-slate-500">DNI: {doc.dni}</p>
                 </div>
