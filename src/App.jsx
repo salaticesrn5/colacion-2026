@@ -102,6 +102,7 @@ function PortalPrincipalDNI() {
       return;
     }
 
+    console.log("Datos recuperados de Supabase:", data);
     setDatosPersona(data);
     if (tipoUsuario === 'egresado') {
       if (data.celular) setCelular(data.celular);
@@ -143,7 +144,27 @@ function PortalPrincipalDNI() {
     }
   };
 
-  // Función de descarga para generar la tarjeta 1080x1920 con el nombre real arriba y el rol correspondiente abajo
+  // Función infalible para extraer el nombre de cualquier columna posible en Supabase
+  const obtenerNombreReal = (obj) => {
+    if (!obj) return '';
+    return (
+      obj.nombre || 
+      obj.name || 
+      obj.apellido || 
+      obj.docente || 
+      obj.profesor || 
+      obj.fullname || 
+      obj.full_name || 
+      obj.docente_nombre || 
+      obj.egresado || 
+      obj.persona || 
+      obj.titular || 
+      (obj.apellidos ? `${obj.apellidos}, ${obj.nombre}` : '') ||
+      ''
+    );
+  };
+
+  // Función de descarga para generar la tarjeta 1080x1920 con depuración directa
   const descargarTarjeta1080x1920 = () => {
     const svgElement = qrRef.current?.querySelector('svg');
     if (!svgElement) {
@@ -196,20 +217,8 @@ function PortalPrincipalDNI() {
           ctx.strokeStyle = '#E5E7EB';
           ctx.stroke();
 
-          // 4. Extracción robusta del nombre (Arriba) y Rol aclarado abajo
-          const nombreTitular = (
-            datosPersona.nombre || 
-            datosPersona.name || 
-            datosPersona.apellido || 
-            datosPersona.docente || 
-            datosPersona.profesor || 
-            datosPersona.fullname || 
-            datosPersona.full_name || 
-            datosPersona.docente_nombre || 
-            datosPersona.egresado || 
-            (datosPersona.apellidos ? `${datosPersona.apellidos}, ${datosPersona.nombre}` : '') || 
-            'ASISTENTE ESRN N° 005'
-          );
+          // 4. Extracción exacta del nombre y DNI
+          const nombreTitular = obtenerNombreReal(datosPersona) || 'ASISTENTE ESRN N° 005';
           const dniTitular = datosPersona.dni || dni;
 
           // Nombre grande y destacado arriba
@@ -221,7 +230,7 @@ function PortalPrincipalDNI() {
           ctx.font = '32px sans-serif';
           ctx.fillText(`DNI: ${dniTitular}`, 540, 650);
 
-          // Rol aclarado abajo (DOCENTE, VIP o EGRESADO)
+          // Rol aclarado abajo
           ctx.fillStyle = '#6B1D2F';
           ctx.font = 'bold 28px sans-serif';
           let textoRol = 'EGRESADO / TITULADO';
@@ -268,20 +277,7 @@ function PortalPrincipalDNI() {
     }
   };
 
-  const nombreMostrado = datosPersona ? (
-    datosPersona.nombre || 
-    datosPersona.name || 
-    datosPersona.apellido || 
-    datosPersona.docente || 
-    datosPersona.profesor || 
-    datosPersona.fullname || 
-    datosPersona.full_name || 
-    datosPersona.docente_nombre || 
-    datosPersona.egresado || 
-    (datosPersona.apellidos ? `${datosPersona.apellidos}, ${datosPersona.nombre}` : '') || 
-    'Asistente'
-  ) : '';
-
+  const nombreMostrado = obtenerNombreReal(datosPersona);
   const valorQRTexto = datosPersona ? `ESRN005-${tipoUsuario.toUpperCase()}-${datosPersona.dni || dni}-${nombreMostrado}` : '';
 
   return (
@@ -347,7 +343,7 @@ function PortalPrincipalDNI() {
         ) : (
           <div className="space-y-4 text-left">
             <div className="p-4 bg-gray-50 rounded-lg border text-center">
-              <h3 className="font-bold text-lg text-gray-800">{nombreMostrado}</h3>
+              <h3 className="font-bold text-lg text-gray-800">{nombreMostrado || 'Nombre no especificado en tabla'}</h3>
               <p className="text-xs text-gray-500">DNI: {datosPersona.dni || dni}</p>
               <p className="text-[11px] uppercase tracking-wider text-[#6B1D2F] font-semibold mt-1">
                 {tipoUsuario === 'egresado' ? 'Egresado / Titulado' : tipoUsuario === 'docente' ? 'Docente' : 'Invitado VIP / Autoridad'}
@@ -537,7 +533,7 @@ function PanelAdmin() {
               <div key={estudiante.id} className="p-4 flex flex-col md:flex-row justify-between items-center gap-4">
                 <div>
                   <h4 className="font-bold text-gray-900">{estudiante.nombre}</h4>
-                  <p className="text-xs text-gray-500">DNI: {estudiante.dni} | Cel: {estudiante.celular || 'No registrado'}</p>
+                  <p className="text-xs text-gray-500">DNI: {estudiante.dni} | Cel: {estudiante.celular || 'No registrado'}`;</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <button 
@@ -546,7 +542,7 @@ function PanelAdmin() {
                   >
                     {estudiante.activo ? '🚫 Marcar "No Asiste"' : '✅ Reactivar'}
                   </button>
-                  {whatsappActivo && estudiante.celular && estudiante.activo && (
+                  {whatsapp_activo && estudiante.celular && estudiante.activo && (
                     <a href={linkWp} target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-medium">
                       💬 Avisar
                     </a>
