@@ -7,7 +7,7 @@ import {
 import { QRCodeSVG } from 'qrcode.react';
 
 // ==========================================
-// CONFIGURACIÓN DE SUPABASE
+// CONFIGURACIÓN DE SUPABASE (Variables de entorno seguras)
 // ==========================================
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -388,16 +388,17 @@ function PortalPrincipalDNI() {
 
             {tipoUsuario === 'egresado' && (
               <>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Celular / WhatsApp</label>
+                {/* Campo de WhatsApp / Celular Destacado */}
+                <div className="border-2 border-emerald-300 bg-emerald-50/60 p-4 rounded-xl space-y-2 shadow-sm">
+                  <label className="block text-xs font-bold text-emerald-900 uppercase tracking-wide">📱 Tu Celular / WhatsApp</label>
                   <input 
                     type="text"
                     placeholder="Ej: 2994444444"
                     value={celular}
                     onChange={(e) => setCelular(e.target.value)}
-                    className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
+                    className="w-full px-3 py-2 border border-emerald-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-emerald-600 outline-none"
                   />
-                  <p className="text-xs text-gray-400 mt-0.5">Para recibir avisos institucionales.</p>
+                  <p className="text-[11px] text-emerald-700">Necesario para recibir notificaciones institucionales y avisos de plazas extra.</p>
                 </div>
 
                 {/* Carga de los 4 invitados base con tilde para grupal/individual, recomendación y destacado visual */}
