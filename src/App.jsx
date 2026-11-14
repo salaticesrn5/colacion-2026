@@ -15,6 +15,11 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
+const createTempAuthClient = () =>
+  createClient(supabaseUrl, supabaseAnonKey, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  });
+
 const sanitizeDNI = (val) => String(val || '').replace(/\D/g, '').slice(0, 8);
 const CAPACIDAD_MAXIMA = 525;
 const CUPO_BASE_DEFECTO = 4;
@@ -126,7 +131,6 @@ export default function App() {
     setVista('portal');
   };
 
-  // Funciones globales de mantenimiento
   const reiniciarAsistenciasGeneral = async () => {
     if (!window.confirm("¿Estás seguro de reiniciar todas las asistencias a 0 para las pruebas o el acto?")) return;
     try {
