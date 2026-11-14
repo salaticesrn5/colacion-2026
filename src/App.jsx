@@ -4,7 +4,7 @@ import {
   Users, UserCheck, Shield, QrCode, Upload, Trash2, Plus, Search,
   CheckCircle2, XCircle, AlertTriangle, Lock, Unlock, Download,
   LogOut, Eye, EyeOff, Edit3, Save, X, RefreshCw, MessageCircle, Award,
-  UserPlus, FileSpreadsheet, Check, ArrowRight, Building2, Phone, Eye as EyeIcon, Edit2, Star, Key, UserX, UserCheck as UserCheckIcon, Camera, CameraOff
+  UserPlus, FileSpreadsheet, Check, ArrowRight, Building2, Phone, Eye as EyeIcon, Edit2, Star, Key, UserX, UserCheck as UserCheckIcon, Camera, CameraOff, Printer, FileText
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 
@@ -33,7 +33,7 @@ const parseCSV = (text) => {
 };
 
 export default function App() {
-  const [vista, setVista] = useState('portal'); // 'portal', 'login', 'puerta', 'admin'
+  const [vista, setVista] = useState('portal'); // 'portal', 'login', 'puerta', 'admin', 'reporte_papel'
   const [session, setSession] = useState(null);
   const [perfilStaff, setPerfilStaff] = useState(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
@@ -137,7 +137,7 @@ export default function App() {
       )}
 
       {/* Encabezado Institucional ESRN N° 005 */}
-      <header className="bg-[#6B1D2F] text-white shadow-md sticky top-0 z-40">
+      <header className="bg-[#6B1D2F] text-white shadow-md sticky top-0 z-40 print:hidden">
         <div className="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3 cursor-pointer" onClick={() => setVista('portal')}>
             <div className="w-9 h-9 bg-white rounded-full flex items-center justify-center font-bold text-[#6B1D2F] text-sm shadow">
@@ -170,14 +170,24 @@ export default function App() {
                   Puerta
                 </button>
                 {(perfilStaff?.rol === 'admin' || perfilStaff?.rol === 'coordinador') && (
-                  <button
-                    onClick={() => setVista('admin')}
-                    className={`px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-bold shadow transition ${
-                      vista === 'admin' ? 'bg-white text-[#6B1D2F]' : 'bg-amber-500 hover:bg-amber-600 text-white'
-                    }`}
-                  >
-                    Administración
-                  </button>
+                  <>
+                    <button
+                      onClick={() => setVista('admin')}
+                      className={`px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-bold shadow transition ${
+                        vista === 'admin' ? 'bg-white text-[#6B1D2F]' : 'bg-amber-500 hover:bg-amber-600 text-white'
+                      }`}
+                    >
+                      Administración
+                    </button>
+                    <button
+                      onClick={() => setVista('reporte_papel')}
+                      className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition flex items-center gap-1 ${
+                        vista === 'reporte_papel' ? 'bg-white text-[#6B1D2F]' : 'bg-indigo-700 hover:bg-indigo-800 text-white'
+                      }`}
+                    >
+                      <FileText className="w-4 h-4" /> Resumen Papel
+                    </button>
+                  </>
                 )}
               </>
             )}
@@ -222,6 +232,8 @@ export default function App() {
             totalEgresados={totalEgresados} totalDocentes={totalDocentes} totalEspeciales={totalEspeciales}
             totalCuposFamiliares={totalCuposFamiliares} vacantesLibres={vacantesLibres} recargar={cargarDatosGlobales} notify={notify}
           />
+        ) : vista === 'reporte_papel' && session ? (
+          <ReporteResumenPapel egresados={egresados} invitados={invitados} docentes={docentes} especiales={especiales} />
         ) : (
           <PortalPrincipalDNI config={config} egresados={egresados} invitados={invitados} docentes={docentes} especiales={especiales} solicitudes={solicitudes} recargar={cargarDatosGlobales} notify={notify} />
         )}
@@ -232,7 +244,7 @@ export default function App() {
         href="https://wa.me/5492996326617?text=Hola,%20necesito%20ayuda%20con%20el%20sistema%20de%20acceso%20de%20la%20Colación%20ESRN%20N°%20005."
         target="_blank"
         rel="noopener noreferrer"
-        className="fixed bottom-6 right-6 z-50 bg-green-600 hover:bg-green-700 text-white p-3.5 rounded-full shadow-2xl flex items-center justify-center transition-transform hover:scale-110 cursor-pointer"
+        className="fixed bottom-6 right-6 z-50 bg-green-600 hover:bg-green-700 text-white p-3.5 rounded-full shadow-2xl flex items-center justify-center transition-transform hover:scale-110 cursor-pointer print:hidden"
         title="¿Necesitas ayuda? Escribinos por WhatsApp"
       >
         <Phone className="w-6 h-6" />
@@ -344,7 +356,6 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
       }
     }
     setFilasInvitados(arr);
-    // Si ya tiene invitados guardados, por defecto arrancan bloqueados (solo lectura) hasta que apreten "Modificar"
     if (misInv.length > 0) {
       setEditando(false);
     } else {
@@ -510,7 +521,7 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
         }
       }
       await recargar();
-      setEditando(false); // Bloqueamos nuevamente tras guardar exitosamente
+      setEditando(false);
       notify('Invitados y datos guardados correctamente.');
     } catch (err) {
       notify('Error al guardar: ' + err.message, 'error');
@@ -611,6 +622,7 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
                   <label className="block text-xs font-bold text-emerald-900 uppercase">📱 Tu Celular / WhatsApp</label>
                   <input 
                     type="text" 
+                    maxLength={15}
                     placeholder="Ej: 2994444444" 
                     value={celular} 
                     onChange={(e) => setCelular(sanitizeDNI(e.target.value))} 
@@ -625,7 +637,6 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
                       <p className="text-xs font-bold text-amber-900">⚠️ Recomendación Importante</p>
                       <p className="text-[11px] text-amber-800 mt-0.5">Revise bien los nombres y DNI antes de guardar.</p>
                     </div>
-                    {/* Botón Modificar / Bloquear */}
                     {!editando && (
                       <button
                         type="button"
@@ -672,7 +683,6 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
                         className={`w-full px-2.5 py-1.5 border rounded text-xs font-mono ${!editando ? 'bg-slate-100 text-slate-600 cursor-not-allowed' : 'bg-white'}`} 
                       />
 
-                      {/* Tilde para elegir si es Grupal o Individual */}
                       <div className="flex items-center gap-2 pt-1">
                         <input 
                           type="checkbox" 
@@ -2152,7 +2162,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
         </div>
       )}
 
-      {/* SECCIÓN REPORTES: ACREDITACIÓN EN VIVO UNIFICADA (Docentes, VIP y Egresados) */}
       {tab === 'reportes' && (
         <div className="bg-white rounded-2xl border p-5 space-y-5">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4">
@@ -2166,7 +2175,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
             </div>
           </div>
 
-          {/* Tarjetas de Métricas */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200">
               <p className="text-[11px] text-emerald-700 font-bold">Egresados Presentes</p>
@@ -2186,7 +2194,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
             </div>
           </div>
 
-          {/* Selector de Categoría (Docentes, VIP, Egresados) y Filtro */}
           <div className="flex flex-col sm:flex-row gap-3 items-center justify-between pt-2">
             <div className="flex gap-1.5 w-full sm:w-auto">
               <button onClick={() => setTipoCeremonial('docentes')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${tipoCeremonial === 'docentes' ? 'bg-[#6B1D2F] text-white shadow' : 'bg-slate-100 text-slate-700'}`}>📚 Docentes ({docentes.length})</button>
@@ -2209,7 +2216,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
             </div>
           </div>
 
-          {/* Buscador */}
           <div className="relative">
             <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
             <input
@@ -2221,7 +2227,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
             />
           </div>
 
-          {/* Listado Dinámico según la categoría seleccionada */}
           <div className="max-h-96 overflow-y-auto border rounded-xl divide-y text-xs">
             {tipoCeremonial === 'docentes' && (
               listaDocentesCeremonial.length === 0 ? (
@@ -2431,6 +2436,137 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ============================================================================
+// NUEVO COMPONENTE: REPORTE RESUMEN PARA PAPEL (Optimizado para impresión)
+// ============================================================================
+function ReporteResumenPapel({ egresados, invitados, docentes, especiales }) {
+  const egresadosOrdenados = [...egresados].sort((a, b) => 
+    (a.nombre_completo || '').localeCompare(b.nombre_completo || '')
+  );
+
+  return (
+    <div className="max-w-4xl mx-auto bg-white p-8 rounded-2xl shadow-sm border space-y-8 print:shadow-none print:border-none print:p-0 print:m-0">
+      <div className="flex justify-between items-center border-b pb-4 print:pb-2">
+        <div>
+          <h2 className="text-xl font-bold text-[#6B1D2F]">ESRN N° 005 — Cipolletti</h2>
+          <p className="text-xs text-slate-500">Acto de Colación 2026 · Resumen General para Control en Papel</p>
+        </div>
+        <button
+          onClick={() => window.print()}
+          className="px-4 py-2 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow cursor-pointer print:hidden"
+        >
+          <Printer className="w-4 h-4" /> Imprimir Documento
+        </button>
+      </div>
+
+      {/* 1. TABLA DE EGRESADOS E INVITADOS */}
+      <div className="space-y-3">
+        <h3 className="font-bold text-sm text-[#6B1D2F] uppercase tracking-wide">1. Padrón de Egresados y Grupo Familiar</h3>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse text-xs">
+            <thead>
+              <tr className="bg-slate-100 border-b border-slate-300">
+                <th className="p-2 border">Egresado / DNI</th>
+                <th className="p-2 border">Invitado / Familiar</th>
+                <th className="p-2 border">DNI Invitado</th>
+                <th className="p-2 border text-center">Modalidad</th>
+                <th className="p-2 border text-center">Firma Ingreso</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {egresadosOrdenados.map((egr) => {
+                const misInv = invitados.filter(i => i.egresado_id === egr.id);
+                return (
+                  <React.Fragment key={egr.id}>
+                    <tr className="bg-slate-50 font-bold">
+                      <td className="p-2 border align-top" colSpan={5}>
+                        🎓 {egr.nombre_completo} (DNI: {egr.dni}) · Cel: {egr.celular || 'S/N'}
+                      </td>
+                    </tr>
+                    {misInv.length === 0 ? (
+                      <tr>
+                        <td className="p-2 border text-slate-400 italic" colSpan={5}>Sin invitados cargados</td>
+                      </tr>
+                    ) : (
+                      misInv.map((inv, idx) => (
+                        <tr key={inv.id} className="hover:bg-slate-50/50">
+                          <td className="p-2 border text-slate-400 pl-6">↳ Cupo #{idx + 1}</td>
+                          <td className="p-2 border font-medium">{inv.nombre_completo}</td>
+                          <td className="p-2 border font-mono">{inv.dni}</td>
+                          <td className="p-2 border text-center">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${inv.es_grupal !== false ? 'bg-amber-100 text-amber-800' : 'bg-sky-100 text-sky-800'}`}>
+                              {inv.es_grupal !== false ? 'Grupal' : 'Individual'}
+                            </span>
+                          </td>
+                          <td className="p-2 border text-center w-28">______</td>
+                        </tr>
+                      ))
+                    )}
+                  </React.Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* 2. LISTA DE DOCENTES */}
+      <div className="space-y-3 pt-4">
+        <h3 className="font-bold text-sm text-[#6B1D2F] uppercase tracking-wide">2. Padrón de Docentes Confirmados</h3>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse text-xs">
+            <thead>
+              <tr className="bg-slate-100 border-b border-slate-300">
+                <th className="p-2 border">Nombre y Apellido del Docente</th>
+                <th className="p-2 border">DNI</th>
+                <th className="p-2 border text-center">Estado</th>
+                <th className="p-2 border text-center">Firma Ingreso</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {docentes.map((d) => (
+                <tr key={d.id}>
+                  <td className="p-2 border font-medium">📚 {d.nombre_completo}</td>
+                  <td className="p-2 border font-mono">{d.dni}</td>
+                  <td className="p-2 border text-center uppercase font-bold text-[10px]">{d.asistio ? 'Presente' : 'Pendiente'}</td>
+                  <td className="p-2 border text-center w-28">______</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* 3. LISTA DE VIP / AUTORIDADES */}
+      <div className="space-y-3 pt-4">
+        <h3 className="font-bold text-sm text-[#6B1D2F] uppercase tracking-wide">3. Padrón de Invitados VIP / Autoridades</h3>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse text-xs">
+            <thead>
+              <tr className="bg-slate-100 border-b border-slate-300">
+                <th className="p-2 border">Nombre y Apellido / Institución</th>
+                <th className="p-2 border">DNI</th>
+                <th className="p-2 border text-center">Estado</th>
+                <th className="p-2 border text-center">Firma Ingreso</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {especiales.map((v) => (
+                <tr key={v.id}>
+                  <td className="p-2 border font-medium">⭐ {v.nombre_completo}</td>
+                  <td className="p-2 border font-mono">{v.dni || 'S/DNI'}</td>
+                  <td className="p-2 border text-center uppercase font-bold text-[10px]">{v.asistio ? 'Presente' : 'Pendiente'}</td>
+                  <td className="p-2 border text-center w-28">______</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }
