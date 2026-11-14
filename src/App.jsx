@@ -309,6 +309,7 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
   const [celular, setCelular] = useState('');
   const [filasInvitados, setFilasInvitados] = useState([]);
   const [guardando, setGuardando] = useState(false);
+  const [editando, setEditando] = useState(false); // Controla si están bloqueados o editables los campos
   const [cantExtra, setCantExtra] = useState(1);
   const [obsExtra, setObsExtra] = useState('');
   const [enviandoSol, setEnviandoSol] = useState(false);
@@ -330,12 +331,25 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
     const arr = [];
     for (let idx = 0; idx < cupo; idx++) {
       if (misInv[idx]) {
-        arr.push({ id: misInv[idx].id, nombre_completo: misInv[idx].nombre_completo || '', dni: misInv[idx].dni || '', numero_entrada: misInv[idx].numero_entrada || '', guardado: true });
+        arr.push({ 
+          id: misInv[idx].id, 
+          nombre_completo: misInv[idx].nombre_completo || '', 
+          dni: misInv[idx].dni || '', 
+          numero_entrada: misInv[idx].numero_entrada || '', 
+          es_grupal: misInv[idx].es_grupal !== undefined ? misInv[idx].es_grupal : true, 
+          guardado: true 
+        });
       } else {
-        arr.push({ id: null, nombre_completo: '', dni: '', numero_entrada: '', guardado: false });
+        arr.push({ id: null, nombre_completo: '', dni: '', numero_entrada: '', es_grupal: true, guardado: false });
       }
     }
     setFilasInvitados(arr);
+    // Si ya tiene invitados guardados, por defecto arrancan bloqueados (solo lectura) hasta que apreten "Modificar"
+    if (misInv.length > 0) {
+      setEditando(false);
+    } else {
+      setEditando(true);
+    }
   };
 
   const buscarPorDNI = async (e) => {
@@ -475,16 +489,28 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
 
         if (nombreLimpio && dniLimpio) {
           if (fila.id) {
-            await supabase.from('invitados').update({ nombre_completo: nombreLimpio.toUpperCase(), dni: dniLimpio }).eq('id', fila.id);
+            await supabase.from('invitados').update({ 
+              nombre_completo: nombreLimpio.toUpperCase(), 
+              dni: dniLimpio,
+              es_grupal: fila.es_grupal 
+            }).eq('id', fila.id);
           } else {
             const numEntrada = `ENT-${datosPersona.dni.slice(-4)}-${i + 1}-${Math.floor(100 + Math.random() * 900)}`;
-            await supabase.from('invitados').insert({ egresado_id: datosPersona.id, nombre_completo: nombreLimpio.toUpperCase(), dni: dniLimpio, numero_entrada: numEntrada, asistio: false });
+            await supabase.from('invitados').insert({ 
+              egresado_id: datosPersona.id, 
+              nombre_completo: nombreLimpio.toUpperCase(), 
+              dni: dniLimpio, 
+              numero_entrada: numEntrada, 
+              es_grupal: fila.es_grupal,
+              asistio: false 
+            });
           }
         } else if (!nombreLimpio && !dniLimpio && fila.id) {
           await supabase.from('invitados').delete().eq('id', fila.id);
         }
       }
       await recargar();
+      setEditando(false); // Bloqueamos nuevamente tras guardar exitosamente
       notify('Invitados y datos guardados correctamente.');
     } catch (err) {
       notify('Error al guardar: ' + err.message, 'error');
@@ -571,7 +597,7 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
               </div>
 
               <button type="button" onClick={() => descargarTarjeta1080x1920(nombreMostrado, `DNI: ${datosPersona.dni || dni}`, textoRolTarjeta)} className="w-full py-2.5 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 shadow cursor-pointer">
-                <Download className="w-4 h-4" /> Descargar Mi QR Personal (1080x1920)
+                <Download className="w-4 h-4" /> Descargar Mi QR Personal
               </button>
             </div>
 
@@ -583,44 +609,101 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
               <>
                 <div className="border-2 border-emerald-500 bg-emerald-50 p-4 rounded-xl space-y-2">
                   <label className="block text-xs font-bold text-emerald-900 uppercase">📱 Tu Celular / WhatsApp</label>
-                  <input type="text" placeholder="Ej: 2994444444" value={celular} onChange={(e) => setCelular(e.target.value)} className="w-full px-3 py-2 border-2 border-emerald-500 rounded-lg text-sm bg-white font-semibold text-emerald-900 outline-none" />
+                  <input 
+                    type="text" 
+                    placeholder="Ej: 2994444444" 
+                    value={celular} 
+                    onChange={(e) => setCelular(sanitizeDNI(e.target.value))} 
+                    disabled={!editando}
+                    className={`w-full px-3 py-2 border-2 border-emerald-500 rounded-lg text-sm font-semibold text-emerald-900 outline-none ${!editando ? 'bg-slate-100 text-slate-600 cursor-not-allowed' : 'bg-white'}`} 
+                  />
                 </div>
 
                 <div className="border-2 border-[#6B1D2F] bg-rose-50/40 p-4 rounded-xl space-y-3">
-                  <div className="bg-amber-100 border border-amber-300 p-3 rounded-lg">
-                    <p className="text-xs font-bold text-amber-900">⚠️ Recomendación Importante</p>
-                    <p className="text-[11px] text-amber-800 mt-0.5">Revise bien los nombres y DNI de sus invitados antes de guardar.</p>
+                  <div className="bg-amber-100 border border-amber-300 p-3 rounded-lg flex justify-between items-center">
+                    <div>
+                      <p className="text-xs font-bold text-amber-900">⚠️ Recomendación Importante</p>
+                      <p className="text-[11px] text-amber-800 mt-0.5">Revise bien los nombres y DNI antes de guardar.</p>
+                    </div>
+                    {/* Botón Modificar / Bloquear */}
+                    {!editando && (
+                      <button
+                        type="button"
+                        onClick={() => setEditando(true)}
+                        className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold shadow cursor-pointer shrink-0"
+                      >
+                        ✏️ Modificar
+                      </button>
+                    )}
                   </div>
 
                   <h4 className="font-bold text-sm text-[#6B1D2F]">Carga de Invitados ({filasInvitados.length} cupos)</h4>
                   {filasInvitados.map((fila, idx) => (
-                    <div key={idx} className="p-3 bg-white border rounded-lg space-y-2">
+                    <div key={idx} className="p-3 bg-white border rounded-lg space-y-2.5">
                       <div className="flex justify-between items-center">
-                        <span className="text-xs font-bold text-[#6B1D2F]">Invitado #{idx + 1} {fila.numero_entrada && `(${fila.numero_entrada})`}</span>
+                        <span className="text-xs font-bold text-[#6B1D2F]">Invitado #{idx + 1}</span>
                         {fila.guardado && fila.numero_entrada && (
-                          <button type="button" onClick={() => descargarTarjeta1080x1920(fila.nombre_completo, `Invitado de ${nombreMostrado}`, fila.numero_entrada)} className="text-xs text-emerald-700 font-bold hover:underline flex items-center gap-1">
-                            <Download className="w-3 h-3" /> QR
+                          <button 
+                            type="button" 
+                            onClick={() => descargarTarjeta1080x1920(fila.nombre_completo, `Invitado de ${nombreMostrado}`, fila.es_grupal ? 'ACCESO GRUPAL' : 'ACCESO INDIVIDUAL')} 
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 shadow-xs cursor-pointer"
+                          >
+                            <Download className="w-3.5 h-3.5" /> QR
                           </button>
                         )}
                       </div>
-                      <input type="text" placeholder="Nombre y Apellido" value={fila.nombre_completo} onChange={(e) => { const arr = [...filasInvitados]; arr[idx].nombre_completo = e.target.value; setFilasInvitados(arr); }} className="w-full px-2.5 py-1.5 border rounded text-xs" />
-                      <input type="text" maxLength={8} placeholder="DNI" value={fila.dni} onChange={(e) => { const arr = [...filasInvitados]; arr[idx].dni = sanitizeDNI(e.target.value); setFilasInvitados(arr); }} className="w-full px-2.5 py-1.5 border rounded text-xs" />
+
+                      <input 
+                        type="text" 
+                        placeholder="Nombre y Apellido" 
+                        value={fila.nombre_completo} 
+                        onChange={(e) => { const arr = [...filasInvitados]; arr[idx].nombre_completo = e.target.value; setFilasInvitados(arr); }} 
+                        disabled={!editando}
+                        className={`w-full px-2.5 py-1.5 border rounded text-xs ${!editando ? 'bg-slate-100 text-slate-600 cursor-not-allowed' : 'bg-white'}`} 
+                      />
+
+                      <input 
+                        type="text" 
+                        maxLength={8} 
+                        placeholder="DNI (Solo números)" 
+                        value={fila.dni} 
+                        onChange={(e) => { const arr = [...filasInvitados]; arr[idx].dni = sanitizeDNI(e.target.value); setFilasInvitados(arr); }} 
+                        disabled={!editando}
+                        className={`w-full px-2.5 py-1.5 border rounded text-xs font-mono ${!editando ? 'bg-slate-100 text-slate-600 cursor-not-allowed' : 'bg-white'}`} 
+                      />
+
+                      {/* Tilde para elegir si es Grupal o Individual */}
+                      <div className="flex items-center gap-2 pt-1">
+                        <input 
+                          type="checkbox" 
+                          id={`grupal-${idx}`}
+                          checked={fila.es_grupal}
+                          disabled={!editando}
+                          onChange={(e) => { const arr = [...filasInvitados]; arr[idx].es_grupal = e.target.checked; setFilasInvitados(arr); }}
+                          className="w-4 h-4 text-[#6B1D2F] rounded border-gray-300 focus:ring-[#6B1D2F] cursor-pointer"
+                        />
+                        <label htmlFor={`grupal-${idx}`} className="text-[11px] font-semibold text-slate-700 cursor-pointer">
+                          Ingresa de forma grupal con el egresado (Tildado = Grupal / Destildado = Individual)
+                        </label>
+                      </div>
                     </div>
                   ))}
                 </div>
 
-                <button onClick={guardarInvitados} disabled={guardando} className="w-full py-2 bg-[#6B1D2F] text-white rounded-lg text-sm font-medium hover:bg-opacity-90 shadow">
-                  {guardando ? 'Guardando...' : 'Guardar Cambios y Generar QR'}
-                </button>
+                {editando && (
+                  <button onClick={guardarInvitados} disabled={guardando} className="w-full py-2.5 bg-[#6B1D2F] text-white rounded-lg text-sm font-bold hover:bg-opacity-95 shadow cursor-pointer">
+                    {guardando ? 'Guardando...' : 'Guardar Cambios y Generar QR'}
+                  </button>
+                )}
 
                 <div className="bg-gray-50 border rounded-xl p-4 space-y-3">
                   <h4 className="font-bold text-xs text-gray-800 uppercase">Solicitar Butacas Extra</h4>
-                  <form onSubmit={enviarSolicitudExtra} className="flex gap-2">
-                    <select value={cantExtra} onChange={(e) => setCantExtra(e.target.value)} className="px-2 py-1.5 border rounded text-xs bg-white">
+                  <form onSubmit={enviarSolicitudExtra} className="flex flex-col sm:flex-row gap-2">
+                    <select value={cantExtra} onChange={(e) => setCantExtra(e.target.value)} className="px-2 py-2 border rounded-xl text-xs bg-white">
                       <option value={1}>+1</option><option value={2}>+2</option><option value={3}>+3</option>
                     </select>
-                    <input type="text" placeholder="Observación (ej: abuelos)" value={obsExtra} onChange={(e) => setObsExtra(e.target.value)} className="flex-1 px-2.5 py-1.5 border rounded text-xs" />
-                    <button type="submit" disabled={enviandoSol} className="px-3 py-1.5 bg-indigo-600 text-white rounded text-xs font-bold">Solicitar</button>
+                    <input type="text" placeholder="Observación (ej: abuelos)" value={obsExtra} onChange={(e) => setObsExtra(e.target.value)} className="w-full sm:flex-1 px-3 py-2 border rounded-xl text-xs bg-white outline-none" />
+                    <button type="submit" disabled={enviandoSol} className="w-full sm:w-auto px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow shrink-0 cursor-pointer">Solicitar</button>
                   </form>
                   {misSolicitudes.map((s) => (
                     <div key={s.id} className="text-xs bg-white p-2 border rounded flex justify-between">
@@ -633,12 +716,12 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
             )}
 
             <div className="pt-2 border-t">
-              <button type="button" onClick={marcarNoAsistire} className="w-full py-2.5 bg-red-50 hover:bg-red-100 border border-red-300 text-red-700 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition">
+              <button type="button" onClick={marcarNoAsistire} className="w-full py-2.5 bg-red-50 hover:bg-red-100 border border-red-300 text-red-700 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer">
                 <XCircle className="w-4 h-4" /> No podré asistir / Liberar cupo
               </button>
             </div>
 
-            <button type="button" onClick={() => { setDatosPersona(null); setDni(''); }} className="w-full py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 text-sm">
+            <button type="button" onClick={() => { setDatosPersona(null); setDni(''); }} className="w-full py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 text-sm cursor-pointer">
               Consultar otro DNI
             </button>
           </div>
@@ -687,7 +770,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
       }
       await supabase.from('invitados').update({ asistio: true, hora_ingreso: new Date().toISOString() }).eq('id', inv.id);
       await recargar();
-      setResultadoIngreso({ tipo: 'success', titulo: '✓ INGRESO PERMITIDO (FAMILIAR)', nombre: inv.nombre_completo, detalle: `DNI: ${inv.dni} · Entrada: ${inv.numero_entrada}` });
+      setResultadoIngreso({ tipo: 'success', titulo: '✓ INGRESO PERMITIDO (FAMILIAR)', nombre: inv.nombre_completo, detalle: `DNI: ${inv.dni} · ${inv.es_grupal ? 'Ingreso Grupal' : 'Ingreso Individual'}` });
       notify(`✓ INGRESO PERMITIDO: ${inv.nombre_completo}`);
       return;
     }
@@ -720,7 +803,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
       return;
     }
 
-    setResultadoIngreso({ tipo: 'error', titulo: '❌ CÓDIGO NO ENCONTRADO', nombre: raw, detalle: 'Verifique el padrón o busque manualmente por DNI.' });
+    setResultadoIngreso({ tipo: 'error', titulo: '❌ CÓDIGO NO ENCONTRADO', nombre: raw, detalle: 'Verifique el padrón o busque manualmente por DNI (Plan B).' });
     notify(`❌ Código o DNI no encontrado: ${raw}`, 'error');
   };
 
@@ -863,8 +946,9 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
         </form>
       </div>
 
+      {/* PLAN B: BÚSQUEDA MANUAL PARA CASOS SEPARADOS */}
       <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-4 shadow-sm">
-        <h3 className="font-bold text-xs text-slate-500 uppercase tracking-wider">Plan B: Búsqueda manual por Apellido o DNI</h3>
+        <h3 className="font-bold text-xs text-slate-500 uppercase tracking-wider">Plan B: Búsqueda manual (Por si un invitado grupal llega por separado)</h3>
         <div className="relative">
           <Search className="w-5 h-5 text-slate-400 absolute left-3.5 top-3" />
           <input type="text" placeholder="Escribí el nombre del egresado, docente o DNI..." value={busqueda} onChange={(e) => { setBusqueda(e.target.value); setEgresadoSeleccionado(null); }} className="w-full pl-11 pr-4 py-3 rounded-xl border border-slate-300 text-sm outline-none focus:border-[#6B1D2F]" />
@@ -878,11 +962,11 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
               <p className="text-xs text-slate-500">DNI Egresado: {egresadoSeleccionado.dni}</p>
             </div>
             <div className="space-y-2">
-              <p className="text-xs font-bold uppercase text-slate-500">Familiares Habilitados:</p>
+              <p className="text-xs font-bold uppercase text-slate-500">Familiares Habilitados (Acreditar individualmente si llegaron separados):</p>
               {invitados.filter((i) => i.egresado_id === egresadoSeleccionado.id).map((inv) => (
                 <div key={inv.id} className="p-3 rounded-xl border flex items-center justify-between">
                   <div>
-                    <p className="font-bold text-sm">{inv.nombre_completo}</p>
+                    <p className="font-bold text-sm">{inv.nombre_completo} {inv.es_grupal && <span className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-bold ml-1">Grupal</span>}</p>
                     <p className="text-xs text-slate-500">DNI: {inv.dni} · <strong>{inv.numero_entrada}</strong></p>
                   </div>
                   <button onClick={async () => { await supabase.from('invitados').update({ asistio: !inv.asistio }).eq('id', inv.id); await recargar(); }} className={`px-3.5 py-1.5 rounded-xl text-xs font-bold shadow-xs ${inv.asistio ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-800'}`}>
@@ -923,7 +1007,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
 }
 
 // ============================================================================
-// MÓDULO A: PANEL DE ADMINISTRACIÓN Y COORDINACIÓN COMPLETO (Con Acreditación unificada de Docentes, VIP y Egresados)
+// MÓDULO A: PANEL DE ADMINISTRACIÓN Y COORDINACIÓN COMPLETO
 // ============================================================================
 function PanelAdministracion({ perfilStaff, config, egresados, invitados, docentes, especiales, solicitudes, usuariosSistema, totalEgresados, totalDocentes, totalEspeciales, totalCuposFamiliares, vacantesLibres, recargar, notify }) {
   const [tab, setTab] = useState('egresados');
@@ -1672,7 +1756,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
 
               <div className="flex gap-2 pt-3 border-t">
                 <button type="button" onClick={() => setModalEditarEgr(null)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold">Cancelar</button>
-                <button type="submit" disabled={guardandoEdicion} className="flex-1 py-2.5 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-xl text-xs font-bold shadow">
+                <button type="submit" disabled={guardandoEdicion} className="flex-1 py-2.5 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold shadow">
                   {guardandoEdicion ? 'Guardando...' : 'Guardar Cambios'}
                 </button>
               </div>
