@@ -721,20 +721,18 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
                     placeholder="Ej: 2994444444" 
                     value={celular} 
                     onChange={(e) => setCelular(sanitizeDNI(e.target.value))} 
-                    disabled={!editando || esCierreParcialOVerdadero}
-                    className={`w-full px-3 py-2 border-2 border-emerald-500 rounded-lg text-sm font-semibold text-emerald-900 outline-none ${(!editando || esCierreParcialOVerdadero) ? 'bg-slate-100 text-slate-600 cursor-not-allowed' : 'bg-white'}`} 
+                    disabled={!editando}
+                    className={`w-full px-3 py-2 border-2 border-emerald-500 rounded-lg text-sm font-semibold text-emerald-900 outline-none ${!editando ? 'bg-slate-100 text-slate-600 cursor-not-allowed' : 'bg-white'}`} 
                   />
                 </div>
 
                 <div className="border-2 border-[#6B1D2F] bg-rose-50/40 p-4 rounded-xl space-y-3">
                   <div className="bg-amber-100 border border-amber-300 p-3 rounded-lg flex justify-between items-center">
                     <div>
-                      <p className="text-xs font-bold text-amber-900">⚠️ Estado del Padrón</p>
-                      <p className="text-[11px] text-amber-800 mt-0.5">
-                        {esCierreParcialOVerdadero ? 'Cierre Parcial activo: Edición bloqueada.' : 'Revise bien los nombres antes de guardar.'}
-                      </p>
+                      <p className="text-xs font-bold text-amber-900">⚠️ Recomendación Importante</p>
+                      <p className="text-[11px] text-amber-800 mt-0.5">Revise bien los nombres y DNI antes de guardar.</p>
                     </div>
-                    {!editando && !esCierreParcialOVerdadero && (
+                    {!editando && (
                       <button
                         type="button"
                         onClick={() => setEditando(true)}
@@ -766,8 +764,8 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
                         placeholder="Nombre y Apellido" 
                         value={fila.nombre_completo} 
                         onChange={(e) => { const arr = [...filasInvitados]; arr[idx].nombre_completo = e.target.value; setFilasInvitados(arr); }} 
-                        disabled={!editando || esCierreParcialOVerdadero}
-                        className={`w-full px-2.5 py-1.5 border rounded text-xs ${(!editando || esCierreParcialOVerdadero) ? 'bg-slate-100 text-slate-600 cursor-not-allowed' : 'bg-white'}`} 
+                        disabled={!editando}
+                        className={`w-full px-2.5 py-1.5 border rounded text-xs ${!editando ? 'bg-slate-100 text-slate-600 cursor-not-allowed' : 'bg-white'}`} 
                       />
 
                       <input 
@@ -776,8 +774,8 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
                         placeholder="DNI (Solo números)" 
                         value={fila.dni} 
                         onChange={(e) => { const arr = [...filasInvitados]; arr[idx].dni = sanitizeDNI(e.target.value); setFilasInvitados(arr); }} 
-                        disabled={!editando || esCierreParcialOVerdadero}
-                        className={`w-full px-2.5 py-1.5 border rounded text-xs font-mono ${(!editando || esCierreParcialOVerdadero) ? 'bg-slate-100 text-slate-600 cursor-not-allowed' : 'bg-white'}`} 
+                        disabled={!editando}
+                        className={`w-full px-2.5 py-1.5 border rounded text-xs font-mono ${!editando ? 'bg-slate-100 text-slate-600 cursor-not-allowed' : 'bg-white'}`} 
                       />
 
                       <div className="flex items-center gap-2 pt-1">
@@ -785,7 +783,7 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
                           type="checkbox" 
                           id={`grupal-${idx}`}
                           checked={fila.es_grupal}
-                          disabled={!editando || esCierreParcialOVerdadero}
+                          disabled={!editando}
                           onChange={(e) => { const arr = [...filasInvitados]; arr[idx].es_grupal = e.target.checked; setFilasInvitados(arr); }}
                           className="w-4 h-4 text-[#6B1D2F] rounded border-gray-300 focus:ring-[#6B1D2F] cursor-pointer"
                         />
@@ -797,7 +795,7 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
                   ))}
                 </div>
 
-                {editando && !esCierreParcialOVerdadero && (
+                {editando && (
                   <button onClick={guardarInvitados} disabled={guardando} className="w-full py-2.5 bg-[#6B1D2F] text-white rounded-lg text-sm font-bold hover:bg-opacity-95 shadow cursor-pointer">
                     {guardando ? 'Guardando...' : 'Guardar Cambios y Generar QR'}
                   </button>
