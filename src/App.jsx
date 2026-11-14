@@ -649,7 +649,7 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
 }
 
 // ============================================================================
-// MÓDULO C: CONTROL DE ACCESO EN PUERTA (Ultra simplificado y directo)
+// MÓDULO C: CONTROL DE ACCESO EN PUERTA (Cámara Trasera Forzada y Lector QR Real)
 // ============================================================================
 function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, notify }) {
   const [busqueda, setBusqueda] = useState('');
@@ -657,13 +657,14 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
   const [egresadoSeleccionado, setEgresadoSeleccionado] = useState(null);
   const [escaneandoCamara, setEscaneandoCamara] = useState(false);
   const videoRef = useRef(null);
+  const canvasRef = useRef(null);
   const streamRef = useRef(null);
+  const scanIntervalRef = useRef(null);
 
   const validarCodigoEntrada = async (codigoRaw) => {
     const code = String(codigoRaw || '').trim().toUpperCase();
     if (!code) return;
 
-    // Buscar en invitados (familiares)
     let inv = invitados.find((i) => String(i.numero_entrada || '').toUpperCase() === code || String(i.dni || '') === code);
     
     if (inv) {
@@ -678,7 +679,6 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
       return;
     }
 
-    // Buscar en docentes
     let doc = docentes.find((d) => String(d.dni || '') === code);
     if (doc) {
       await supabase.from('docentes').update({ asistio: true }).eq('id', doc.id);
@@ -688,7 +688,6 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
       return;
     }
 
-    // Buscar en VIP
     let vip = especiales.find((v) => String(v.dni || '') === code || String(v.nombre_completo || '').toUpperCase().includes(code));
     if (vip) {
       await supabase.from('invitados_especiales').update({ asistio: true }).eq('id', vip.id);
@@ -704,19 +703,48 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
   const iniciarCamara = async () => {
     setEscaneandoCamara(true);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      // Forzamos explícitamente la cámara trasera principal del celular
+      const constraints = {
+        video: {
+          facingMode: { ideal: 'environment' }
+        }
+      };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        videoRef.current.play();
+      }
+
+      // Iniciamos loop de lectura por canvas
+      if (window.BarcodeDetector) {
+        const barcodeDetector = new window.BarcodeDetector({ formats: ['qr_code'] });
+        scanIntervalRef.current = setInterval(async () => {
+          if (videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA) {
+            try {
+              const barcodes = await barcodeDetector.detect(videoRef.current);
+              if (barcodes.length > 0) {
+                const scannedText = barcodes[0].rawValue;
+                validarCodigoEntrada(scannedText);
+              }
+            } catch (err) {
+              // Ignorar errores temporales de fotograma
+            }
+          }
+        }, 500);
       }
     } catch (err) {
       console.error(err);
-      notify('No se pudo acceder a la cámara. Verifique los permisos del navegador.', 'error');
+      notify('No se pudo acceder a la cámara trasera. Verifique los permisos del navegador.', 'error');
       setEscaneandoCamara(false);
     }
   };
 
   const apagarCamara = () => {
+    if (scanIntervalRef.current) {
+      clearInterval(scanIntervalRef.current);
+      scanIntervalRef.current = null;
+    }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
@@ -736,14 +764,13 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
 
   return (
     <div className="max-w-xl mx-auto space-y-4">
-      {/* TARJETA PRINCIPAL DE ESCANEO RÁPIDO */}
       <div className="bg-slate-900 text-white rounded-2xl p-6 space-y-4 shadow-xl text-center">
         <div>
           <h2 className="font-extrabold text-2xl text-white">Control de Puerta</h2>
-          <p className="text-xs text-slate-300 mt-1">Tocá el botón para abrir la cámara y registrar ingresos al instante</p>
+          <p className="text-xs text-slate-300 mt-1">Utilizá la cámara trasera para escanear los pases QR al ingresar</p>
         </div>
 
-        {/* BOTÓN GIGANTE PARA ESCANEAR */}
+        {/* BOTÓN GIGANTE PARA ACTIVAR CÁMARA TRASERA */}
         <button
           type="button"
           onClick={() => {
@@ -772,36 +799,33 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
 
         {escaneandoCamara && (
           <div className="bg-slate-800 border-2 border-emerald-500 rounded-2xl p-4 space-y-3">
-            <div className="relative w-full h-72 bg-black rounded-xl overflow-hidden border border-slate-700">
+            <div className="relative w-full h-80 bg-black rounded-xl overflow-hidden border border-slate-700">
               <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
+              <canvas ref={canvasRef} className="hidden" />
               <div className="absolute inset-0 border-4 border-emerald-500/40 rounded-xl pointer-events-none flex items-center justify-center">
-                <div className="w-52 h-52 border-2 border-dashed border-emerald-400 rounded-lg animate-pulse" />
+                <div className="w-56 h-56 border-2 border-dashed border-emerald-400 rounded-lg animate-pulse" />
               </div>
             </div>
-            <p className="font-bold text-xs text-emerald-400">Apuntá la cámara al QR del pase</p>
-            <div className="flex justify-center gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  const primerInv = invitados[0]?.numero_entrada || 'ENT-1234-1-589';
-                  validarCodigoEntrada(primerInv);
-                }}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow"
-              >
-                Simular Lectura Exitosa
-              </button>
-            </div>
+            <p className="font-bold text-xs text-emerald-400">Apuntá la cámara trasera al código QR del pase</p>
+            <button
+              type="button"
+              onClick={() => {
+                const primerInv = invitados[0]?.numero_entrada || 'ENT-1234-1-589';
+                validarCodigoEntrada(primerInv);
+              }}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow"
+            >
+              Simular Lectura Exitosa
+            </button>
           </div>
         )}
 
-        {/* INPUT DE TIPEO RÁPIDO OPCIONAL */}
         <form onSubmit={(e) => { e.preventDefault(); validarCodigoEntrada(codigoManualQr); setCodigoManualQr(''); }} className="flex gap-2 pt-2 border-t border-slate-800">
           <input type="text" placeholder="O tipear código ENT-... o DNI" value={codigoManualQr} onChange={(e) => setCodigoManualQr(e.target.value)} className="flex-1 px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white outline-none font-mono" />
           <button type="submit" className="px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm">Registrar</button>
         </form>
       </div>
 
-      {/* PLAN B: BÚSQUEDA MANUAL */}
       <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-4 shadow-sm">
         <h3 className="font-bold text-xs text-slate-500 uppercase tracking-wider">Plan B: Búsqueda manual por Apellido o DNI</h3>
         <div className="relative">
@@ -849,7 +873,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
                   <p className="font-bold text-sm">{doc.nombre_completo}</p>
                   <p className="text-xs text-slate-500">DNI: {doc.dni}</p>
                 </div>
-                <button onClick={async () => { await supabase.from('docentes').update({ asistio: !doc.asistio }).eq('id', doc.id); await recargar(); }} className={`px-3.5 py-1.5 rounded-xl text-xs font-bold shadow-xs ${doc.asistio ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-800'}`}>
+                <button onClick={async () => { await supabase.from('docentes').update({ asistio: !doc.asistio }).eq('id', doc.id); await recargar(); }} className={`px-3 py-1.5 rounded-xl text-xs font-bold shadow-xs ${doc.asistio ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-800'}`}>
                   {doc.asistio ? '✓ Asistió' : 'Marcar Ingreso'}
                 </button>
               </div>
@@ -1594,7 +1618,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
 
               <div className="flex gap-2 pt-3 border-t">
                 <button type="button" onClick={() => setModalEditarEgr(null)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold">Cancelar</button>
-                <button type="submit" disabled={guardandoEdicion} className="flex-1 py-2.5 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold shadow">
+                <button type="submit" disabled={guardandoEdicion} className="flex-1 py-2.5 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-xl text-xs font-bold shadow">
                   {guardandoEdicion ? 'Guardando...' : 'Guardar Cambios'}
                 </button>
               </div>
@@ -1753,7 +1777,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
               </div>
 
               <div className="flex gap-2 pt-3 border-t">
-                <button type="button" onClick={() => setModalEditarDoc(null)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold">Cancelar</button>
+                <button type="button" onClick={() => setModalEditarDoc(null)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold hover:bg-slate-50">Cancelar</button>
                 <button type="submit" disabled={guardandoDocente} className="flex-1 py-2.5 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-xl text-xs font-bold shadow">
                   {guardandoDocente ? 'Guardando...' : 'Guardar Cambios'}
                 </button>
