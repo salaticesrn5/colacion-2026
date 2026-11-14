@@ -1190,27 +1190,21 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     let nombreArchivo = "";
 
     if (tipo === 'egresados') {
-      contenidoCSV += "DNI,Nombre Completo,Celular,Cupo Asignado,Asistio
-";
+      contenidoCSV += "DNI,Nombre Completo,Celular,Cupo Asignado,Asistio\n";
       egresados.forEach(e => {
-        contenidoCSV += `"${e.dni}","${e.nombre_completo}","${e.celular || ''}",${e.cupo_asignado},${e.asistio ? 'SI' : 'NO'}
-`;
+        contenidoCSV += `"${e.dni}","${e.nombre_completo}","${e.celular || ''}",${e.cupo_asignado},${e.asistio ? 'SI' : 'NO'}\n`;
       });
       nombreArchivo = "padron-egresados-esrn5.csv";
     } else if (tipo === 'docentes') {
-      contenidoCSV += "DNI,Nombre Completo,Asistio
-";
+      contenidoCSV += "DNI,Nombre Completo,Asistio\n";
       docentes.forEach(d => {
-        contenidoCSV += `"${d.dni}","${d.nombre_completo}",${d.asistio ? 'SI' : 'NO'}
-`;
+        contenidoCSV += `"${d.dni}","${d.nombre_completo}",${d.asistio ? 'SI' : 'NO'}\n`;
       });
       nombreArchivo = "padron-docentes-esrn5.csv";
     } else if (tipo === 'vip') {
-      contenidoCSV += "DNI,Nombre e Institucion,Asistio
-";
+      contenidoCSV += "DNI,Nombre e Institucion,Asistio\n";
       especiales.forEach(v => {
-        contenidoCSV += `"${v.dni || 'S/D'}","${v.nombre_completo}",${v.asistio ? 'SI' : 'NO'}
-`;
+        contenidoCSV += `"${v.dni || 'S/D'}","${v.nombre_completo}",${v.asistio ? 'SI' : 'NO'}\n`;
       });
       nombreArchivo = "padron-vip-esrn5.csv";
     }
@@ -1323,133 +1317,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     }
   };
 
-  const crearUsuarioSistema = async (e) => {
-    e.preventDefault();
-    if (!nuevoNombreUsr.trim() || !nuevoEmailUsr.trim() || !nuevoPassUsr || nuevoPassUsr.length < 6) {
-      notify('Completá todos los campos y una contraseña de al menos 6 caracteres.', 'error');
-      return;
-    }
-    try {
-      const { error } = await supabase.from('usuarios_sistema').insert({
-        nombre: nuevoNombreUsr.trim(),
-        email: nuevoEmailUsr.trim().toLowerCase(),
-        rol: nuevoRolUsr,
-        activo: true
-      });
-      if (error) throw error;
-      setNuevoNombreUsr('');
-      setNuevoEmailUsr('');
-      setNuevoPassUsr('');
-      await recargar();
-      notify('Usuario del sistema creado correctamente.');
-    } catch (err) {
-      notify('Error al crear usuario: ' + err.message, 'error');
-    }
-  };
-
-  const reiniciarAsistenciasGeneral = async () => {
-    if (!window.confirm("¿Estás seguro de reiniciar todas las asistencias a 0 para las pruebas o el acto?")) return;
-    try {
-      await supabase.from('egresados').update({ asistio: false }).neq('id', '00000000-0000-0000-0000-000000000000');
-      await supabase.from('invitados').update({ asistio: false, hora_ingreso: null }).neq('id', '00000000-0000-0000-0000-000000000000');
-      await supabase.from('docentes').update({ asistio: false }).neq('id', '00000000-0000-0000-0000-000000000000');
-      await supabase.from('invitados_especiales').update({ asistio: false }).neq('id', '00000000-0000-0000-0000-000000000000');
-      await recargar();
-      notify('Todas las asistencias han sido reiniciadas a cero.');
-    } catch (err) {
-      notify('Error al reiniciar asistencias: ' + err.message, 'error');
-    }
-  };
-
-  const borrarInvitadosEgresados = async () => {
-    const resp = window.prompt("Para confirmar el borrado de todos los invitados egresados cargados, escribí BORRAR en mayúsculas:");
-    if (resp !== 'BORRAR') return;
-    try {
-      await supabase.from('invitados').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-      await recargar();
-      notify('Invitados egresados borrados correctamente.');
-    } catch (err) {
-      notify('Error al borrar invitados: ' + err.message, 'error');
-    }
-  };
-
-  const guardarConfiguracionAforo = async (e) => {
-    e.preventDefault();
-    setGuardandoConfig(true);
-    try {
-      if (config.id) {
-        await supabase.from('configuracion').update({
-          cupo_base: Number(cupoBaseEdit),
-          filas: Number(filasEdit),
-          butacas_por_fila: Number(butacasFilaEdit)
-        }).eq('id', config.id);
-      } else {
-        await supabase.from('configuracion').insert({
-          cupo_base: Number(cupoBaseEdit),
-          filas: Number(filasEdit),
-          butacas_por_fila: Number(butacasFilaEdit),
-          estado_etapa: 'abierta'
-        });
-      }
-      await recargar();
-      notify('Configuración de aforo y sala guardada correctamente.');
-    } catch (err) {
-      notify('Error guardando aforo: ' + err.message, 'error');
-    } finally {
-      setGuardandoConfig(false);
-    }
-  };
-
-  const abrirModalEditarUsuario = (usr) => {
-    setModalEditarUsr(usr);
-    setEditUsrNombre(usr.nombre || '');
-    setEditUsrEmail(usr.email || '');
-    setEditUsrRol(usr.rol || 'puerta');
-  };
-
-  const guardarEdicionUsuario = async (e) => {
-    e.preventDefault();
-    if (!modalEditarUsr) return;
-    setGuardandoUsr(true);
-    try {
-      const { error } = await supabase
-        .from('usuarios_sistema')
-        .update({
-          nombre: editUsrNombre.trim(),
-          email: editUsrEmail.trim().toLowerCase(),
-          rol: editUsrRol
-        })
-        .eq('id', modalEditarUsr.id);
-
-      if (error) throw error;
-      notify('Usuario del sistema actualizado correctamente.');
-      setModalEditarUsr(null);
-      await recargar();
-    } catch (err) {
-      notify('Error al actualizar usuario: ' + err.message, 'error');
-    } finally {
-      setGuardandoUsr(false);
-    }
-  };
-
-  const cambiarClaveUsuarioSistema = async (e) => {
-    e.preventDefault();
-    if (!modalCambiarClaveUsr || !nuevaClaveUsr || nuevaClaveUsr.length < 6) {
-      notify('La contraseña debe tener al menos 6 caracteres.', 'error');
-      return;
-    }
-    setGuardandoClave(true);
-    try {
-      notify(`Contraseña actualizada correctamente para ${modalCambiarClaveUsr.nombre}.`);
-      setModalCambiarClaveUsr(null);
-      setNuevaClaveUsr('');
-    } catch (err) {
-      notify('Error al cambiar contraseña: ' + err.message, 'error');
-    } finally {
-      setGuardandoClave(false);
-    }
-  };
-
   const egresadosFiltrados = egresados.filter((e) => {
     const matchTexto = (e.nombre_completo || '').toLowerCase().includes(filtroEgresado.toLowerCase()) || (e.dni || '').includes(filtroEgresado);
     const tieneWp = Boolean(e.celular && e.celular.replace(/\D/g, '').length >= 8);
@@ -1472,68 +1339,17 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     return matchTexto;
   });
 
-  const resolverSolicitud = async (sol, aprobar) => {
-    if (aprobar) {
-      const egr = egresados.find((e) => e.id === sol.egresado_id);
-      if (egr) {
-        await supabase.from('egresados').update({ cupo_asignado: Number(egr.cupo_asignado) + Number(sol.cantidad_solicitada) }).eq('id', egr.id);
-      }
-    }
-    await supabase.from('solicitudes_butacas').update({ estado: aprobar ? 'aprobada' : 'rechazada' }).eq('id', sol.id);
-    await recargar();
-    notify(aprobar ? 'Solicitud aprobada y cupo asignado.' : 'Solicitud rechazada.');
-  };
-
-  const docentesPresentesCount = docentes.filter(d => d.asistio).length;
-  const vipsPresentesCount = especiales.filter(v => v.asistio).length;
-  const egresadosPresentesCount = egresados.filter(e => e.asistio).length;
-  const porcentajeAsistencia = Math.round((egresadosPresentesCount / (egresados.length || 1)) * 100);
-
-  const totalFilas = Number(config.filas) || 15;
-  const butacasPorFila = Number(config.butacas_por_fila) || 35;
-
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-        <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Egresados</p><p className="text-2xl font-extrabold">{totalEgresados}</p></div>
-        <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Docentes</p><p className="text-2xl font-extrabold">{totalDocentes}</p></div>
-        <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Especiales / VIP</p><p className="text-2xl font-extrabold">{totalEspeciales}</p></div>
-        <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Cupos Familiares</p><p className="text-2xl font-extrabold">{totalCuposFamiliares}</p></div>
-        <div className={`col-span-2 sm:col-span-1 p-4 rounded-2xl border ${vacantesLibres < 0 ? 'bg-rose-50 text-rose-700' : 'bg-emerald-50 text-emerald-700'}`}>
-          <p className="text-xs font-semibold">Vacantes Libres (525 máx)</p><p className="text-2xl font-extrabold">{vacantesLibres}</p>
-        </div>
-      </div>
-
-      <div className="bg-white p-4 rounded-2xl border flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <p className="text-xs font-bold uppercase text-slate-500">Etapa Global de Carga</p>
-        </div>
-        <div className="flex gap-2">
-          <button onClick={async () => {
-            if (config.id) await supabase.from('configuracion').update({ estado_etapa: 'abierta' }).eq('id', config.id);
-            else await supabase.from('configuracion').insert({ estado_etapa: 'abierta', cupo_base: CUPO_BASE_DEFECTO });
-            await recargar();
-            notify('Etapa actualizada a: ABIERTA');
-          }} className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${config.estado_etapa === 'abierta' ? 'bg-[#6B1D2F] text-white shadow' : 'bg-slate-100 text-slate-700'}`}>Abierta</button>
-          <button onClick={() => setMostrarModalCierreParcial(true)} className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${config.estado_etapa === 'cierre_parcial' ? 'bg-amber-600 text-white shadow' : 'bg-slate-100 text-slate-700'}`}>Cierre Parcial</button>
-          <button onClick={async () => {
-            if (config.id) await supabase.from('configuracion').update({ estado_etapa: 'cierre_definitivo' }).eq('id', config.id);
-            else await supabase.from('configuracion').insert({ estado_etapa: 'cierre_definitivo', cupo_base: CUPO_BASE_DEFECTO });
-            await recargar();
-            notify('Etapa actualizada a: CIERRE DEFINITIVO');
-          }} className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${config.estado_etapa === 'cierre_definitivo' ? 'bg-rose-600 text-white shadow' : 'bg-slate-100 text-slate-700'}`}>Definitivo</button>
-        </div>
-      </div>
-
       <div className="flex flex-wrap gap-2">
-        <button onClick={() => setTab('egresados')} className={`px-4 py-2 rounded-xl text-xs font-bold ${tab === 'egresados' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Egresados ({egresados.length})</button>
-        <button onClick={() => setTab('docentes')} className={`px-4 py-2 rounded-xl text-xs font-bold ${tab === 'docentes' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Docentes ({docentes.length})</button>
-        <button onClick={() => setTab('vip')} className={`px-4 py-2 rounded-xl text-xs font-bold ${tab === 'vip' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Invitados VIP ({especiales.length})</button>
-        <button onClick={() => setTab('solicitudes')} className={`px-4 py-2 rounded-xl text-xs font-bold ${tab === 'solicitudes' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Solicitudes Butacas ({solicitudes.length})</button>
-        <button onClick={() => setTab('reportes')} className={`px-4 py-2 rounded-xl text-xs font-bold ${tab === 'reportes' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Acreditación en Vivo</button>
-        <button onClick={() => setTab('aforo')} className={`px-4 py-2 rounded-xl text-xs font-bold ${tab === 'aforo' ? 'bg-indigo-700 text-white shadow' : 'bg-white border'}`}>⚙️ Aforo y Sala</button>
+        <button onClick={() => setTab('egresados')} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === 'egresados' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Egresados ({egresados.length})</button>
+        <button onClick={() => setTab('docentes')} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === 'docentes' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Docentes ({docentes.length})</button>
+        <button onClick={() => setTab('vip')} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === 'vip' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Invitados VIP ({especiales.length})</button>
+        <button onClick={() => setTab('solicitudes')} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === 'solicitudes' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Solicitudes Butacas ({solicitudes.length})</button>
+        <button onClick={() => setTab('reportes')} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === 'reportes' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Acreditación en Vivo</button>
+        <button onClick={() => setTab('aforo')} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === 'aforo' ? 'bg-indigo-700 text-white shadow' : 'bg-white border'}`}>⚙️ Aforo y Sala</button>
         {perfilStaff?.rol === 'admin' && (
-          <button onClick={() => setTab('usuarios')} className={`px-4 py-2 rounded-xl text-xs font-bold ${tab === 'usuarios' ? 'bg-emerald-600 text-white' : 'bg-white border'}`}>Usuarios del Sistema ({usuariosSistema.length})</button>
+          <button onClick={() => setTab('usuarios')} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === 'usuarios' ? 'bg-emerald-600 text-white' : 'bg-white border'}`}>Usuarios del Sistema ({usuariosSistema.length})</button>
         )}
       </div>
 
