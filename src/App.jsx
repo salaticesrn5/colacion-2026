@@ -1131,27 +1131,21 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     let nombreArchivo = "";
 
     if (tipo === 'egresados') {
-      contenidoCSV += "DNI,Nombre Completo,Celular,Cupo Asignado,Asistio
-";
+      contenidoCSV += "DNI,Nombre Completo,Celular,Cupo Asignado,Asistio\n";
       egresados.forEach(e => {
-        contenidoCSV += `"${e.dni}","${e.nombre_completo}","${e.celular || ''}",${e.cupo_asignado},${e.asistio ? 'SI' : 'NO'}
-`;
+        contenidoCSV += `"${e.dni}","${e.nombre_completo}","${e.celular || ''}",${e.cupo_asignado},${e.asistio ? 'SI' : 'NO'}\n`;
       });
       nombreArchivo = "padron-egresados-esrn5.csv";
     } else if (tipo === 'docentes') {
-      contenidoCSV += "DNI,Nombre Completo,Asistio
-";
+      contenidoCSV += "DNI,Nombre Completo,Asistio\n";
       docentes.forEach(d => {
-        contenidoCSV += `"${d.dni}","${d.nombre_completo}",${d.asistio ? 'SI' : 'NO'}
-`;
+        contenidoCSV += `"${d.dni}","${d.nombre_completo}",${d.asistio ? 'SI' : 'NO'}\n`;
       });
       nombreArchivo = "padron-docentes-esrn5.csv";
     } else if (tipo === 'vip') {
-      contenidoCSV += "DNI,Nombre e Institucion,Asistio
-";
+      contenidoCSV += "DNI,Nombre e Institucion,Asistio\n";
       especiales.forEach(v => {
-        contenidoCSV += `"${v.dni || 'S/D'}","${v.nombre_completo}",${v.asistio ? 'SI' : 'NO'}
-`;
+        contenidoCSV += `"${v.dni || 'S/D'}","${v.nombre_completo}",${v.asistio ? 'SI' : 'NO'}\n`;
       });
       nombreArchivo = "padron-vip-esrn5.csv";
     }
@@ -1341,7 +1335,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     }
   };
 
-  // Creación real de usuario en Auth + tabla usuarios_sistema con un cliente secundario temporal para no desloguear al admin
   const crearUsuarioSistema = async (e) => {
     e.preventDefault();
     const nombre = nuevoNombreUsr.trim();
@@ -1380,6 +1373,188 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
       notify('Error al crear usuario: ' + (err.message || err), 'error');
     }
   };
+
+  const agregarEgresadoManual = async (e) => {
+    e.preventDefault();
+    try {
+      await supabase.from('egresados').insert({
+        dni: sanitizeDNI(nuevoEgDni),
+        nombre_completo: nuevoEgNombre.trim().toUpperCase(),
+        cupo_asignado: config.cupo_base || CUPO_BASE_DEFECTO,
+        activo: true
+      });
+      setNuevoEgNombre('');
+      setNuevoEgDni('');
+      setModalAgregarEgresado(false);
+      await recargar();
+      notify('Egresado agregado con éxito.');
+    } catch (err) {
+      notify('Error al agregar egresado: ' + err.message, 'error');
+    }
+  };
+
+  const agregarDocenteManual = async (e) => {
+    e.preventDefault();
+    try {
+      await supabase.from('docentes').insert({
+        dni: sanitizeDNI(nuevoDocDni),
+        nombre_completo: nuevoDocNombre.trim().toUpperCase(),
+        activo: true
+      });
+      setNuevoDocNombre('');
+      setNuevoDocDni('');
+      setModalAgregarDocente(false);
+      await recargar();
+      notify('Docente agregado con éxito.');
+    } catch (err) {
+      notify('Error al agregar docente: ' + err.message, 'error');
+    }
+  };
+
+  const agregarVipManual = async (e) => {
+    e.preventDefault();
+    try {
+      await supabase.from('invitados_especiales').insert({
+        dni: nuevoVipDni ? sanitizeDNI(nuevoVipDni) : null,
+        nombre_completo: nuevoVipNombre.trim().toUpperCase(),
+        activo: true
+      });
+      setNuevoVipNombre('');
+      setNuevoVipDni('');
+      setModalAgregarVip(false);
+      await recargar();
+      notify('Invitado VIP agregado con éxito.');
+    } catch (err) {
+      notify('Error al agregar VIP: ' + err.message, 'error');
+    }
+  };
+
+  const abrirModalEditar = (e) => {
+    setModalEditarEgr(e);
+    setEditNombre(e.nombre_completo || '');
+    setEditDni(e.dni || '');
+    setEditCelular(e.celular || '');
+    setEditCupo(e.cupo_asignado || 4);
+  };
+
+  const guardarEdicionEgresado = async (e) => {
+    e.preventDefault();
+    if (!modalEditarEgr) return;
+    setGuardandoEdicion(true);
+    try {
+      await supabase.from('egresados').update({
+        nombre_completo: editNombre.trim().toUpperCase(),
+        dni: sanitizeDNI(editDni),
+        celular: editCelular.trim(),
+        cupo_asignado: Number(editCupo)
+      }).eq('id', modalEditarEgr.id);
+      setModalEditarEgr(null);
+      await recargar();
+      notify('Egresado actualizado correctamente.');
+    } catch (err) {
+      notify('Error al actualizar: ' + err.message, 'error');
+    } finally {
+      setGuardandoEdicion(false);
+    }
+  };
+
+  const abrirModalEditarDocente = (d) => {
+    setModalEditarDoc(d);
+    setEditDocNombre(d.nombre_completo || '');
+    setEditDocDni(d.dni || '');
+  };
+
+  const guardarEdicionDocente = async (e) => {
+    e.preventDefault();
+    if (!modalEditarDoc) return;
+    setGuardandoDocente(true);
+    try {
+      await supabase.from('docentes').update({
+        nombre_completo: editDocNombre.trim().toUpperCase(),
+        dni: sanitizeDNI(editDocDni)
+      }).eq('id', modalEditarDoc.id);
+      setModalEditarDoc(null);
+      await recargar();
+      notify('Docente actualizado correctamente.');
+    } catch (err) {
+      notify('Error al actualizar docente: ' + err.message, 'error');
+    } finally {
+      setGuardandoDocente(false);
+    }
+  };
+
+  const abrirModalEditarVip = (v) => {
+    setModalEditarVip(v);
+    setEditVipNombre(v.nombre_completo || '');
+    setEditVipDni(v.dni || '');
+  };
+
+  const guardarEdicionVip = async (e) => {
+    e.preventDefault();
+    if (!modalEditarVip) return;
+    setGuardandoVip(true);
+    try {
+      await supabase.from('invitados_especiales').update({
+        nombre_completo: editVipNombre.trim().toUpperCase(),
+        dni: editVipDni ? sanitizeDNI(editVipDni) : null
+      }).eq('id', modalEditarVip.id);
+      setModalEditarVip(null);
+      await recargar();
+      notify('Invitado VIP actualizado correctamente.');
+    } catch (err) {
+      notify('Error al actualizar VIP: ' + err.message, 'error');
+    } finally {
+      setGuardandoVip(false);
+    }
+  };
+
+  const resolverSolicitud = async (sol, aprobar) => {
+    try {
+      const nuevoEstado = aprobar ? 'aprobada' : 'rechazada';
+      await supabase.from('solicitudes_butacas').update({ estado: nuevoEstado }).eq('id', sol.id);
+
+      if (aprobar) {
+        const egr = egresados.find((e) => e.id === sol.egresado_id);
+        if (egr) {
+          const cupoActual = Number(egr.cupo_asignado) || 4;
+          const nuevoCupo = cupoActual + Number(sol.cantidad_solicitada);
+          await supabase.from('egresados').update({ cupo_asignado: nuevoCupo }).eq('id', egr.id);
+        }
+      }
+
+      await recargar();
+      notify(`Solicitud ${nuevoEstado} con éxito.`);
+    } catch (err) {
+      notify('Error al procesar solicitud: ' + err.message, 'error');
+    }
+  };
+
+  const totalFilas = config.filas || 15;
+  const butacasPorFila = config.butacas_por_fila || 35;
+
+  const egresadosPresentesCount = egresados.filter(e => e.asistio).length;
+  const docentesPresentesCount = docentes.filter(d => d.asistio).length;
+  const vipsPresentesCount = especiales.filter(v => v.asistio).length;
+  const totalAsistentes = egresadosPresentesCount + docentesPresentesCount + vipsPresentesCount + invitados.filter(i => i.asistio).length;
+  const porcentajeAsistencia = egresados.length > 0 ? Math.round((egresadosPresentesCount / egresados.length) * 100) : 0;
+
+  const listaDocentesCeremonial = docentes.filter(d => {
+    const matchFiltro = filtroCeremonial === 'TODOS' ? true : filtroCeremonial === 'PRESENTES' ? d.asistio : !d.asistio;
+    const matchBusqueda = (d.nombre_completo || '').toLowerCase().includes(busquedaCeremonial.toLowerCase()) || (d.dni || '').includes(busquedaCeremonial);
+    return matchFiltro && matchBusqueda;
+  });
+
+  const listaVipsCeremonial = especiales.filter(v => {
+    const matchFiltro = filtroCeremonial === 'TODOS' ? true : filtroCeremonial === 'PRESENTES' ? v.asistio : !v.asistio;
+    const matchBusqueda = (v.nombre_completo || '').toLowerCase().includes(busquedaCeremonial.toLowerCase()) || (v.dni || '').includes(busquedaCeremonial);
+    return matchFiltro && matchBusqueda;
+  });
+
+  const listaEgresadosCeremonial = egresados.filter(e => {
+    const matchFiltro = filtroCeremonial === 'TODOS' ? true : filtroCeremonial === 'PRESENTES' ? e.asistio : !e.asistio;
+    const matchBusqueda = (e.nombre_completo || '').toLowerCase().includes(busquedaCeremonial.toLowerCase()) || (e.dni || '').includes(busquedaCeremonial);
+    return matchFiltro && matchBusqueda;
+  });
 
   const egresadosFiltrados = egresados.filter((e) =>
     (e.nombre_completo || '').toLowerCase().includes(filtroEgresado.toLowerCase()) ||
