@@ -649,7 +649,7 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
 }
 
 // ============================================================================
-// MÓDULO C: CONTROL DE ACCESO EN PUERTA (Cámara Trasera Forzada y Lector QR Real)
+// MÓDULO C: CONTROL DE ACCESO EN PUERTA (Con intérprete inteligente de QR Institucional)
 // ============================================================================
 function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, notify }) {
   const [busqueda, setBusqueda] = useState('');
@@ -662,48 +662,71 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
   const scanIntervalRef = useRef(null);
 
   const validarCodigoEntrada = async (codigoRaw) => {
-    const code = String(codigoRaw || '').trim().toUpperCase();
-    if (!code) return;
+    const raw = String(codigoRaw || '').trim();
+    if (!raw) return;
 
+    let code = raw.toUpperCase();
+
+    // Si escanea el QR institucional completo (ej: ESRN005-DOCENTE-26620400-SANDRI...) o contiene un DNI/Entrada
+    if (code.includes('ESRN005-')) {
+      const partes = code.split('-');
+      // Buscamos el DNI o el token dentro de las partes del QR institucional
+      for (let p of partes) {
+        if (/^\d{7,8}$/.test(p)) {
+          code = p; // Encontramos el DNI dentro del QR
+          break;
+        }
+      }
+    }
+
+    // 1. Buscar en Invitados (Familiares) por número de entrada exacto o DNI
     let inv = invitados.find((i) => String(i.numero_entrada || '').toUpperCase() === code || String(i.dni || '') === code);
-    
     if (inv) {
       if (inv.asistio) {
-        notify(`¡ALERTA DUPLICADO! La entrada ${inv.numero_entrada} (${inv.nombre_completo}) ya ingresó.`, 'error');
+        notify(`⚠️ ¡ALERTA DUPLICADO! La entrada ${inv.numero_entrada} (${inv.nombre_completo}) ya ingresó.`, 'error');
         return;
       }
       await supabase.from('invitados').update({ asistio: true, hora_ingreso: new Date().toISOString() }).eq('id', inv.id);
       await recargar();
-      notify(`✓ INGRESO PERMITIDO: ${inv.nombre_completo} (DNI ${inv.dni})`);
+      notify(`✓ INGRESO PERMITIDO (FAMILIAR): ${inv.nombre_completo} (DNI ${inv.dni})`);
       apagarCamara();
       return;
     }
 
-    let doc = docentes.find((d) => String(d.dni || '') === code);
+    // 2. Buscar en Docentes por DNI
+    let doc = docentes.find((d) => String(d.dni || '') === code || code.includes(String(d.dni || '')));
     if (doc) {
+      if (doc.asistio) {
+        notify(`⚠️ ¡DOCENTE YA INGRESÓ! ${doc.nombre_completo}`, 'warning');
+        return;
+      }
       await supabase.from('docentes').update({ asistio: true }).eq('id', doc.id);
       await recargar();
-      notify(`✓ DOCENTE ACCEDIÓ: ${doc.nombre_completo}`);
+      notify(`✓ INGRESO PERMITIDO (DOCENTE): ${doc.nombre_completo}`);
       apagarCamara();
       return;
     }
 
-    let vip = especiales.find((v) => String(v.dni || '') === code || String(v.nombre_completo || '').toUpperCase().includes(code));
+    // 3. Buscar en Invitados Especiales / VIP por DNI o Nombre
+    let vip = especiales.find((v) => String(v.dni || '') === code || code.includes(String(v.dni || '')) || String(v.nombre_completo || '').toUpperCase().includes(code));
     if (vip) {
+      if (vip.asistio) {
+        notify(`⚠️ ¡VIP YA INGRESÓ! ${vip.nombre_completo}`, 'warning');
+        return;
+      }
       await supabase.from('invitados_especiales').update({ asistio: true }).eq('id', vip.id);
       await recargar();
-      notify(`✓ VIP ACCEDIÓ: ${vip.nombre_completo}`);
+      notify(`✓ INGRESO PERMITIDO (VIP): ${vip.nombre_completo}`);
       apagarCamara();
       return;
     }
 
-    notify(`Código o DNI no encontrado: ${code}`, 'error');
+    notify(`❌ Código o DNI no encontrado: ${raw}`, 'error');
   };
 
   const iniciarCamara = async () => {
     setEscaneandoCamara(true);
     try {
-      // Forzamos explícitamente la cámara trasera principal del celular
       const constraints = {
         video: {
           facingMode: { ideal: 'environment' }
@@ -716,7 +739,6 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
         videoRef.current.play();
       }
 
-      // Iniciamos loop de lectura por canvas
       if (window.BarcodeDetector) {
         const barcodeDetector = new window.BarcodeDetector({ formats: ['qr_code'] });
         scanIntervalRef.current = setInterval(async () => {
@@ -728,14 +750,14 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
                 validarCodigoEntrada(scannedText);
               }
             } catch (err) {
-              // Ignorar errores temporales de fotograma
+              // Ignorar errores transitorios de fotograma
             }
           }
-        }, 500);
+        }, 400);
       }
     } catch (err) {
       console.error(err);
-      notify('No se pudo acceder a la cámara trasera. Verifique los permisos del navegador.', 'error');
+      notify('No se pudo acceder a la cámara trasera. Verifique los permisos.', 'error');
       setEscaneandoCamara(false);
     }
   };
@@ -764,6 +786,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
 
   return (
     <div className="max-w-xl mx-auto space-y-4">
+      {/* TARJETA PRINCIPAL DE ESCANEO RÁPIDO */}
       <div className="bg-slate-900 text-white rounded-2xl p-6 space-y-4 shadow-xl text-center">
         <div>
           <h2 className="font-extrabold text-2xl text-white">Control de Puerta</h2>
@@ -820,12 +843,14 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
           </div>
         )}
 
+        {/* INPUT DE TIPEO RÁPIDO OPCIONAL */}
         <form onSubmit={(e) => { e.preventDefault(); validarCodigoEntrada(codigoManualQr); setCodigoManualQr(''); }} className="flex gap-2 pt-2 border-t border-slate-800">
           <input type="text" placeholder="O tipear código ENT-... o DNI" value={codigoManualQr} onChange={(e) => setCodigoManualQr(e.target.value)} className="flex-1 px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white outline-none font-mono" />
           <button type="submit" className="px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm">Registrar</button>
         </form>
       </div>
 
+      {/* PLAN B: BÚSQUEDA MANUAL */}
       <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-4 shadow-sm">
         <h3 className="font-bold text-xs text-slate-500 uppercase tracking-wider">Plan B: Búsqueda manual por Apellido o DNI</h3>
         <div className="relative">
@@ -873,7 +898,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
                   <p className="font-bold text-sm">{doc.nombre_completo}</p>
                   <p className="text-xs text-slate-500">DNI: {doc.dni}</p>
                 </div>
-                <button onClick={async () => { await supabase.from('docentes').update({ asistio: !doc.asistio }).eq('id', doc.id); await recargar(); }} className={`px-3 py-1.5 rounded-xl text-xs font-bold shadow-xs ${doc.asistio ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-800'}`}>
+                <button onClick={async () => { await supabase.from('docentes').update({ asistio: !doc.asistio }).eq('id', doc.id); await recargar(); }} className={`px-3.5 py-1.5 rounded-xl text-xs font-bold shadow-xs ${doc.asistio ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-800'}`}>
                   {doc.asistio ? '✓ Asistió' : 'Marcar Ingreso'}
                 </button>
               </div>
@@ -1777,7 +1802,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
               </div>
 
               <div className="flex gap-2 pt-3 border-t">
-                <button type="button" onClick={() => setModalEditarDoc(null)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold hover:bg-slate-50">Cancelar</button>
+                <button type="button" onClick={() => setModalEditarDoc(null)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold">Cancelar</button>
                 <button type="submit" disabled={guardandoDocente} className="flex-1 py-2.5 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-xl text-xs font-bold shadow">
                   {guardandoDocente ? 'Guardando...' : 'Guardar Cambios'}
                 </button>
@@ -2196,7 +2221,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                   <div className="flex items-center gap-2">
                     <p className="font-bold text-slate-900">{u.nombre}</p>
                     <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${u.activo !== false ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
-                      {u.activo !== false ? 'Activo' : 'Inactivo'}
+                      {u.activo !== false ? 'Acto' : 'Inactivo'}
                     </span>
                   </div>
                   <p className="text-xs text-slate-500">{u.email} · Rol: <strong className="uppercase">{u.rol}</strong></p>
@@ -2219,7 +2244,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                       const nuevoEstado = u.activo === false ? true : false;
                       await supabase.from('usuarios_sistema').update({ activo: nuevoEstado }).eq('id', u.id);
                       await recargar();
-                      notify(`Usuario ${nuevoEstado ? 'activado' : 'desactivado'}.`);
+                      notify(`Usuario ${nuevoEstado ? 'activado' : 'desactivado'}.` );
                     }}
                     className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${u.activo !== false ? 'bg-slate-100 text-slate-700 hover:bg-slate-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}
                   >
