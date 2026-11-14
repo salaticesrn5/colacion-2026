@@ -15,11 +15,6 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-const createTempAuthClient = () =>
-  createClient(supabaseUrl, supabaseAnonKey, {
-    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-  });
-
 const sanitizeDNI = (val) => String(val || '').replace(/\D/g, '').slice(0, 8);
 const CAPACIDAD_MAXIMA = 525;
 const CUPO_BASE_DEFECTO = 4;
@@ -45,7 +40,6 @@ export default function App() {
   const [especiales, setEspeciales] = useState([]);
   const [solicitudes, setSolicitudes] = useState([]);
   const [usuariosSistema, setUsuariosSistema] = useState([]);
-  const [cargandoDatos, setCargandoDatos] = useState(false);
 
   const [toast, setToast] = useState(null);
   const notify = (msg, type = 'success') => {
@@ -1049,9 +1043,14 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
 function PanelAdministracion({ perfilStaff, config, egresados, invitados, docentes, especiales, solicitudes, usuariosSistema, totalEgresados, totalDocentes, totalEspeciales, totalCuposFamiliares, totalOcupado, vacantesLibres, recargar, notify }) {
   const [tab, setTab] = useState('egresados');
   const [filtroEgresado, setFiltroEgresado] = useState('');
-  const [filtroDocente, setFiltroDocente] = useState('');
-  const [filtroVip, setFiltroVip] = useState('');
+  const [filtroEgresadoEstado, setFiltroEgresadoEstado] = useState('TODOS');
   
+  const [filtroDocente, setFiltroDocente] = useState('');
+  const [filtroDocenteEstado, setFiltroDocenteEstado] = useState('TODOS');
+
+  const [filtroVip, setFiltroVip] = useState('');
+  const [filtroVipEstado, setFiltroVipEstado] = useState('TODOS');
+
   const [cupoBaseEdit, setCupoBaseEdit] = useState(config.cupo_base || CUPO_BASE_DEFECTO);
   const [filasEdit, setFilasEdit] = useState(config.filas || 15);
   const [butacasFilaEdit, setButacasFilaEdit] = useState(config.butacas_por_fila || 35);
@@ -1405,20 +1404,49 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     }
   };
 
-  const egresadosFiltrados = egresados.filter((e) =>
-    (e.nombre_completo || '').toLowerCase().includes(filtroEgresado.toLowerCase()) ||
-    (e.dni || '').includes(filtroEgresado)
-  );
+  egresados.filter((e) => {
+    const matchTexto = (e.nombre_completo || '').toLowerCase().includes(filtroEgresado.toLowerCase()) || (e.dni || '').includes(filtroEgresado);
+    const tieneWp = Boolean(e.celular && e.celular.replace(/\D/g, '').length >= 8);
+    if (filtroEgresadoEstado === 'CON_WP') return matchTexto && tieneWp;
+    if (filtroEgresadoEstado === 'SIN_WP') return matchTexto && !tieneWp;
+    return matchTexto;
+  });
 
-  const docentesFiltrados = docentes.filter((d) =>
-    (d.nombre_completo || '').toLowerCase().includes(filtroDocente.toLowerCase()) ||
-    (d.dni || '').includes(filtroDocente)
-  );
+  docentes.filter((d) => {
+    const matchTexto = (d.nombre_completo || '').toLowerCase().includes(filtroDocente.toLowerCase()) || (d.dni || '').includes(filtroDocente);
+    if (filtroDocenteEstado === 'PRESENTES') return matchTexto && d.asistio;
+    if (filtroDocenteEstado === 'PENDIENTES') return matchTexto && !d.asistio;
+    return matchTexto;
+  });
 
-  const vipsFiltrados = especiales.filter((v) =>
-    (v.nombre_completo || '').toLowerCase().includes(filtroVip.toLowerCase()) ||
-    (v.dni || '').includes(filtroVip)
-  );
+  especiales.filter((v) => {
+    const matchTexto = (v.nombre_completo || '').toLowerCase().includes(filtroVip.toLowerCase()) || (v.dni || '').includes(filtroVip);
+    if (filtroVipEstado === 'PRESENTES') return matchTexto && v.asistio;
+    if (filtroVipEstado === 'PENDIENTES') return matchTexto && !v.asistio;
+    return matchTexto;
+  });
+
+  const egresadosFiltrados = egresados.filter((e) => {
+    const matchTexto = (e.nombre_completo || '').toLowerCase().includes(filtroEgresado.toLowerCase()) || (e.dni || '').includes(filtroEgresado);
+    const tieneWp = Boolean(e.celular && e.celular.replace(/\D/g, '').length >= 8);
+    if (filtroEgresadoEstado === 'CON_WP') return matchTexto && tieneWp;
+    if (filtroEgresadoEstado === 'SIN_WP') return matchTexto && !tieneWp;
+    return matchTexto;
+  });
+
+  const docentesFiltrados = docentes.filter((d) => {
+    const matchTexto = (d.nombre_completo || '').toLowerCase().includes(filtroDocente.toLowerCase()) || (d.dni || '').includes(filtroDocente);
+    if (filtroDocenteEstado === 'PRESENTES') return matchTexto && d.asistio;
+    if (filtroDocenteEstado === 'PENDIENTES') return matchTexto && !d.asistio;
+    return matchTexto;
+  });
+
+  const vipsFiltrados = especiales.filter((v) => {
+    const matchTexto = (v.nombre_completo || '').toLowerCase().includes(filtroVip.toLowerCase()) || (v.dni || '').includes(filtroVip);
+    if (filtroVipEstado === 'PRESENTES') return matchTexto && v.asistio;
+    if (filtroVipEstado === 'PENDIENTES') return matchTexto && !v.asistio;
+    return matchTexto;
+  });
 
   const listaDocentesCeremonial = docentes.filter(d => {
     const match = (d.nombre_completo || '').toLowerCase().includes(busquedaCeremonial.toLowerCase()) || (d.dni || '').includes(busquedaCeremonial);
@@ -1564,6 +1592,12 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
             <h3 className="font-bold">Padrón de Egresados</h3>
             <div className="flex flex-wrap gap-2">
               <button
+                onClick={() => exportarCSV('egresados')}
+                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow"
+              >
+                <Download className="w-4 h-4" /> Exportar CSV
+              </button>
+              <button
                 onClick={() => setModalAgregarEgresado(true)}
                 className="px-3.5 py-2 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow"
               >
@@ -1581,15 +1615,30 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
             </div>
           </div>
 
-          <div className="relative">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-            <input
-              type="text"
-              placeholder="Filtrar egresados por nombre o DNI..."
-              value={filtroEgresado}
-              onChange={(e) => setFiltroEgresado(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 rounded-xl border text-sm outline-none focus:border-[#6B1D2F]"
-            />
+          <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
+            <div className="relative w-full sm:flex-1">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+              <input
+                type="text"
+                placeholder="Filtrar egresados por nombre o DNI..."
+                value={filtroEgresado}
+                onChange={(e) => setFiltroEgresado(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 rounded-xl border text-sm outline-none focus:border-[#6B1D2F]"
+              />
+            </div>
+            <div className="flex gap-1.5 w-full sm:w-auto">
+              {['TODOS', 'CON_WP', 'SIN_WP'].map((f) => (
+                <button
+                  key={f}
+                  onClick={() => setFiltroEgresadoEstado(f)}
+                  className={`px-3 py-2 rounded-lg text-xs font-bold border transition ${
+                    filtroEgresadoEstado === f ? 'bg-[#6B1D2F] text-white border-[#6B1D2F]' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'
+                  }`}
+                >
+                  {f === 'TODOS' ? 'Todos' : f === 'CON_WP' ? '📱 Con WhatsApp' : 'Sin Celular'}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="max-h-96 overflow-y-auto divide-y">
@@ -1792,6 +1841,12 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
             <h3 className="font-bold">Padrón de Docentes ({docentes.length})</h3>
             <div className="flex flex-wrap gap-2">
               <button
+                onClick={() => exportarCSV('docentes')}
+                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow"
+              >
+                <Download className="w-4 h-4" /> Exportar CSV
+              </button>
+              <button
                 onClick={() => setModalAgregarDocente(true)}
                 className="px-3.5 py-2 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow"
               >
@@ -1809,15 +1864,30 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
             </div>
           </div>
 
-          <div className="relative">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-            <input
-              type="text"
-              placeholder="Filtrar docentes por nombre o DNI..."
-              value={filtroDocente}
-              onChange={(e) => setFiltroDocente(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 rounded-xl border text-sm outline-none focus:border-[#6B1D2F]"
-            />
+          <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
+            <div className="relative w-full sm:flex-1">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+              <input
+                type="text"
+                placeholder="Filtrar docentes por nombre o DNI..."
+                value={filtroDocente}
+                onChange={(e) => setFiltroDocente(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 rounded-xl border text-sm outline-none focus:border-[#6B1D2F]"
+              />
+            </div>
+            <div className="flex gap-1.5 w-full sm:w-auto">
+              {['TODOS', 'PRESENTES', 'PENDIENTES'].map((f) => (
+                <button
+                  key={f}
+                  onClick={() => setFiltroDocenteEstado(f)}
+                  className={`px-3 py-2 rounded-lg text-xs font-bold border transition ${
+                    filtroDocenteEstado === f ? 'bg-[#6B1D2F] text-white border-[#6B1D2F]' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'
+                  }`}
+                >
+                  {f === 'TODOS' ? 'Todos' : f === 'PRESENTES' ? '✓ Presentes' : 'Pendientes'}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="max-h-96 overflow-y-auto divide-y">
@@ -1829,6 +1899,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                   <div>
                     <span className="font-semibold">{d.nombre_completo}</span> 
                     <span className="text-xs text-slate-500 ml-1">({d.dni})</span>
+                    {d.asistio && <span className="ml-2 px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full text-[10px] font-bold">Presente</span>}
                   </div>
                   <div className="flex items-center gap-2">
                     <button
@@ -1953,6 +2024,12 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
             <h3 className="font-bold">Padrón de Invitados VIP / Autoridades ({especiales.length})</h3>
             <div className="flex flex-wrap gap-2">
               <button
+                onClick={() => exportarCSV('vip')}
+                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow"
+              >
+                <Download className="w-4 h-4" /> Exportar CSV
+              </button>
+              <button
                 onClick={() => setModalAgregarVip(true)}
                 className="px-3.5 py-2 bg-amber-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow"
               >
@@ -1970,15 +2047,30 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
             </div>
           </div>
 
-          <div className="relative">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-            <input
-              type="text"
-              placeholder="Filtrar invitados VIP por nombre o DNI..."
-              value={filtroVip}
-              onChange={(e) => setFiltroVip(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 rounded-xl border text-sm outline-none focus:border-amber-600"
-            />
+          <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
+            <div className="relative w-full sm:flex-1">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+              <input
+                type="text"
+                placeholder="Filtrar invitados VIP por nombre o DNI..."
+                value={filtroVip}
+                onChange={(e) => setFiltroVip(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 rounded-xl border text-sm outline-none focus:border-amber-600"
+              />
+            </div>
+            <div className="flex gap-1.5 w-full sm:w-auto">
+              {['TODOS', 'PRESENTES', 'PENDIENTES'].map((f) => (
+                <button
+                  key={f}
+                  onClick={() => setFiltroVipEstado(f)}
+                  className={`px-3 py-2 rounded-lg text-xs font-bold border transition ${
+                    filtroVipEstado === f ? 'bg-amber-600 text-white border-amber-600' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'
+                  }`}
+                >
+                  {f === 'TODOS' ? 'Todos' : f === 'PRESENTES' ? '✓ Presentes' : 'Pendientes'}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="max-h-96 overflow-y-auto divide-y">
@@ -1990,6 +2082,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                   <div>
                     <span className="font-semibold">{v.nombre_completo}</span> 
                     <span className="text-xs text-slate-500 ml-1">{v.dni ? `(${v.dni})` : '(Sin DNI)'}</span>
+                    {v.asistio && <span className="ml-2 px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full text-[10px] font-bold">Presente</span>}
                   </div>
                   <div className="flex items-center gap-2">
                     <button
