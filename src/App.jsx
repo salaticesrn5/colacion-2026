@@ -68,7 +68,6 @@ export default function App() {
 
     cargarDatosGlobales();
 
-    // Actualización automática cada 5 segundos para tiempo real en acreditación
     const intervalId = setInterval(() => {
       cargarDatosGlobales();
     }, 5000);
@@ -339,6 +338,8 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
   const [enviandoSol, setEnviandoSol] = useState(false);
   const qrRef = useRef(null);
 
+  const esCierreParcialOVerdadero = config.estado_etapa === 'cierre_parcial' || config.estado_etapa === 'cierre_definitivo';
+
   useEffect(() => {
     if (datosPersona && tipoUsuario === 'egresado') {
       const actualizado = egresados.find((e) => e.id === datosPersona.id);
@@ -368,7 +369,10 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
       }
     }
     setFilasInvitados(arr);
-    if (misInv.length > 0) {
+    // Si estamos en cierre parcial o definitivo, el egresado no puede editar libremente salvo que tenga cupo plus habilitado
+    if (esCierreParcialOVerdadero && misInv.length > 0) {
+      setEditando(false);
+    } else if (misInv.length > 0) {
       setEditando(false);
     } else {
       setEditando(true);
@@ -501,6 +505,10 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
   };
 
   const guardarInvitados = async () => {
+    if (esCierreParcialOVerdadero) {
+      notify('El sistema se encuentra en etapa de Cierre Parcial o Definitivo. Ya no se pueden modificar los invitados.', 'error');
+      return;
+    }
     setGuardando(true);
     try {
       await supabase.from('egresados').update({ celular }).eq('id', datosPersona.id);
@@ -591,6 +599,12 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
         <h3 className="text-lg font-bold text-[#6B1D2F] mb-1 text-center">Portal de Acceso por DNI</h3>
         <p className="text-xs text-gray-500 text-center mb-4">Seleccioná tu rol y consultá tu pase</p>
 
+        {esCierreParcialOVerdadero && (
+          <div className="mb-4 bg-amber-50 border border-amber-300 p-3 rounded-xl text-xs text-amber-900 text-center font-bold">
+            🔒 El sistema se encuentra en etapa de Cierre Parcial o Definitivo. Las modificaciones de invitados se encuentran bloqueadas.
+          </div>
+        )}
+
         <div className="flex gap-1 mb-6 bg-gray-100 p-1 rounded-lg">
           <button type="button" onClick={() => { setTipoUsuario('egresado'); setDatosPersona(null); setError(''); }} className={`flex-1 py-2 rounded-md font-medium text-xs transition ${tipoUsuario === 'egresado' ? 'bg-[#6B1D2F] text-white shadow' : 'text-gray-600'}`}>🎓 Egresado</button>
           <button type="button" onClick={() => { setTipoUsuario('docente'); setDatosPersona(null); setError(''); }} className={`flex-1 py-2 rounded-md font-medium text-xs transition ${tipoUsuario === 'docente' ? 'bg-[#6B1D2F] text-white shadow' : 'text-gray-600'}`}>📚 Docente</button>
@@ -638,18 +652,20 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
                     placeholder="Ej: 2994444444" 
                     value={celular} 
                     onChange={(e) => setCelular(sanitizeDNI(e.target.value))} 
-                    disabled={!editando}
-                    className={`w-full px-3 py-2 border-2 border-emerald-500 rounded-lg text-sm font-semibold text-emerald-900 outline-none ${!editando ? 'bg-slate-100 text-slate-600 cursor-not-allowed' : 'bg-white'}`} 
+                    disabled={!editando || esCierreParcialOVerdadero}
+                    className={`w-full px-3 py-2 border-2 border-emerald-500 rounded-lg text-sm font-semibold text-emerald-900 outline-none ${(!editando || esCierreParcialOVerdadero) ? 'bg-slate-100 text-slate-600 cursor-not-allowed' : 'bg-white'}`} 
                   />
                 </div>
 
                 <div className="border-2 border-[#6B1D2F] bg-rose-50/40 p-4 rounded-xl space-y-3">
                   <div className="bg-amber-100 border border-amber-300 p-3 rounded-lg flex justify-between items-center">
                     <div>
-                      <p className="text-xs font-bold text-amber-900">⚠️ Recomendación Importante</p>
-                      <p className="text-[11px] text-amber-800 mt-0.5">Revise bien los nombres y DNI antes de guardar.</p>
+                      <p className="text-xs font-bold text-amber-900">⚠️ Estado del Padrón</p>
+                      <p className="text-[11px] text-amber-800 mt-0.5">
+                        {esCierreParcialOVerdadero ? 'Cierre Parcial activo: Edición bloqueada.' : 'Revise bien los nombres antes de guardar.'}
+                      </p>
                     </div>
-                    {!editando && (
+                    {!editando && !esCierreParcialOVerdadero && (
                       <button
                         type="button"
                         onClick={() => setEditando(true)}
@@ -681,8 +697,8 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
                         placeholder="Nombre y Apellido" 
                         value={fila.nombre_completo} 
                         onChange={(e) => { const arr = [...filasInvitados]; arr[idx].nombre_completo = e.target.value; setFilasInvitados(arr); }} 
-                        disabled={!editando}
-                        className={`w-full px-2.5 py-1.5 border rounded text-xs ${!editando ? 'bg-slate-100 text-slate-600 cursor-not-allowed' : 'bg-white'}`} 
+                        disabled={!editando || esCierreParcialOVerdadero}
+                        className={`w-full px-2.5 py-1.5 border rounded text-xs ${(!editando || esCierreParcialOVerdadero) ? 'bg-slate-100 text-slate-600 cursor-not-allowed' : 'bg-white'}`} 
                       />
 
                       <input 
@@ -691,8 +707,8 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
                         placeholder="DNI (Solo números)" 
                         value={fila.dni} 
                         onChange={(e) => { const arr = [...filasInvitados]; arr[idx].dni = sanitizeDNI(e.target.value); setFilasInvitados(arr); }} 
-                        disabled={!editando}
-                        className={`w-full px-2.5 py-1.5 border rounded text-xs font-mono ${!editando ? 'bg-slate-100 text-slate-600 cursor-not-allowed' : 'bg-white'}`} 
+                        disabled={!editando || esCierreParcialOVerdadero}
+                        className={`w-full px-2.5 py-1.5 border rounded text-xs font-mono ${(!editando || esCierreParcialOVerdadero) ? 'bg-slate-100 text-slate-600 cursor-not-allowed' : 'bg-white'}`} 
                       />
 
                       <div className="flex items-center gap-2 pt-1">
@@ -700,7 +716,7 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
                           type="checkbox" 
                           id={`grupal-${idx}`}
                           checked={fila.es_grupal}
-                          disabled={!editando}
+                          disabled={!editando || esCierreParcialOVerdadero}
                           onChange={(e) => { const arr = [...filasInvitados]; arr[idx].es_grupal = e.target.checked; setFilasInvitados(arr); }}
                           className="w-4 h-4 text-[#6B1D2F] rounded border-gray-300 focus:ring-[#6B1D2F] cursor-pointer"
                         />
@@ -712,7 +728,7 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
                   ))}
                 </div>
 
-                {editando && (
+                {editando && !esCierreParcialOVerdadero && (
                   <button onClick={guardarInvitados} disabled={guardando} className="w-full py-2.5 bg-[#6B1D2F] text-white rounded-lg text-sm font-bold hover:bg-opacity-95 shadow cursor-pointer">
                     {guardando ? 'Guardando...' : 'Guardar Cambios y Generar QR'}
                   </button>
@@ -1029,7 +1045,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
 }
 
 // ============================================================================
-// MÓDULO A: PANEL DE ADMINISTRACIÓN (Con panel de mantenimiento abajo del todo)
+// MÓDULO A: PANEL DE ADMINISTRACIÓN (Con modal de advertencia para Cierre Parcial)
 // ============================================================================
 function PanelAdministracion({ perfilStaff, config, egresados, invitados, docentes, especiales, solicitudes, usuariosSistema, totalEgresados, totalDocentes, totalEspeciales, totalCuposFamiliares, totalOcupado, vacantesLibres, recargar, notify }) {
   const [tab, setTab] = useState('egresados');
@@ -1037,6 +1053,9 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
   const [filtroDocente, setFiltroDocente] = useState('');
   const [filtroVip, setFiltroVip] = useState('');
   
+  // Estado para el modal de advertencia de Cierre Parcial
+  const [mostrarModalCierreParcial, setMostrarModalCierreParcial] = useState(false);
+
   // Configuración editable de aforo y sala
   const [cupoBaseEdit, setCupoBaseEdit] = useState(config.cupo_base || CUPO_BASE_DEFECTO);
   const [filasEdit, setFilasEdit] = useState(config.filas || 15);
@@ -1367,7 +1386,22 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     }
   };
 
+  const ejecutarCierreParcial = async () => {
+    if (config.id) {
+      await supabase.from('configuracion').update({ estado_etapa: 'cierre_parcial' }).eq('id', config.id);
+    } else {
+      await supabase.from('configuracion').insert({ estado_etapa: 'cierre_parcial', cupo_base: CUPO_BASE_DEFECTO });
+    }
+    await recargar();
+    setMostrarModalCierreParcial(false);
+    notify('¡Cierre Parcial activado con éxito!');
+  };
+
   const cambiarEtapaGlobal = async (nuevaEtapa) => {
+    if (nuevaEtapa === 'cierre_parcial') {
+      setMostrarModalCierreParcial(true);
+      return;
+    }
     if (config.id) {
       await supabase.from('configuracion').update({ estado_etapa: nuevaEtapa }).eq('id', config.id);
     } else {
@@ -1534,6 +1568,61 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
 
   return (
     <div className="space-y-6">
+      {/* MODAL DE ADVERTENCIA CLARO PARA CIERRE PARCIAL */}
+      {mostrarModalCierreParcial && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50 animate-fadeIn">
+          <div className="bg-white rounded-3xl max-w-lg w-full shadow-2xl overflow-hidden border-4 border-amber-500">
+            <div className="bg-amber-500 text-white p-5 flex items-center gap-3">
+              <AlertTriangle className="w-8 h-8 shrink-0" />
+              <div>
+                <h3 className="font-extrabold text-lg leading-tight">⚠️ Advertencia Importante: Activación de Cierre Parcial</h3>
+                <p className="text-xs text-amber-100">Estás a punto de modificar la etapa operativa del evento</p>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-4 text-sm text-slate-700">
+              <p className="font-bold text-slate-900">¿Qué sucederá exactamente al activar el Cierre Parcial?</p>
+              
+              <ul className="space-y-2.5 text-xs text-slate-600 bg-slate-50 p-4 rounded-2xl border">
+                <li className="flex items-start gap-2">
+                  <span className="text-rose-600 font-bold">🔒</span>
+                  <span><b>Bloqueo de edición general:</b> Los egresados ya no podrán modificar libremente a los invitados que cargaron en sus cupos base, blindando el padrón para evitar cambios de última hora.</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-emerald-600 font-bold">🎟️</span>
+                  <span><b>Gestión de butacas extra:</b> Quedará habilitado el espacio para asignar y aprobar los lugares plus o adicionales basados en las solicitudes pendientes.</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-green-600 font-bold">📱</span>
+                  <span><b>Notificaciones activas:</b> Se habilitarán los botones de notificación instantánea por WhatsApp para avisar a los egresados que ya tienen sus cupos extra aprobados.</span>
+                </li>
+              </ul>
+
+              <p className="text-xs text-slate-500 italic">
+                Esta acción es segura y se puede revertir cambiando la etapa nuevamente, pero afectará de inmediato el acceso de los alumnos al portal.
+              </p>
+
+              <div className="flex gap-3 pt-4 border-t">
+                <button 
+                  type="button" 
+                  onClick={() => setMostrarModalCierreParcial(false)} 
+                  className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition cursor-pointer"
+                >
+                  Cancelar / Volver
+                </button>
+                <button 
+                  type="button" 
+                  onClick={ejecutarCierreParcial} 
+                  className="flex-1 py-3 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-extrabold shadow-lg transition cursor-pointer"
+                >
+                  Sí, Activar Cierre Parcial
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Egresados</p><p className="text-2xl font-extrabold">{totalEgresados}</p></div>
         <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Docentes</p><p className="text-2xl font-extrabold">{totalDocentes}</p></div>
@@ -1786,7 +1875,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
 
               <div className="flex gap-2 pt-3 border-t">
                 <button type="button" onClick={() => setModalEditarEgr(null)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold">Cancelar</button>
-                <button type="submit" disabled={guardandoEdicion} className="flex-1 py-2.5 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-xl text-xs font-bold shadow">
+                <button type="submit" disabled={guardandoEdicion} className="flex-1 py-2.5 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold shadow">
                   {guardandoEdicion ? 'Guardando...' : 'Guardar Cambios'}
                 </button>
               </div>
@@ -2305,7 +2394,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
         </div>
       )}
 
-      {/* ⚙️ SOLAPA DE AFORO Y SALA (Sin los botones de mantenimiento, solo configuración y mapa) */}
+      {/* ⚙️ SOLAPA DE AFORO Y SALA */}
       {tab === 'aforo' && (
         <div className="bg-white rounded-2xl border p-5 space-y-6">
           <div className="border-b pb-3">
