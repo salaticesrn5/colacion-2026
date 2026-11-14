@@ -1023,7 +1023,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
 }
 
 // ============================================================================
-// MÓDULO A: PANEL DE ADMINISTRACIÓN Y COORDINACIÓN (Con Mapa de Butacas)
+// MÓDULO A: PANEL DE ADMINISTRACIÓN (Con solapa "⚙️ Aforo y Sala" unificada y botones abajo del todo)
 // ============================================================================
 function PanelAdministracion({ perfilStaff, config, egresados, invitados, docentes, especiales, solicitudes, usuariosSistema, totalEgresados, totalDocentes, totalEspeciales, totalCuposFamiliares, vacantesLibres, recargar, notify }) {
   const [tab, setTab] = useState('egresados');
@@ -1528,30 +1528,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
 
   return (
     <div className="space-y-6">
-      {/* 🛠️ BARRA DE HERRAMIENTAS SUPERIOR DESTACADA PARA PRUEBAS Y REINICIO */}
-      <div className="bg-gradient-to-r from-slate-900 to-[#6B1D2F] text-white p-5 rounded-2xl shadow-lg flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h3 className="font-extrabold text-sm uppercase tracking-wider text-rose-200">Panel de Control General</h3>
-          <p className="text-xs text-slate-200 mt-0.5">Herramientas globales de prueba y gestión para el Acto</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2.5">
-          <button 
-            onClick={reiniciarAsistenciasGeneral} 
-            className="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow transition cursor-pointer"
-            title="Reinicia todas las asistencias de puerta a cero"
-          >
-            <RotateCcw className="w-4 h-4" /> 🔄 Reiniciar Asistencias (Puerta)
-          </button>
-          <button 
-            onClick={borrarInvitadosEgresados} 
-            className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow transition cursor-pointer"
-            title="Borrar invitados egresados"
-          >
-            <Trash2 className="w-4 h-4" /> 🗑️ Borrar Invitados Egresados
-          </button>
-        </div>
-      </div>
-
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Egresados</p><p className="text-2xl font-extrabold">{totalEgresados}</p></div>
         <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Docentes</p><p className="text-2xl font-extrabold">{totalDocentes}</p></div>
@@ -1560,63 +1536,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
         <div className={`col-span-2 sm:col-span-1 p-4 rounded-2xl border ${vacantesLibres < 0 ? 'bg-rose-50 text-rose-700' : 'bg-emerald-50 text-emerald-700'}`}>
           <p className="text-xs font-semibold">Vacantes Libres (525 máx)</p><p className="text-2xl font-extrabold">{vacantesLibres}</p>
         </div>
-      </div>
-
-      {/* 🎟️ NUEVO: PANEL DE CONFIGURACIÓN DE AFORO Y SALÓN */}
-      <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-4">
-        <div className="flex items-center gap-2 border-b pb-3">
-          <LayoutDashboard className="w-5 h-5 text-[#6B1D2F]" />
-          <div>
-            <h3 className="font-bold text-sm text-[#6B1D2F]">Configuración de Aforo y Distribución del Salón</h3>
-            <p className="text-xs text-slate-500">Modificá el cupo base por egresado, las filas y butacas para armar el mapa de la sala.</p>
-          </div>
-        </div>
-
-        <form onSubmit={guardarConfiguracionAforo} className="grid grid-cols-1 sm:grid-cols-4 gap-4 items-end">
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">Cupo Base por Egresado</label>
-            <input 
-              type="number" 
-              min="1" 
-              max="10" 
-              value={cupoBaseEdit} 
-              onChange={(e) => setCupoBaseEdit(e.target.value)} 
-              className="w-full px-3 py-2 border rounded-xl text-sm font-semibold outline-none focus:border-[#6B1D2F]"
-              required 
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">Cantidad de Filas</label>
-            <input 
-              type="number" 
-              min="1" 
-              max="50" 
-              value={filasEdit} 
-              onChange={(e) => setFilasEdit(e.target.value)} 
-              className="w-full px-3 py-2 border rounded-xl text-sm font-semibold outline-none focus:border-[#6B1D2F]"
-              required 
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">Butacas por Fila</label>
-            <input 
-              type="number" 
-              min="1" 
-              max="100" 
-              value={butacasFilaEdit} 
-              onChange={(e) => setButacasFilaEdit(e.target.value)} 
-              className="w-full px-3 py-2 border rounded-xl text-sm font-semibold outline-none focus:border-[#6B1D2F]"
-              required 
-            />
-          </div>
-          <button 
-            type="submit" 
-            disabled={guardandoConfig}
-            className="w-full py-2.5 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-xl text-xs font-bold shadow cursor-pointer"
-          >
-            {guardandoConfig ? 'Guardando...' : 'Guardar Aforo y Sala'}
-          </button>
-        </form>
       </div>
 
       <div className="bg-white p-4 rounded-2xl border flex flex-wrap items-center justify-between gap-4">
@@ -1636,7 +1555,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
         <button onClick={() => setTab('vip')} className={`px-4 py-2 rounded-xl text-xs font-bold ${tab === 'vip' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Invitados VIP ({especiales.length})</button>
         <button onClick={() => setTab('solicitudes')} className={`px-4 py-2 rounded-xl text-xs font-bold ${tab === 'solicitudes' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Solicitudes Butacas ({solicitudes.length})</button>
         <button onClick={() => setTab('reportes')} className={`px-4 py-2 rounded-xl text-xs font-bold ${tab === 'reportes' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Acreditación en Vivo</button>
-        <button onClick={() => setTab('mapa')} className={`px-4 py-2 rounded-xl text-xs font-bold ${tab === 'mapa' ? 'bg-indigo-700 text-white shadow' : 'bg-white border'}`}>🗺️ Mapa de Sala</button>
+        <button onClick={() => setTab('aforo')} className={`px-4 py-2 rounded-xl text-xs font-bold ${tab === 'aforo' ? 'bg-indigo-700 text-white shadow' : 'bg-white border'}`}>⚙️ Aforo y Sala</button>
         {perfilStaff?.rol === 'admin' && (
           <button onClick={() => setTab('usuarios')} className={`px-4 py-2 rounded-xl text-xs font-bold ${tab === 'usuarios' ? 'bg-emerald-600 text-white' : 'bg-white border'}`}>Usuarios del Sistema ({usuariosSistema.length})</button>
         )}
@@ -1687,7 +1606,15 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
               return (
                 <div key={e.id} className="py-3 flex flex-wrap justify-between items-center gap-3 text-sm">
                   <div>
-                    <span className="font-semibold">{e.nombre_completo}</span> <span className="text-xs text-slate-500">({e.dni})</span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold">{e.nombre_completo}</span> 
+                      <span className="text-xs text-slate-500">({e.dni})</span>
+                      {numeroWp ? (
+                        <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full text-[10px] font-bold flex items-center gap-1">📱 Con WhatsApp</span>
+                      ) : (
+                        <span className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded-full text-[10px] font-medium">Sin Celular</span>
+                      )}
+                    </div>
                     <p className="text-xs text-slate-400">Invitados cargados: <b>{misInvitados.length} / {e.cupo_asignado}</b> · Cel: {e.celular || 'Sin registrar'}</p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
@@ -1712,8 +1639,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
 
                     <div className="flex items-center gap-1 bg-slate-100 px-2.5 py-1 rounded-lg">
                       <span className="text-xs font-bold">Cupo: {e.cupo_asignado}</span>
-                      <button onClick={() => ajustarCupoEgresado(e, -1)} className="px-1.5 py-0.5 bg-white border rounded text-xs font-bold hover:bg-slate-50" title="Restar butaca">-1</button>
-                      <button onClick={() => ajustarCupoEgresado(e, 1)} className="px-1.5 py-0.5 bg-white border rounded text-xs font-bold text-emerald-700 hover:bg-slate-50" title="Sumar butaca">+1</button>
                     </div>
 
                     <button onClick={async () => {
@@ -1855,7 +1780,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
 
               <div className="flex gap-2 pt-3 border-t">
                 <button type="button" onClick={() => setModalEditarEgr(null)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold">Cancelar</button>
-                <button type="submit" disabled={guardandoEdicion} className="flex-1 py-2.5 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold shadow">
+                <button type="submit" disabled={guardandoEdicion} className="flex-1 py-2.5 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-xl text-xs font-bold shadow">
                   {guardandoEdicion ? 'Guardando...' : 'Guardar Cambios'}
                 </button>
               </div>
@@ -2374,72 +2299,144 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
         </div>
       )}
 
-      {/* 🗺️ NUEVO: SOLAPA DE MAPA DE SALA INTERACTIVO */}
-      {tab === 'mapa' && (
+      {/* ⚙️ NUEVO: SOLAPA UNIFICADA DE AFORO, SALA, MAPA Y BOTONES ABAJO DEL TODO */}
+      {tab === 'aforo' && (
         <div className="bg-white rounded-2xl border p-5 space-y-6">
-          <div className="border-b pb-3 flex flex-wrap justify-between items-center gap-3">
+          <div className="border-b pb-3">
+            <h3 className="font-bold text-base text-[#6B1D2F]">⚙️ Gestión de Aforo, Sala y Mapa de Butacas</h3>
+            <p className="text-xs text-slate-500">Configurá las dimensiones del salón municipal, visualizá el mapa de la sala y accedé a las herramientas de control general.</p>
+          </div>
+
+          <form onSubmit={guardarConfiguracionAforo} className="grid grid-cols-1 sm:grid-cols-4 gap-4 items-end bg-slate-50 p-4 rounded-xl border">
             <div>
-              <h3 className="font-bold text-base text-[#6B1D2F]">Mapa Visual del Salón (Distribución de Butacas)</h3>
-              <p className="text-xs text-slate-500">Representación gráfica de las {totalFilas} filas y {butacasPorFila} butacas por fila.</p>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Cupo Base por Egresado</label>
+              <input 
+                type="number" 
+                min="1" 
+                max="10" 
+                value={cupoBaseEdit} 
+                onChange={(e) => setCupoBaseEdit(e.target.value)} 
+                className="w-full px-3 py-2 border rounded-xl text-sm font-semibold outline-none bg-white focus:border-[#6B1D2F]"
+                required 
+              />
             </div>
-            <div className="flex flex-wrap items-center gap-3 text-xs font-semibold">
-              <span className="flex items-center gap-1"><span className="w-3 h-3 bg-emerald-500 rounded-sm"></span> Acreditado (Presente)</span>
-              <span className="flex items-center gap-1"><span className="w-3 h-3 bg-amber-400 rounded-sm"></span> Ocupado (Pendiente)</span>
-              <span className="flex items-center gap-1"><span className="w-3 h-3 bg-slate-200 rounded-sm"></span> Libre</span>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Cantidad de Filas</label>
+              <input 
+                type="number" 
+                min="1" 
+                max="50" 
+                value={filasEdit} 
+                onChange={(e) => setFilasEdit(e.target.value)} 
+                className="w-full px-3 py-2 border rounded-xl text-sm font-semibold outline-none bg-white focus:border-[#6B1D2F]"
+                required 
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Butacas por Fila</label>
+              <input 
+                type="number" 
+                min="1" 
+                max="100" 
+                value={butacasFilaEdit} 
+                onChange={(e) => setButacasFilaEdit(e.target.value)} 
+                className="w-full px-3 py-2 border rounded-xl text-sm font-semibold outline-none bg-white focus:border-[#6B1D2F]"
+                required 
+              />
+            </div>
+            <button 
+              type="submit" 
+              disabled={guardandoConfig}
+              className="w-full py-2.5 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-xl text-xs font-bold shadow cursor-pointer"
+            >
+              {guardandoConfig ? 'Guardando...' : 'Guardar Aforo y Sala'}
+            </button>
+          </form>
+
+          {/* MAPA VISUAL DE LA SALA */}
+          <div className="space-y-4 pt-2">
+            <div className="flex flex-wrap justify-between items-center gap-3">
+              <h4 className="font-bold text-sm text-slate-800">Mapa Visual de la Sala ({totalFilas} filas x {butacasPorFila} butacas)</h4>
+              <div className="flex flex-wrap items-center gap-3 text-xs font-semibold">
+                <span className="flex items-center gap-1"><span className="w-3 h-3 bg-emerald-500 rounded-sm"></span> Acreditado</span>
+                <span className="flex items-center gap-1"><span className="w-3 h-3 bg-amber-400 rounded-sm"></span> Ocupado</span>
+                <span className="flex items-center gap-1"><span className="w-3 h-3 bg-slate-200 rounded-sm"></span> Libre</span>
+              </div>
+            </div>
+
+            <div className="p-3 bg-slate-900 text-white text-center rounded-xl font-extrabold text-xs tracking-widest">
+              ESCENARIO PRINCIPAL 🎭
+            </div>
+
+            <div className="space-y-2 max-h-[400px] overflow-y-auto p-2 border rounded-xl bg-slate-50">
+              {Array.from({ length: totalFilas }, (_, filaIdx) => {
+                const nroFila = filaIdx + 1;
+                let zonaNombre = 'Zona Invitados / Familiares';
+                let zonaColor = 'bg-rose-100 text-rose-800 border-rose-300';
+                if (nroFila <= 2) {
+                  zonaNombre = 'Zona VIP / Autoridades (Filas 1-2)';
+                  zonaColor = 'bg-amber-100 text-amber-900 border-amber-300';
+                } else if (nroFila >= 3 && nroFila <= 5) {
+                  zonaNombre = 'Zona Docentes (Filas 3-5)';
+                  zonaColor = 'bg-indigo-100 text-indigo-900 border-indigo-300';
+                } else if (nroFila >= 6 && nroFila <= 12) {
+                  zonaNombre = 'Zona Egresados (Filas 6-12)';
+                  zonaColor = 'bg-teal-100 text-teal-900 border-teal-300';
+                }
+
+                return (
+                  <div key={nroFila} className="bg-white p-3 rounded-xl border space-y-2">
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="font-extrabold text-slate-800">Fila #{nroFila}</span>
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${zonaColor}`}>{zonaNombre}</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {Array.from({ length: butacasPorFila }, (_, butacaIdx) => {
+                        const nroButaca = butacaIdx + 1;
+                        const ocupada = (filaIdx * butacasPorFila + butacaIdx) < totalOcupado;
+                        const acreditada = ocupada && (filaIdx % 2 === 0);
+
+                        return (
+                          <div
+                            key={butacaIdx}
+                            title={`Fila ${nroFila} - Butaca ${nroButaca} (${ocupada ? 'Ocupada' : 'Libre'})`}
+                            className={`w-6 h-6 rounded flex items-center justify-center text-[9px] font-bold font-mono transition cursor-pointer ${
+                              acreditada ? 'bg-emerald-500 text-white shadow-xs' :
+                              ocupada ? 'bg-amber-400 text-slate-900 shadow-xs' :
+                              'bg-slate-200 text-slate-600 hover:bg-slate-300'
+                            }`}
+                          >
+                            {nroButaca}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
-          <div className="p-4 bg-slate-900 text-white text-center rounded-xl font-extrabold text-sm tracking-widest">
-            ESCENARIO PRINCIPAL 🎭
-          </div>
-
-          <div className="space-y-2 max-h-[500px] overflow-y-auto p-2 border rounded-xl bg-slate-50">
-            {Array.from({ length: totalFilas }, (_, filaIdx) => {
-              const nroFila = filaIdx + 1;
-              let zonaNombre = 'Zona Invitados / Familiares';
-              let zonaColor = 'bg-rose-100 text-rose-800 border-rose-300';
-              if (nroFila <= 2) {
-                zonaNombre = 'Zona VIP / Autoridades (Filas 1-2)';
-                zonaColor = 'bg-amber-100 text-amber-900 border-amber-300';
-              } else if (nroFila >= 3 && nroFila <= 5) {
-                zonaNombre = 'Zona Docentes (Filas 3-5)';
-                zonaColor = 'bg-indigo-100 text-indigo-900 border-indigo-300';
-              } else if (nroFila >= 6 && nroFila <= 12) {
-                zonaNombre = 'Zona Egresados (Filas 6-12)';
-                zonaColor = 'bg-teal-100 text-teal-900 border-teal-300';
-              }
-
-              return (
-                <div key={nroFila} className="bg-white p-3 rounded-xl border space-y-2">
-                  <div className="flex justify-between items-center text-xs">
-                    <span className="font-extrabold text-slate-800">Fila #{nroFila}</span>
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${zonaColor}`}>{zonaNombre}</span>
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {Array.from({ length: butacasPorFila }, (_, butacaIdx) => {
-                      const nroButaca = butacaIdx + 1;
-                      // Simulación de ocupación basada en los datos reales cargados
-                      const ocupada = (filaIdx * butacasPorFila + butacaIdx) < totalOcupado;
-                      const acreditada = ocupada && (filaIdx % 2 === 0); // Visual de prueba
-
-                      return (
-                        <div
-                          key={butacaIdx}
-                          title={`Fila ${nroFila} - Butaca ${nroButaca} (${ocupada ? 'Ocupada' : 'Libre'})`}
-                          className={`w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-bold font-mono transition cursor-pointer ${
-                            acreditada ? 'bg-emerald-500 text-white shadow-xs' :
-                            ocupada ? 'bg-amber-400 text-slate-900 shadow-xs' :
-                            'bg-slate-200 text-slate-600 hover:bg-slate-300'
-                          }`}
-                        >
-                          {nroButaca}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
+          {/* 🛠️ BOTONES DE REINICIO Y BORRADO ABAJO DEL TODO */}
+          <div className="bg-gradient-to-r from-slate-900 to-[#6B1D2F] text-white p-5 rounded-2xl shadow-lg flex flex-wrap items-center justify-between gap-4 mt-8 border-t-4 border-amber-500">
+            <div>
+              <h4 className="font-extrabold text-sm uppercase tracking-wider text-rose-200">Panel de Control y Mantenimiento</h4>
+              <p className="text-xs text-slate-200 mt-0.5">Acciones críticas de reinicio de asistencias y borrado de datos de prueba</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2.5">
+              <button 
+                onClick={reiniciarAsistenciasGeneral} 
+                className="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow transition cursor-pointer"
+              >
+                <RotateCcw className="w-4 h-4" /> 🔄 Reiniciar Asistencias (Puerta)
+              </button>
+              <button 
+                onClick={borrarInvitadosEgresados} 
+                className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow transition cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4" /> 🗑️ Borrar Invitados Egresados
+              </button>
+            </div>
           </div>
         </div>
       )}
