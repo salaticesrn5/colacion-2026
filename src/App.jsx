@@ -369,7 +369,6 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
       }
     }
     setFilasInvitados(arr);
-    // Si estamos en cierre parcial o definitivo, el egresado no puede editar libremente salvo que tenga cupo plus habilitado
     if (esCierreParcialOVerdadero && misInv.length > 0) {
       setEditando(false);
     } else if (misInv.length > 0) {
@@ -1045,7 +1044,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
 }
 
 // ============================================================================
-// MÓDULO A: PANEL DE ADMINISTRACIÓN (Con modal de advertencia para Cierre Parcial)
+// MÓDULO A: PANEL DE ADMINISTRACIÓN
 // ============================================================================
 function PanelAdministracion({ perfilStaff, config, egresados, invitados, docentes, especiales, solicitudes, usuariosSistema, totalEgresados, totalDocentes, totalEspeciales, totalCuposFamiliares, totalOcupado, vacantesLibres, recargar, notify }) {
   const [tab, setTab] = useState('egresados');
@@ -1053,10 +1052,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
   const [filtroDocente, setFiltroDocente] = useState('');
   const [filtroVip, setFiltroVip] = useState('');
   
-  // Estado para el modal de advertencia de Cierre Parcial
-  const [mostrarModalCierreParcial, setMostrarModalCierreParcial] = useState(false);
-
-  // Configuración editable de aforo y sala
   const [cupoBaseEdit, setCupoBaseEdit] = useState(config.cupo_base || CUPO_BASE_DEFECTO);
   const [filasEdit, setFilasEdit] = useState(config.filas || 15);
   const [butacasFilaEdit, setButacasFilaEdit] = useState(config.butacas_por_fila || 35);
@@ -1117,7 +1112,31 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
   const [nuevoRolUsr, setNuevoRolUsr] = useState('puerta');
   const [showPassUsr, setShowPassUsr] = useState(false);
 
-  // Funciones de Reinicio / Limpieza
+  // Función crear usuario del sistema
+  const crearUsuarioSistema = async (e) => {
+    e.preventDefault();
+    if (!nuevoNombreUsr.trim() || !nuevoEmailUsr.trim() || !nuevoPassUsr || nuevoPassUsr.length < 6) {
+      notify('Completá todos los campos y una contraseña de al menos 6 caracteres.', 'error');
+      return;
+    }
+    try {
+      const { error } = await supabase.from('usuarios_sistema').insert({
+        nombre: nuevoNombreUsr.trim(),
+        email: nuevoEmailUsr.trim().toLowerCase(),
+        rol: nuevoRolUsr,
+        activo: true
+      });
+      if (error) throw error;
+      setNuevoNombreUsr('');
+      setNuevoEmailUsr('');
+      setNuevoPassUsr('');
+      await recargar();
+      notify('Usuario del sistema creado correctamente.');
+    } catch (err) {
+      notify('Error al crear usuario: ' + err.message, 'error');
+    }
+  };
+
   const reiniciarAsistenciasGeneral = async () => {
     if (!window.confirm("¿Estás seguro de reiniciar todas las asistencias a 0 para las pruebas o el acto?")) return;
     try {
@@ -1386,141 +1405,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     }
   };
 
-  const ejecutarCierreParcial = async () => {
-    if (config.id) {
-      await supabase.from('configuracion').update({ estado_etapa: 'cierre_parcial' }).eq('id', config.id);
-    } else {
-      await supabase.from('configuracion').insert({ estado_etapa: 'cierre_parcial', cupo_base: CUPO_BASE_DEFECTO });
-    }
-    await recargar();
-    setMostrarModalCierreParcial(false);
-    notify('¡Cierre Parcial activado con éxito!');
-  };
-
-  const cambiarEtapaGlobal = async (nuevaEtapa) => {
-    if (nuevaEtapa === 'cierre_parcial') {
-      setMostrarModalCierreParcial(true);
-      return;
-    }
-    if (config.id) {
-      await supabase.from('configuracion').update({ estado_etapa: nuevaEtapa }).eq('id', config.id);
-    } else {
-      await supabase.from('configuracion').insert({ estado_etapa: nuevaEtapa, cupo_base: CUPO_BASE_DEFECTO });
-    }
-    await recargar();
-    notify(`Etapa actualizada a: ${nuevaEtapa.toUpperCase()}`);
-  };
-
-  const handleImportarCSVEgresados = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const text = await file.text();
-      const rows = parseCSV(text);
-      const registros = rows.map((r) => ({
-        dni: sanitizeDNI(r[0]),
-        nombre_completo: (r[1] || '').toUpperCase(),
-        cupo_asignado: config.cupo_base || CUPO_BASE_DEFECTO,
-        cerrado: false,
-      })).filter(x => x.dni.length >= 7 && x.nombre_completo);
-
-      await supabase.from('egresados').upsert(registros, { onConflict: 'dni' });
-      await recargar();
-      notify(`Importados ${registros.length} egresados.`);
-    } catch (err) {
-      notify('Error importando CSV: ' + err.message, 'error');
-    }
-  };
-
-  const handleImportarCSVDocentes = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const text = await file.text();
-      const rows = parseCSV(text);
-      const registros = rows.map((r) => ({
-        dni: sanitizeDNI(r[0]),
-        nombre_completo: (r[1] || '').toUpperCase(),
-        asistio: false,
-      })).filter(x => x.dni.length >= 7 && x.nombre_completo);
-
-      await supabase.from('docentes').upsert(registros, { onConflict: 'dni' });
-      await recargar();
-      notify(`Importados ${registros.length} docentes.`);
-    } catch (err) {
-      notify('Error importando CSV Docentes: ' + err.message, 'error');
-    }
-  };
-
-  const handleImportarCSVVips = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const text = await file.text();
-      const rows = parseCSV(text);
-      const registros = rows.map((r) => ({
-        dni: sanitizeDNI(r[0]),
-        nombre_completo: (r[1] || '').toUpperCase(),
-        asistio: false,
-      })).filter(x => x.nombre_completo);
-
-      await supabase.from('invitados_especiales').upsert(registros, { onConflict: 'dni' });
-      await recargar();
-      notify(`Importados ${registros.length} invitados VIP.`);
-    } catch (err) {
-      notify('Error importando CSV VIP: ' + err.message, 'error');
-    }
-  };
-
-  const vaciarPadronEgresados = async () => {
-    const resp = window.prompt("Para confirmar el vaciado total del padrón de egresados, escribí VACIAR en mayúsculas:");
-    if (resp !== 'VACIAR') return;
-    try {
-      await supabase.from('invitados').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-      await supabase.from('egresados').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-      await recargar();
-      notify('Padrón de egresados vaciado correctamente.');
-    } catch (err) {
-      notify('Error al vaciar padrón: ' + err.message, 'error');
-    }
-  };
-
-  const vaciarPadronDocentes = async () => {
-    const resp = window.prompt("Para confirmar el vaciado total del padrón de docentes, escribí VACIAR en mayúsculas:");
-    if (resp !== 'VACIAR') return;
-    try {
-      await supabase.from('docentes').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-      await recargar();
-      notify('Padrón de docentes vaciado correctamente.');
-    } catch (err) {
-      notify('Error al vaciar docentes: ' + err.message, 'error');
-    }
-  };
-
-  const vaciarPadronVip = async () => {
-    const resp = window.prompt("Para confirmar el vaciado total del padrón VIP, escribí VACIAR en mayúsculas:");
-    if (resp !== 'VACIAR') return;
-    try {
-      await supabase.from('invitados_especiales').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-      await recargar();
-      notify('Padrón VIP vaciado correctamente.');
-    } catch (err) {
-      notify('Error al vaciar VIP: ' + err.message, 'error');
-    }
-  };
-
-  const resolverSolicitud = async (sol, aprobar) => {
-    if (aprobar) {
-      const egr = egresados.find((e) => e.id === sol.egresado_id);
-      if (egr) {
-        await supabase.from('egresados').update({ cupo_asignado: Number(egr.cupo_asignado) + Number(sol.cantidad_solicitada) }).eq('id', egr.id);
-      }
-    }
-    await supabase.from('solicitudes_butacas').update({ estado: aprobar ? 'aprobada' : 'rechazada' }).eq('id', sol.id);
-    await recargar();
-    notify(aprobar ? 'Solicitud aprobada y cupo asignado.' : 'Solicitud rechazada.');
-  };
-
   const egresadosFiltrados = egresados.filter((e) =>
     (e.nombre_completo || '').toLowerCase().includes(filtroEgresado.toLowerCase()) ||
     (e.dni || '').includes(filtroEgresado)
@@ -1562,7 +1446,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
   const egresadosPresentesCount = egresados.filter(e => e.asistio).length;
   const porcentajeAsistencia = Math.round((egresadosPresentesCount / (egresados.length || 1)) * 100);
 
-  // Construcción del Mapa de Sala por filas y butacas
   const totalFilas = Number(config.filas) || 15;
   const butacasPorFila = Number(config.butacas_por_fila) || 35;
 
@@ -1612,7 +1495,16 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                 </button>
                 <button 
                   type="button" 
-                  onClick={ejecutarCierreParcial} 
+                  onClick={async () => {
+                    if (config.id) {
+                      await supabase.from('configuracion').update({ estado_etapa: 'cierre_parcial' }).eq('id', config.id);
+                    } else {
+                      await supabase.from('configuracion').insert({ estado_etapa: 'cierre_parcial', cupo_base: CUPO_BASE_DEFECTO });
+                    }
+                    await recargar();
+                    setMostrarModalCierreParcial(false);
+                    notify('¡Cierre Parcial activado con éxito!');
+                  }} 
                   className="flex-1 py-3 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-extrabold shadow-lg transition cursor-pointer"
                 >
                   Sí, Activar Cierre Parcial
@@ -1638,9 +1530,19 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
           <p className="text-xs font-bold uppercase text-slate-500">Etapa Global de Carga</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={() => cambiarEtapaGlobal('abierta')} className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${config.estado_etapa === 'abierta' ? 'bg-[#6B1D2F] text-white shadow' : 'bg-slate-100 text-slate-700'}`}>Abierta</button>
-          <button onClick={() => cambiarEtapaGlobal('cierre_parcial')} className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${config.estado_etapa === 'cierre_parcial' ? 'bg-amber-600 text-white shadow' : 'bg-slate-100 text-slate-700'}`}>Cierre Parcial</button>
-          <button onClick={() => cambiarEtapaGlobal('cierre_definitivo')} className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${config.estado_etapa === 'cierre_definitivo' ? 'bg-rose-600 text-white shadow' : 'bg-slate-100 text-slate-700'}`}>Definitivo</button>
+          <button onClick={async () => {
+            if (config.id) await supabase.from('configuracion').update({ estado_etapa: 'abierta' }).eq('id', config.id);
+            else await supabase.from('configuracion').insert({ estado_etapa: 'abierta', cupo_base: CUPO_BASE_DEFECTO });
+            await recargar();
+            notify('Etapa actualizada a: ABIERTA');
+          }} className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${config.estado_etapa === 'abierta' ? 'bg-[#6B1D2F] text-white shadow' : 'bg-slate-100 text-slate-700'}`}>Abierta</button>
+          <button onClick={() => setMostrarModalCierreParcial(true)} className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${config.estado_etapa === 'cierre_parcial' ? 'bg-amber-600 text-white shadow' : 'bg-slate-100 text-slate-700'}`}>Cierre Parcial</button>
+          <button onClick={async () => {
+            if (config.id) await supabase.from('configuracion').update({ estado_etapa: 'cierre_definitivo' }).eq('id', config.id);
+            else await supabase.from('configuracion').insert({ estado_etapa: 'cierre_definitivo', cupo_base: CUPO_BASE_DEFECTO });
+            await recargar();
+            notify('Etapa actualizada a: CIERRE DEFINITIVO');
+          }} className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${config.estado_etapa === 'cierre_definitivo' ? 'bg-rose-600 text-white shadow' : 'bg-slate-100 text-slate-700'}`}>Definitivo</button>
         </div>
       </div>
 
@@ -1875,7 +1777,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
 
               <div className="flex gap-2 pt-3 border-t">
                 <button type="button" onClick={() => setModalEditarEgr(null)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold">Cancelar</button>
-                <button type="submit" disabled={guardandoEdicion} className="flex-1 py-2.5 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold shadow">
+                <button type="submit" disabled={guardandoEdicion} className="flex-1 py-2.5 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-xl text-xs font-bold shadow">
                   {guardandoEdicion ? 'Guardando...' : 'Guardar Cambios'}
                 </button>
               </div>
