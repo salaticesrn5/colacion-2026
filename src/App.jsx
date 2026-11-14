@@ -41,7 +41,7 @@ export default function App() {
   const [solicitudes, setSolicitudes] = useState([]);
   const [usuariosSistema, setUsuariosSistema] = useState([]);
 
-  // Estado global para el modal de Cierre Parcial (declarado aquí para evitar cualquier ReferenceError)
+  // Estado global para el modal de Cierre Parcial
   const [mostrarModalCierreParcial, setMostrarModalCierreParcial] = useState(false);
 
   const [toast, setToast] = useState(null);
@@ -116,16 +116,12 @@ export default function App() {
       try {
         const resSol = await supabase.from('solicitudes_butacas').select('*').order('created_at', { ascending: false });
         if (resSol.data) setSolicitudes(resSol.data);
-      } catch (errSol) {
-        // Tabla solicitudes_butacas opcional si no fue creada aún
-      }
+      } catch (errSol) {}
 
       try {
         const resUsr = await supabase.from('usuarios_sistema').select('*').order('created_at', { ascending: true });
         if (resUsr.data) setUsuariosSistema(resUsr.data);
-      } catch (errUsr) {
-        // Tabla usuarios_sistema opcional
-      }
+      } catch (errUsr) {}
 
     } catch (e) {
       console.error('Error cargando datos:', e);
@@ -944,9 +940,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
                 const scannedText = barcodes[0].rawValue;
                 validarCodigoEntrada(scannedText);
               }
-            } catch (err) {
-              // Ignorar errores transitorios
-            }
+            } catch (err) {}
           }
         }, 400);
       }
@@ -1223,6 +1217,67 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     link.click();
     document.body.removeChild(link);
     notify(`Exportado ${nombreArchivo} con éxito.`);
+  };
+
+  const handleImportarCSVEgresados = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const rows = parseCSV(text);
+      const registros = rows.map((r) => ({
+        dni: sanitizeDNI(r[0]),
+        nombre_completo: (r[1] || '').toUpperCase(),
+        cupo_asignado: config.cupo_base || CUPO_BASE_DEFECTO,
+        cerrado: false,
+      })).filter(x => x.dni.length >= 7 && x.nombre_completo);
+
+      await supabase.from('egresados').upsert(registros, { onConflict: 'dni' });
+      await recargar();
+      notify(`Importados ${registros.length} egresados.`);
+    } catch (err) {
+      notify('Error importando CSV: ' + err.message, 'error');
+    }
+  };
+
+  const handleImportarCSVDocentes = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const rows = parseCSV(text);
+      const registros = rows.map((r) => ({
+        dni: sanitizeDNI(r[0]),
+        nombre_completo: (r[1] || '').toUpperCase(),
+        asistio: false,
+      })).filter(x => x.dni.length >= 7 && x.nombre_completo);
+
+      await supabase.from('docentes').upsert(registros, { onConflict: 'dni' });
+      await recargar();
+      notify(`Importados ${registros.length} docentes.`);
+    } catch (err) {
+      notify('Error importando CSV Docentes: ' + err.message, 'error');
+    }
+  };
+
+  const handleImportarCSVVips = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const rows = parseCSV(text);
+      const registros = rows.map((r) => ({
+        dni: sanitizeDNI(r[0]),
+        nombre_completo: (r[1] || '').toUpperCase(),
+        asistio: false,
+      })).filter(x => x.nombre_completo);
+
+      await supabase.from('invitados_especiales').upsert(registros, { onConflict: 'dni' });
+      await recargar();
+      notify(`Importados ${registros.length} invitados VIP.`);
+    } catch (err) {
+      notify('Error importando CSV VIP: ' + err.message, 'error');
+    }
   };
 
   const crearUsuarioSistema = async (e) => {
