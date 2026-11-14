@@ -236,7 +236,7 @@ export default function App() {
             perfilStaff={perfilStaff} config={config} egresados={egresados} invitados={invitados}
             docentes={docentes} especiales={especiales} solicitudes={solicitudes} usuariosSistema={usuariosSistema}
             totalEgresados={totalEgresados} totalDocentes={totalDocentes} totalEspeciales={totalEspeciales}
-            totalCuposFamiliares={totalCuposFamiliares} vacantesLibres={vacantesLibres} recargar={cargarDatosGlobales} notify={notify}
+            totalCuposFamiliares={totalCuposFamiliares} totalOcupado={totalOcupado} vacantesLibres={vacantesLibres} recargar={cargarDatosGlobales} notify={notify}
           />
         ) : vista === 'reporte_papel' && session ? (
           <ReporteResumenPapel egresados={egresados} invitados={invitados} docentes={docentes} especiales={especiales} />
@@ -1025,7 +1025,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
 // ============================================================================
 // MÓDULO A: PANEL DE ADMINISTRACIÓN (Con solapa "⚙️ Aforo y Sala" unificada y botones abajo del todo)
 // ============================================================================
-function PanelAdministracion({ perfilStaff, config, egresados, invitados, docentes, especiales, solicitudes, usuariosSistema, totalEgresados, totalDocentes, totalEspeciales, totalCuposFamiliares, vacantesLibres, recargar, notify }) {
+function PanelAdministracion({ perfilStaff, config, egresados, invitados, docentes, especiales, solicitudes, usuariosSistema, totalEgresados, totalDocentes, totalEspeciales, totalCuposFamiliares, totalOcupado, vacantesLibres, recargar, notify }) {
   const [tab, setTab] = useState('egresados');
   const [filtroEgresado, setFiltroEgresado] = useState('');
   const [filtroDocente, setFiltroDocente] = useState('');
