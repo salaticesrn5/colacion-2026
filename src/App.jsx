@@ -41,6 +41,9 @@ export default function App() {
   const [solicitudes, setSolicitudes] = useState([]);
   const [usuariosSistema, setUsuariosSistema] = useState([]);
 
+  // Estado global para el modal de Cierre Parcial (declarado aquí para evitar cualquier ReferenceError)
+  const [mostrarModalCierreParcial, setMostrarModalCierreParcial] = useState(false);
+
   const [toast, setToast] = useState(null);
   const notify = (msg, type = 'success') => {
     setToast({ msg, type });
@@ -89,16 +92,7 @@ export default function App() {
 
   const cargarDatosGlobales = async () => {
     try {
-      const [resCfg, resEgr, resInv, resDoc, resEsp, resSol, resUsr] = await Promise.all([
-        supabase.from('configuracion').select('*').limit(1).maybeSingle(),
-        supabase.from('egresados').select('*').order('nombre_completo', { ascending: true }),
-        supabase.from('invitados').select('*').order('numero_entrada', { ascending: true }),
-        supabase.from('docentes').select('*').order('nombre_completo', { ascending: true }),
-        supabase.from('invitados_especiales').select('*').order('nombre_completo', { ascending: true }),
-        supabase.from('solicitudes_butacas').select('*').order('created_at', { ascending: false }),
-        supabase.from('usuarios_sistema').select('*').order('created_at', { ascending: true }),
-      ]);
-
+      const resCfg = await supabase.from('configuracion').select('*').limit(1).maybeSingle();
       if (resCfg.data) {
         setConfig({
           ...resCfg.data,
@@ -106,12 +100,33 @@ export default function App() {
           butacas_por_fila: resCfg.data.butacas_por_fila || 35
         });
       }
+
+      const resEgr = await supabase.from('egresados').select('*').order('nombre_completo', { ascending: true });
       if (resEgr.data) setEgresados(resEgr.data);
+
+      const resInv = await supabase.from('invitados').select('*').order('numero_entrada', { ascending: true });
       if (resInv.data) setInvitados(resInv.data);
+
+      const resDoc = await supabase.from('docentes').select('*').order('nombre_completo', { ascending: true });
       if (resDoc.data) setDocentes(resDoc.data);
+
+      const resEsp = await supabase.from('invitados_especiales').select('*').order('nombre_completo', { ascending: true });
       if (resEsp.data) setEspeciales(resEsp.data);
-      if (resSol.data) setSolicitudes(resSol.data);
-      if (resUsr.data) setUsuariosSistema(resUsr.data);
+
+      try {
+        const resSol = await supabase.from('solicitudes_butacas').select('*').order('created_at', { ascending: false });
+        if (resSol.data) setSolicitudes(resSol.data);
+      } catch (errSol) {
+        // Tabla solicitudes_butacas opcional si no fue creada aún
+      }
+
+      try {
+        const resUsr = await supabase.from('usuarios_sistema').select('*').order('created_at', { ascending: true });
+        if (resUsr.data) setUsuariosSistema(resUsr.data);
+      } catch (errUsr) {
+        // Tabla usuarios_sistema opcional
+      }
+
     } catch (e) {
       console.error('Error cargando datos:', e);
     }
@@ -138,6 +153,70 @@ export default function App() {
         }`}>
           {toast.type === 'error' ? <XCircle className="w-5 h-5 shrink-0" /> : <CheckCircle2 className="w-5 h-5 shrink-0" />}
           <span>{toast.msg}</span>
+        </div>
+      )}
+
+      {/* MODAL DE ADVERTENCIA CLARO PARA CIERRE PARCIAL */}
+      {mostrarModalCierreParcial && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50 animate-fadeIn">
+          <div className="bg-white rounded-3xl max-w-lg w-full shadow-2xl overflow-hidden border-4 border-amber-500">
+            <div className="bg-amber-500 text-white p-5 flex items-center gap-3">
+              <AlertTriangle className="w-8 h-8 shrink-0" />
+              <div>
+                <h3 className="font-extrabold text-lg leading-tight">⚠️ Advertencia Importante: Activación de Cierre Parcial</h3>
+                <p className="text-xs text-amber-100">Estás a punto de modificar la etapa operativa del evento</p>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-4 text-sm text-slate-700">
+              <p className="font-bold text-slate-900">¿Qué sucederá exactamente al activar el Cierre Parcial?</p>
+              
+              <ul className="space-y-2.5 text-xs text-slate-600 bg-slate-50 p-4 rounded-2xl border">
+                <li className="flex items-start gap-2">
+                  <span className="text-rose-600 font-bold">🔒</span>
+                  <span><b>Bloqueo de edición general:</b> Los egresados ya no podrán modificar libremente a los invitados que cargaron en sus cupos base, blindando el padrón para evitar cambios de última hora.</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-emerald-600 font-bold">🎟️</span>
+                  <span><b>Gestión de butacas extra:</b> Quedará habilitado el espacio para asignar y aprobar los lugares plus o adicionales basados en las solicitudes pendientes.</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-green-600 font-bold">📱</span>
+                  <span><b>Notificaciones activas:</b> Se habilitarán los botones de notificación instantánea por WhatsApp para avisar a los egresados que ya tienen sus cupos extra aprobados.</span>
+                </li>
+              </ul>
+
+              <p className="text-xs text-slate-500 italic">
+                Esta acción es segura y se puede revertir cambiando la etapa nuevamente, pero afectará de inmediato el acceso de los alumnos al portal.
+              </p>
+
+              <div className="flex gap-3 pt-4 border-t">
+                <button 
+                  type="button" 
+                  onClick={() => setMostrarModalCierreParcial(false)} 
+                  className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition cursor-pointer"
+                >
+                  Cancelar / Volver
+                </button>
+                <button 
+                  type="button" 
+                  onClick={async () => {
+                    if (config.id) {
+                      await supabase.from('configuracion').update({ estado_etapa: 'cierre_parcial' }).eq('id', config.id);
+                    } else {
+                      await supabase.from('configuracion').insert({ estado_etapa: 'cierre_parcial', cupo_base: CUPO_BASE_DEFECTO });
+                    }
+                    await cargarDatosGlobales();
+                    setMostrarModalCierreParcial(false);
+                    notify('¡Cierre Parcial activado con éxito!');
+                  }} 
+                  className="flex-1 py-3 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-extrabold shadow-lg transition cursor-pointer"
+                >
+                  Sí, Activar Cierre Parcial
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -236,6 +315,7 @@ export default function App() {
             docentes={docentes} especiales={especiales} solicitudes={solicitudes} usuariosSistema={usuariosSistema}
             totalEgresados={totalEgresados} totalDocentes={totalDocentes} totalEspeciales={totalEspeciales}
             totalCuposFamiliares={totalCuposFamiliares} totalOcupado={totalOcupado} vacantesLibres={vacantesLibres} recargar={cargarDatosGlobales} notify={notify}
+            setMostrarModalCierreParcial={setMostrarModalCierreParcial}
           />
         ) : vista === 'reporte_papel' && session ? (
           <ReporteResumenPapel egresados={egresados} invitados={invitados} docentes={docentes} especiales={especiales} />
@@ -1040,7 +1120,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
 // ============================================================================
 // MÓDULO A: PANEL DE ADMINISTRACIÓN
 // ============================================================================
-function PanelAdministracion({ perfilStaff, config, egresados, invitados, docentes, especiales, solicitudes, usuariosSistema, totalEgresados, totalDocentes, totalEspeciales, totalCuposFamiliares, totalOcupado, vacantesLibres, recargar, notify }) {
+function PanelAdministracion({ perfilStaff, config, egresados, invitados, docentes, especiales, solicitudes, usuariosSistema, totalEgresados, totalDocentes, totalEspeciales, totalCuposFamiliares, totalOcupado, vacantesLibres, recargar, notify, setMostrarModalCierreParcial }) {
   const [tab, setTab] = useState('egresados');
   const [filtroEgresado, setFiltroEgresado] = useState('');
   const [filtroEgresadoEstado, setFiltroEgresadoEstado] = useState('TODOS');
@@ -1111,7 +1191,40 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
   const [nuevoRolUsr, setNuevoRolUsr] = useState('puerta');
   const [showPassUsr, setShowPassUsr] = useState(false);
 
-  // Función crear usuario del sistema
+  const exportarCSV = (tipo) => {
+    let contenidoCSV = "data:text/csv;charset=utf-8,";
+    let nombreArchivo = "";
+
+    if (tipo === 'egresados') {
+      contenidoCSV += "DNI,Nombre Completo,Celular,Cupo Asignado,Asistio\n";
+      egresados.forEach(e => {
+        contenidoCSV += `"${e.dni}","${e.nombre_completo}","${e.celular || ''}",${e.cupo_asignado},${e.asistio ? 'SI' : 'NO'}\n`;
+      });
+      nombreArchivo = "padron-egresados-esrn5.csv";
+    } else if (tipo === 'docentes') {
+      contenidoCSV += "DNI,Nombre Completo,Asistio\n";
+      docentes.forEach(d => {
+        contenidoCSV += `"${d.dni}","${d.nombre_completo}",${d.asistio ? 'SI' : 'NO'}\n`;
+      });
+      nombreArchivo = "padron-docentes-esrn5.csv";
+    } else if (tipo === 'vip') {
+      contenidoCSV += "DNI,Nombre e Institucion,Asistio\n";
+      especiales.forEach(v => {
+        contenidoCSV += `"${v.dni || 'S/D'}","${v.nombre_completo}",${v.asistio ? 'SI' : 'NO'}\n`;
+      });
+      nombreArchivo = "padron-vip-esrn5.csv";
+    }
+
+    const encodedUri = encodeURI(contenidoCSV);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", nombreArchivo);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    notify(`Exportado ${nombreArchivo} con éxito.`);
+  };
+
   const crearUsuarioSistema = async (e) => {
     e.preventDefault();
     if (!nuevoNombreUsr.trim() || !nuevoEmailUsr.trim() || !nuevoPassUsr || nuevoPassUsr.length < 6) {
@@ -1404,28 +1517,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     }
   };
 
-  egresados.filter((e) => {
-    const matchTexto = (e.nombre_completo || '').toLowerCase().includes(filtroEgresado.toLowerCase()) || (e.dni || '').includes(filtroEgresado);
-    const tieneWp = Boolean(e.celular && e.celular.replace(/\D/g, '').length >= 8);
-    if (filtroEgresadoEstado === 'CON_WP') return matchTexto && tieneWp;
-    if (filtroEgresadoEstado === 'SIN_WP') return matchTexto && !tieneWp;
-    return matchTexto;
-  });
-
-  docentes.filter((d) => {
-    const matchTexto = (d.nombre_completo || '').toLowerCase().includes(filtroDocente.toLowerCase()) || (d.dni || '').includes(filtroDocente);
-    if (filtroDocenteEstado === 'PRESENTES') return matchTexto && d.asistio;
-    if (filtroDocenteEstado === 'PENDIENTES') return matchTexto && !d.asistio;
-    return matchTexto;
-  });
-
-  especiales.filter((v) => {
-    const matchTexto = (v.nombre_completo || '').toLowerCase().includes(filtroVip.toLowerCase()) || (v.dni || '').includes(filtroVip);
-    if (filtroVipEstado === 'PRESENTES') return matchTexto && v.asistio;
-    if (filtroVipEstado === 'PENDIENTES') return matchTexto && !v.asistio;
-    return matchTexto;
-  });
-
   const egresadosFiltrados = egresados.filter((e) => {
     const matchTexto = (e.nombre_completo || '').toLowerCase().includes(filtroEgresado.toLowerCase()) || (e.dni || '').includes(filtroEgresado);
     const tieneWp = Boolean(e.celular && e.celular.replace(/\D/g, '').length >= 8);
@@ -1479,70 +1570,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
 
   return (
     <div className="space-y-6">
-      {/* MODAL DE ADVERTENCIA CLARO PARA CIERRE PARCIAL */}
-      {mostrarModalCierreParcial && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50 animate-fadeIn">
-          <div className="bg-white rounded-3xl max-w-lg w-full shadow-2xl overflow-hidden border-4 border-amber-500">
-            <div className="bg-amber-500 text-white p-5 flex items-center gap-3">
-              <AlertTriangle className="w-8 h-8 shrink-0" />
-              <div>
-                <h3 className="font-extrabold text-lg leading-tight">⚠️ Advertencia Importante: Activación de Cierre Parcial</h3>
-                <p className="text-xs text-amber-100">Estás a punto de modificar la etapa operativa del evento</p>
-              </div>
-            </div>
-
-            <div className="p-6 space-y-4 text-sm text-slate-700">
-              <p className="font-bold text-slate-900">¿Qué sucederá exactamente al activar el Cierre Parcial?</p>
-              
-              <ul className="space-y-2.5 text-xs text-slate-600 bg-slate-50 p-4 rounded-2xl border">
-                <li className="flex items-start gap-2">
-                  <span className="text-rose-600 font-bold">🔒</span>
-                  <span><b>Bloqueo de edición general:</b> Los egresados ya no podrán modificar libremente a los invitados que cargaron en sus cupos base, blindando el padrón para evitar cambios de última hora.</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="text-emerald-600 font-bold">🎟️</span>
-                  <span><b>Gestión de butacas extra:</b> Quedará habilitado el espacio para asignar y aprobar los lugares plus o adicionales basados en las solicitudes pendientes.</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="text-green-600 font-bold">📱</span>
-                  <span><b>Notificaciones activas:</b> Se habilitarán los botones de notificación instantánea por WhatsApp para avisar a los egresados que ya tienen sus cupos extra aprobados.</span>
-                </li>
-              </ul>
-
-              <p className="text-xs text-slate-500 italic">
-                Esta acción es segura y se puede revertir cambiando la etapa nuevamente, pero afectará de inmediato el acceso de los alumnos al portal.
-              </p>
-
-              <div className="flex gap-3 pt-4 border-t">
-                <button 
-                  type="button" 
-                  onClick={() => setMostrarModalCierreParcial(false)} 
-                  className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition cursor-pointer"
-                >
-                  Cancelar / Volver
-                </button>
-                <button 
-                  type="button" 
-                  onClick={async () => {
-                    if (config.id) {
-                      await supabase.from('configuracion').update({ estado_etapa: 'cierre_parcial' }).eq('id', config.id);
-                    } else {
-                      await supabase.from('configuracion').insert({ estado_etapa: 'cierre_parcial', cupo_base: CUPO_BASE_DEFECTO });
-                    }
-                    await recargar();
-                    setMostrarModalCierreParcial(false);
-                    notify('¡Cierre Parcial activado con éxito!');
-                  }} 
-                  className="flex-1 py-3 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-extrabold shadow-lg transition cursor-pointer"
-                >
-                  Sí, Activar Cierre Parcial
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Egresados</p><p className="text-2xl font-extrabold">{totalEgresados}</p></div>
         <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Docentes</p><p className="text-2xl font-extrabold">{totalDocentes}</p></div>
