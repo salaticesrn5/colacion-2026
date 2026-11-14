@@ -4,7 +4,7 @@ import {
   Users, UserCheck, Shield, QrCode, Upload, Trash2, Plus, Search,
   CheckCircle2, XCircle, AlertTriangle, Lock, Unlock, Download,
   LogOut, Eye, EyeOff, Edit3, Save, X, RefreshCw, MessageCircle, Award,
-  UserPlus, FileSpreadsheet, Check, ArrowRight, Building2, Phone, Eye as EyeIcon, Edit2, Star, Key, UserX, UserCheck as UserCheckIcon, Camera, CameraOff, Printer, FileText
+  UserPlus, FileSpreadsheet, Check, ArrowRight, Building2, Phone, Eye as EyeIcon, Edit2, Star, Key, UserX, UserCheck as UserCheckIcon, Camera, CameraOff, Printer, FileText, RotateCcw
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 
@@ -1017,7 +1017,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
 }
 
 // ============================================================================
-// MÓDULO A: PANEL DE ADMINISTRACIÓN Y COORDINACIÓN COMPLETO
+// MÓDULO A: PANEL DE ADMINISTRACIÓN Y COORDINACIÓN COMPLETO (Con botones de reinicio y limpieza)
 // ============================================================================
 function PanelAdministracion({ perfilStaff, config, egresados, invitados, docentes, especiales, solicitudes, usuariosSistema, totalEgresados, totalDocentes, totalEspeciales, totalCuposFamiliares, vacantesLibres, recargar, notify }) {
   const [tab, setTab] = useState('egresados');
@@ -1089,6 +1089,33 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
   const [nuevoPassUsr, setNuevoPassUsr] = useState('');
   const [nuevoRolUsr, setNuevoRolUsr] = useState('puerta');
   const [showPassUsr, setShowPassUsr] = useState(false);
+
+  // Funciones de Reinicio / Limpieza de Datos de Prueba
+  const reiniciarAsistenciasGeneral = async () => {
+    if (!window.confirm("¿Estás seguro de reiniciar todas las asistencias a 0 para las pruebas o el acto?")) return;
+    try {
+      await supabase.from('egresados').update({ asistio: false }).neq('id', '00000000-0000-0000-0000-000000000000');
+      await supabase.from('invitados').update({ asistio: false, hora_ingreso: null }).neq('id', '00000000-0000-0000-0000-000000000000');
+      await supabase.from('docentes').update({ asistio: false }).neq('id', '00000000-0000-0000-0000-000000000000');
+      await supabase.from('invitados_especiales').update({ asistio: false }).neq('id', '00000000-0000-0000-0000-000000000000');
+      await recargar();
+      notify('Todas las asistencias han sido reiniciadas a cero.');
+    } catch (err) {
+      notify('Error al reiniciar asistencias: ' + err.message, 'error');
+    }
+  };
+
+  const vaciarInvitadosDePrueba = async () => {
+    const resp = window.prompt("Para eliminar todos los invitados cargados de prueba y liberar los cupos, escribí BORRAR en mayúsculas:");
+    if (resp !== 'BORRAR') return;
+    try {
+      await supabase.from('invitados').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      await recargar();
+      notify('Padrón de invitados vaciado correctamente.');
+    } catch (err) {
+      notify('Error al vaciar invitados: ' + err.message, 'error');
+    }
+  };
 
   const abrirModalEditarUsuario = (usr) => {
     setModalEditarUsr(usr);
@@ -1425,58 +1452,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     notify(aprobar ? 'Solicitud aprobada y cupo asignado.' : 'Solicitud rechazada.');
   };
 
-  const crearUsuarioSistema = async (e) => {
-    e.preventDefault();
-    if (!nuevoNombreUsr.trim() || !nuevoEmailUsr.trim() || !nuevoPassUsr) {
-      notify('Completá todos los campos para crear el usuario.', 'error');
-      return;
-    }
-    try {
-      const tempAuth = createTempAuthClient();
-      const { data: authData, error: authErr } = await tempAuth.auth.signUp({
-        email: nuevoEmailUsr.trim().toLowerCase(),
-        password: nuevoPassUsr,
-      });
-      if (authErr && !authErr.message.toLowerCase().includes('already registered')) {
-        throw authErr;
-      }
-
-      const { error: dbErr } = await supabase.from('usuarios_sistema').upsert({
-        auth_id: authData?.user?.id || null,
-        nombre: nuevoNombreUsr.trim(),
-        email: nuevoEmailUsr.trim().toLowerCase(),
-        rol: nuevoRolUsr,
-        activo: true,
-      }, { onConflict: 'email' });
-
-      if (dbErr) throw dbErr;
-
-      setNuevoNombreUsr('');
-      setNuevoEmailUsr('');
-      setNuevoPassUsr('');
-      setNuevoRolUsr('puerta');
-      await recargar();
-      notify('Usuario creado correctamente.');
-    } catch (err) {
-      notify('Error al crear usuario: ' + err.message, 'error');
-    }
-  };
-
-  const ajustarCupoEgresado = async (egr, delta) => {
-    const nuevoCupo = Math.max(0, (Number(egr.cupo_asignado) || 0) + delta);
-    if (delta > 0 && vacantesLibres <= 0) {
-      notify('No hay vacantes libres disponibles en el recinto (525 máx).', 'error');
-      return;
-    }
-    try {
-      await supabase.from('egresados').update({ cupo_asignado: nuevoCupo }).eq('id', egr.id);
-      await recargar();
-      notify(`Cupo actualizado a ${nuevoCupo} lugares para ${egr.nombre_completo}`);
-    } catch (err) {
-      notify('Error ajustando cupo: ' + err.message, 'error');
-    }
-  };
-
   const egresadosFiltrados = egresados.filter((e) =>
     (e.nombre_completo || '').toLowerCase().includes(filtroEgresado.toLowerCase()) ||
     (e.dni || '').includes(filtroEgresado)
@@ -1531,14 +1506,23 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
         </div>
       </div>
 
+      {/* Herramientas de Pruebas y Etapas */}
       <div className="bg-white p-4 rounded-2xl border flex flex-wrap items-center justify-between gap-4">
         <div>
-          <p className="text-xs font-bold uppercase text-slate-500">Etapa Global de Carga</p>
+          <p className="text-xs font-bold uppercase text-slate-500">Etapa Global y Herramientas de Prueba</p>
         </div>
-        <div className="flex gap-2">
-          <button onClick={() => cambiarEtapaGlobal('abierta')} className={`px-3 py-1.5 rounded-xl text-xs font-bold ${config.estado_etapa === 'abierta' ? 'bg-[#6B1D2F] text-white' : 'bg-slate-100'}`}>Abierta</button>
-          <button onClick={() => cambiarEtapaGlobal('cierre_parcial')} className={`px-3 py-1.5 rounded-xl text-xs font-bold ${config.estado_etapa === 'cierre_parcial' ? 'bg-amber-600 text-white' : 'bg-slate-100'}`}>Cierre Parcial</button>
-          <button onClick={() => cambiarEtapaGlobal('cierre_definitivo')} className={`px-3 py-1.5 rounded-xl text-xs font-bold ${config.estado_etapa === 'cierre_definitivo' ? 'bg-rose-600 text-white' : 'bg-slate-100'}`}>Definitivo</button>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex gap-1.5 bg-slate-100 p-1 rounded-xl">
+            <button onClick={() => cambiarEtapaGlobal('abierta')} className={`px-3 py-1 rounded-lg text-xs font-bold ${config.estado_etapa === 'abierta' ? 'bg-[#6B1D2F] text-white' : 'text-slate-700'}`}>Abierta</button>
+            <button onClick={() => cambiarEtapaGlobal('cierre_parcial')} className={`px-3 py-1 rounded-lg text-xs font-bold ${config.estado_etapa === 'cierre_parcial' ? 'bg-amber-600 text-white' : 'text-slate-700'}`}>Cierre Parcial</button>
+            <button onClick={() => cambiarEtapaGlobal('cierre_definitivo')} className={`px-3 py-1 rounded-lg text-xs font-bold ${config.estado_etapa === 'cierre_definitivo' ? 'bg-rose-600 text-white' : 'text-slate-700'}`}>Definitivo</button>
+          </div>
+          <button onClick={reiniciarAsistenciasGeneral} className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 rounded-xl text-xs font-bold flex items-center gap-1 shadow-xs cursor-pointer" title="Reinicia a 0 las asistencias de puerta">
+            <RotateCcw className="w-3.5 h-3.5" /> Reiniciar Asistencias
+          </button>
+          <button onClick={vaciarInvitadosDePrueba} className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 rounded-xl text-xs font-bold flex items-center gap-1 shadow-xs cursor-pointer" title="Borra los invitados cargados de prueba">
+            <Trash2 className="w-3.5 h-3.5" /> Limpiar Invitados de Prueba
+          </button>
         </div>
       </div>
 
@@ -1766,7 +1750,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
 
               <div className="flex gap-2 pt-3 border-t">
                 <button type="button" onClick={() => setModalEditarEgr(null)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold">Cancelar</button>
-                <button type="submit" disabled={guardandoEdicion} className="flex-1 py-2.5 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold shadow">
+                <button type="submit" disabled={guardandoEdicion} className="flex-1 py-2.5 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-xl text-xs font-bold shadow">
                   {guardandoEdicion ? 'Guardando...' : 'Guardar Cambios'}
                 </button>
               </div>
@@ -2551,7 +2535,7 @@ function ReporteResumenPapel({ egresados, invitados, docentes, especiales }) {
                 <th className="p-2 border">Nombre y Apellido / Institución</th>
                 <th className="p-2 border">DNI</th>
                 <th className="p-2 border text-center">Estado</th>
-                <th className="p-2 border text-center">Firma Ingreso</th>
+                <th className="p-2 border text-center">Fiscale / Firma</th>
               </tr>
             </thead>
             <tbody className="divide-y">
