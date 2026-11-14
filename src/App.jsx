@@ -67,7 +67,16 @@ export default function App() {
     });
 
     cargarDatosGlobales();
-    return () => listener.subscription.unsubscribe();
+
+    // Actualización automática cada 5 segundos para tiempo real en acreditación
+    const intervalId = setInterval(() => {
+      cargarDatosGlobales();
+    }, 5000);
+
+    return () => {
+      listener.subscription.unsubscribe();
+      clearInterval(intervalId);
+    };
   }, []);
 
   const cargarPerfilStaff = async (user) => {
@@ -86,7 +95,6 @@ export default function App() {
   };
 
   const cargarDatosGlobales = async () => {
-    setCargandoDatos(true);
     try {
       const [resCfg, resEgr, resInv, resDoc, resEsp, resSol, resUsr] = await Promise.all([
         supabase.from('configuracion').select('*').limit(1).maybeSingle(),
@@ -113,8 +121,6 @@ export default function App() {
       if (resUsr.data) setUsuariosSistema(resUsr.data);
     } catch (e) {
       console.error('Error cargando datos:', e);
-    } finally {
-      setCargandoDatos(false);
     }
   };
 
@@ -1023,7 +1029,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
 }
 
 // ============================================================================
-// MÓDULO A: PANEL DE ADMINISTRACIÓN (Con solapa "⚙️ Aforo y Sala" unificada y botones abajo del todo)
+// MÓDULO A: PANEL DE ADMINISTRACIÓN (Con panel de mantenimiento abajo del todo)
 // ============================================================================
 function PanelAdministracion({ perfilStaff, config, egresados, invitados, docentes, especiales, solicitudes, usuariosSistema, totalEgresados, totalDocentes, totalEspeciales, totalCuposFamiliares, totalOcupado, vacantesLibres, recargar, notify }) {
   const [tab, setTab] = useState('egresados');
@@ -2299,12 +2305,12 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
         </div>
       )}
 
-      {/* ⚙️ NUEVO: SOLAPA UNIFICADA DE AFORO, SALA, MAPA Y BOTONES ABAJO DEL TODO */}
+      {/* ⚙️ SOLAPA DE AFORO Y SALA (Sin los botones de mantenimiento, solo configuración y mapa) */}
       {tab === 'aforo' && (
         <div className="bg-white rounded-2xl border p-5 space-y-6">
           <div className="border-b pb-3">
             <h3 className="font-bold text-base text-[#6B1D2F]">⚙️ Gestión de Aforo, Sala y Mapa de Butacas</h3>
-            <p className="text-xs text-slate-500">Configurá las dimensiones del salón municipal, visualizá el mapa de la sala y accedé a las herramientas de control general.</p>
+            <p className="text-xs text-slate-500">Configurá las dimensiones del salón municipal y visualizá el mapa de la sala.</p>
           </div>
 
           <form onSubmit={guardarConfiguracionAforo} className="grid grid-cols-1 sm:grid-cols-4 gap-4 items-end bg-slate-50 p-4 rounded-xl border">
@@ -2414,28 +2420,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                   </div>
                 );
               })}
-            </div>
-          </div>
-
-          {/* 🛠️ BOTONES DE REINICIO Y BORRADO ABAJO DEL TODO */}
-          <div className="bg-gradient-to-r from-slate-900 to-[#6B1D2F] text-white p-5 rounded-2xl shadow-lg flex flex-wrap items-center justify-between gap-4 mt-8 border-t-4 border-amber-500">
-            <div>
-              <h4 className="font-extrabold text-sm uppercase tracking-wider text-rose-200">Panel de Control y Mantenimiento</h4>
-              <p className="text-xs text-slate-200 mt-0.5">Acciones críticas de reinicio de asistencias y borrado de datos de prueba</p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2.5">
-              <button 
-                onClick={reiniciarAsistenciasGeneral} 
-                className="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow transition cursor-pointer"
-              >
-                <RotateCcw className="w-4 h-4" /> 🔄 Reiniciar Asistencias (Puerta)
-              </button>
-              <button 
-                onClick={borrarInvitadosEgresados} 
-                className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow transition cursor-pointer"
-              >
-                <Trash2 className="w-4 h-4" /> 🗑️ Borrar Invitados Egresados
-              </button>
             </div>
           </div>
         </div>
@@ -2592,6 +2576,28 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
           </div>
         </div>
       )}
+
+      {/* 🛠️ PANEL DE CONTROL Y MANTENIMIENTO: ABAJO DEL TODO EN LA VISTA ADMINISTRATIVA GENERAL */}
+      <div className="bg-gradient-to-r from-slate-900 to-[#6B1D2F] text-white p-5 rounded-2xl shadow-xl flex flex-wrap items-center justify-between gap-4 mt-12 border-t-4 border-amber-500">
+        <div>
+          <h4 className="font-extrabold text-sm uppercase tracking-wider text-rose-200">Panel de Control y Mantenimiento</h4>
+          <p className="text-xs text-slate-200 mt-0.5">Acciones críticas de reinicio de asistencias y borrado de datos de prueba</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button 
+            onClick={reiniciarAsistenciasGeneral} 
+            className="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow transition cursor-pointer"
+          >
+            <RotateCcw className="w-4 h-4" /> 🔄 Reiniciar Asistencias (Puerta)
+          </button>
+          <button 
+            onClick={borrarInvitadosEgresados} 
+            className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow transition cursor-pointer"
+          >
+            <Trash2 className="w-4 h-4" /> 🗑️ Borrar Invitados Egresados
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
