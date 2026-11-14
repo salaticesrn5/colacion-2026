@@ -15,6 +15,11 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
+const createTempAuthClient = () =>
+  createClient(supabaseUrl, supabaseAnonKey, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  });
+
 const sanitizeDNI = (val) => String(val || '').replace(/\D/g, '').slice(0, 8);
 const CAPACIDAD_MAXIMA = 525;
 const CUPO_BASE_DEFECTO = 4;
@@ -40,9 +45,7 @@ export default function App() {
   const [especiales, setEspeciales] = useState([]);
   const [solicitudes, setSolicitudes] = useState([]);
   const [usuariosSistema, setUsuariosSistema] = useState([]);
-
-  // Estado global para el modal de Cierre Parcial
-  const [mostrarModalCierreParcial, setMostrarModalCierreParcial] = useState(false);
+  const [cargandoDatos, setCargandoDatos] = useState(false);
 
   const [toast, setToast] = useState(null);
   const notify = (msg, type = 'success') => {
@@ -92,7 +95,16 @@ export default function App() {
 
   const cargarDatosGlobales = async () => {
     try {
-      const resCfg = await supabase.from('configuracion').select('*').limit(1).maybeSingle();
+      const [resCfg, resEgr, resInv, resDoc, resEsp, resSol, resUsr] = await Promise.all([
+        supabase.from('configuracion').select('*').limit(1).maybeSingle(),
+        supabase.from('egresados').select('*').order('nombre_completo', { ascending: true }),
+        supabase.from('invitados').select('*').order('numero_entrada', { ascending: true }),
+        supabase.from('docentes').select('*').order('nombre_completo', { ascending: true }),
+        supabase.from('invitados_especiales').select('*').order('nombre_completo', { ascending: true }),
+        supabase.from('solicitudes_butacas').select('*').order('created_at', { ascending: false }),
+        supabase.from('usuarios_sistema').select('*').order('created_at', { ascending: true }),
+      ]);
+
       if (resCfg.data) {
         setConfig({
           ...resCfg.data,
@@ -100,29 +112,12 @@ export default function App() {
           butacas_por_fila: resCfg.data.butacas_por_fila || 35
         });
       }
-
-      const resEgr = await supabase.from('egresados').select('*').order('nombre_completo', { ascending: true });
       if (resEgr.data) setEgresados(resEgr.data);
-
-      const resInv = await supabase.from('invitados').select('*').order('numero_entrada', { ascending: true });
       if (resInv.data) setInvitados(resInv.data);
-
-      const resDoc = await supabase.from('docentes').select('*').order('nombre_completo', { ascending: true });
       if (resDoc.data) setDocentes(resDoc.data);
-
-      const resEsp = await supabase.from('invitados_especiales').select('*').order('nombre_completo', { ascending: true });
       if (resEsp.data) setEspeciales(resEsp.data);
-
-      try {
-        const resSol = await supabase.from('solicitudes_butacas').select('*').order('created_at', { ascending: false });
-        if (resSol.data) setSolicitudes(resSol.data);
-      } catch (errSol) {}
-
-      try {
-        const resUsr = await supabase.from('usuarios_sistema').select('*').order('created_at', { ascending: true });
-        if (resUsr.data) setUsuariosSistema(resUsr.data);
-      } catch (errUsr) {}
-
+      if (resSol.data) setSolicitudes(resSol.data);
+      if (resUsr.data) setUsuariosSistema(resUsr.data);
     } catch (e) {
       console.error('Error cargando datos:', e);
     }
@@ -149,70 +144,6 @@ export default function App() {
         }`}>
           {toast.type === 'error' ? <XCircle className="w-5 h-5 shrink-0" /> : <CheckCircle2 className="w-5 h-5 shrink-0" />}
           <span>{toast.msg}</span>
-        </div>
-      )}
-
-      {/* MODAL DE ADVERTENCIA CLARO PARA CIERRE PARCIAL */}
-      {mostrarModalCierreParcial && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50 animate-fadeIn">
-          <div className="bg-white rounded-3xl max-w-lg w-full shadow-2xl overflow-hidden border-4 border-amber-500">
-            <div className="bg-amber-500 text-white p-5 flex items-center gap-3">
-              <AlertTriangle className="w-8 h-8 shrink-0" />
-              <div>
-                <h3 className="font-extrabold text-lg leading-tight">⚠️ Advertencia Importante: Activación de Cierre Parcial</h3>
-                <p className="text-xs text-amber-100">Estás a punto de modificar la etapa operativa del evento</p>
-              </div>
-            </div>
-
-            <div className="p-6 space-y-4 text-sm text-slate-700">
-              <p className="font-bold text-slate-900">¿Qué sucederá exactamente al activar el Cierre Parcial?</p>
-              
-              <ul className="space-y-2.5 text-xs text-slate-600 bg-slate-50 p-4 rounded-2xl border">
-                <li className="flex items-start gap-2">
-                  <span className="text-rose-600 font-bold">🔒</span>
-                  <span><b>Bloqueo de edición general:</b> Los egresados ya no podrán modificar libremente a los invitados que cargaron en sus cupos base, blindando el padrón para evitar cambios de última hora.</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="text-emerald-600 font-bold">🎟️</span>
-                  <span><b>Gestión de butacas extra:</b> Quedará habilitado el espacio para asignar y aprobar los lugares plus o adicionales basados en las solicitudes pendientes.</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="text-green-600 font-bold">📱</span>
-                  <span><b>Notificaciones activas:</b> Se habilitarán los botones de notificación instantánea por WhatsApp para avisar a los egresados que ya tienen sus cupos extra aprobados.</span>
-                </li>
-              </ul>
-
-              <p className="text-xs text-slate-500 italic">
-                Esta acción es segura y se puede revertir cambiando la etapa nuevamente, pero afectará de inmediato el acceso de los alumnos al portal.
-              </p>
-
-              <div className="flex gap-3 pt-4 border-t">
-                <button 
-                  type="button" 
-                  onClick={() => setMostrarModalCierreParcial(false)} 
-                  className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition cursor-pointer"
-                >
-                  Cancelar / Volver
-                </button>
-                <button 
-                  type="button" 
-                  onClick={async () => {
-                    if (config.id) {
-                      await supabase.from('configuracion').update({ estado_etapa: 'cierre_parcial' }).eq('id', config.id);
-                    } else {
-                      await supabase.from('configuracion').insert({ estado_etapa: 'cierre_parcial', cupo_base: CUPO_BASE_DEFECTO });
-                    }
-                    await cargarDatosGlobales();
-                    setMostrarModalCierreParcial(false);
-                    notify('¡Cierre Parcial activado con éxito!');
-                  }} 
-                  className="flex-1 py-3 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-extrabold shadow-lg transition cursor-pointer"
-                >
-                  Sí, Activar Cierre Parcial
-                </button>
-              </div>
-            </div>
-          </div>
         </div>
       )}
 
@@ -311,7 +242,6 @@ export default function App() {
             docentes={docentes} especiales={especiales} solicitudes={solicitudes} usuariosSistema={usuariosSistema}
             totalEgresados={totalEgresados} totalDocentes={totalDocentes} totalEspeciales={totalEspeciales}
             totalCuposFamiliares={totalCuposFamiliares} totalOcupado={totalOcupado} vacantesLibres={vacantesLibres} recargar={cargarDatosGlobales} notify={notify}
-            setMostrarModalCierreParcial={setMostrarModalCierreParcial}
           />
         ) : vista === 'reporte_papel' && session ? (
           <ReporteResumenPapel egresados={egresados} invitados={invitados} docentes={docentes} especiales={especiales} />
@@ -940,7 +870,9 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
                 const scannedText = barcodes[0].rawValue;
                 validarCodigoEntrada(scannedText);
               }
-            } catch (err) {}
+            } catch (err) {
+              // Ignorar errores transitorios
+            }
           }
         }, 400);
       }
@@ -1114,17 +1046,12 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
 // ============================================================================
 // MÓDULO A: PANEL DE ADMINISTRACIÓN
 // ============================================================================
-function PanelAdministracion({ perfilStaff, config, egresados, invitados, docentes, especiales, solicitudes, usuariosSistema, totalEgresados, totalDocentes, totalEspeciales, totalCuposFamiliares, totalOcupado, vacantesLibres, recargar, notify, setMostrarModalCierreParcial }) {
+function PanelAdministracion({ perfilStaff, config, egresados, invitados, docentes, especiales, solicitudes, usuariosSistema, totalEgresados, totalDocentes, totalEspeciales, totalCuposFamiliares, totalOcupado, vacantesLibres, recargar, notify }) {
   const [tab, setTab] = useState('egresados');
   const [filtroEgresado, setFiltroEgresado] = useState('');
-  const [filtroEgresadoEstado, setFiltroEgresadoEstado] = useState('TODOS');
-  
   const [filtroDocente, setFiltroDocente] = useState('');
-  const [filtroDocenteEstado, setFiltroDocenteEstado] = useState('TODOS');
-
   const [filtroVip, setFiltroVip] = useState('');
-  const [filtroVipEstado, setFiltroVipEstado] = useState('TODOS');
-
+  
   const [cupoBaseEdit, setCupoBaseEdit] = useState(config.cupo_base || CUPO_BASE_DEFECTO);
   const [filasEdit, setFilasEdit] = useState(config.filas || 15);
   const [butacasFilaEdit, setButacasFilaEdit] = useState(config.butacas_por_fila || 35);
@@ -1185,141 +1112,28 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
   const [nuevoRolUsr, setNuevoRolUsr] = useState('puerta');
   const [showPassUsr, setShowPassUsr] = useState(false);
 
-  const exportarCSV = (tipo) => {
-    let contenidoCSV = "data:text/csv;charset=utf-8,";
-    let nombreArchivo = "";
-
-    if (tipo === 'egresados') {
-      contenidoCSV += "DNI,Nombre Completo,Celular,Cupo Asignado,Asistio
-";
-      egresados.forEach(e => {
-        contenidoCSV += `"${e.dni}","${e.nombre_completo}","${e.celular || ''}",${e.cupo_asignado},${e.asistio ? 'SI' : 'NO'}
-`;
+  // Función crear usuario del sistema
+  const crearUsuarioSistema = async (e) => {
+    e.preventDefault();
+    if (!nuevoNombreUsr.trim() || !nuevoEmailUsr.trim() || !nuevoPassUsr || nuevoPassUsr.length < 6) {
+      notify('Completá todos los campos y una contraseña de al menos 6 caracteres.', 'error');
+      return;
+    }
+    try {
+      const { error } = await supabase.from('usuarios_sistema').insert({
+        nombre: nuevoNombreUsr.trim(),
+        email: nuevoEmailUsr.trim().toLowerCase(),
+        rol: nuevoRolUsr,
+        activo: true
       });
-      nombreArchivo = "padron-egresados-esrn5.csv";
-    } else if (tipo === 'docentes') {
-      contenidoCSV += "DNI,Nombre Completo,Asistio
-";
-      docentes.forEach(d => {
-        contenidoCSV += `"${d.dni}","${d.nombre_completo}",${d.asistio ? 'SI' : 'NO'}
-`;
-      });
-      nombreArchivo = "padron-docentes-esrn5.csv";
-    } else if (tipo === 'vip') {
-      contenidoCSV += "DNI,Nombre e Institucion,Asistio
-";
-      especiales.forEach(v => {
-        contenidoCSV += `"${v.dni || 'S/D'}","${v.nombre_completo}",${v.asistio ? 'SI' : 'NO'}
-`;
-      });
-      nombreArchivo = "padron-vip-esrn5.csv";
-    }
-
-    const encodedUri = encodeURI(contenidoCSV);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", nombreArchivo);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    notify(`Exportado ${nombreArchivo} con éxito.`);
-  };
-
-  const handleImportarCSVEgresados = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const text = await file.text();
-      const rows = parseCSV(text);
-      const registros = rows.map((r) => ({
-        dni: sanitizeDNI(r[0]),
-        nombre_completo: (r[1] || '').toUpperCase(),
-        cupo_asignado: config.cupo_base || CUPO_BASE_DEFECTO,
-        cerrado: false,
-      })).filter(x => x.dni.length >= 7 && x.nombre_completo);
-
-      await supabase.from('egresados').upsert(registros, { onConflict: 'dni' });
+      if (error) throw error;
+      setNuevoNombreUsr('');
+      setNuevoEmailUsr('');
+      setNuevoPassUsr('');
       await recargar();
-      notify(`Importados ${registros.length} egresados.`);
+      notify('Usuario del sistema creado correctamente.');
     } catch (err) {
-      notify('Error importando CSV: ' + err.message, 'error');
-    }
-  };
-
-  const handleImportarCSVDocentes = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const text = await file.text();
-      const rows = parseCSV(text);
-      const registros = rows.map((r) => ({
-        dni: sanitizeDNI(r[0]),
-        nombre_completo: (r[1] || '').toUpperCase(),
-        asistio: false,
-      })).filter(x => x.dni.length >= 7 && x.nombre_completo);
-
-      await supabase.from('docentes').upsert(registros, { onConflict: 'dni' });
-      await recargar();
-      notify(`Importados ${registros.length} docentes.`);
-    } catch (err) {
-      notify('Error importando CSV Docentes: ' + err.message, 'error');
-    }
-  };
-
-  const handleImportarCSVVips = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const text = await file.text();
-      const rows = parseCSV(text);
-      const registros = rows.map((r) => ({
-        dni: sanitizeDNI(r[0]),
-        nombre_completo: (r[1] || '').toUpperCase(),
-        asistio: false,
-      })).filter(x => x.nombre_completo);
-
-      await supabase.from('invitados_especiales').upsert(registros, { onConflict: 'dni' });
-      await recargar();
-      notify(`Importados ${registros.length} invitados VIP.`);
-    } catch (err) {
-      notify('Error importando CSV VIP: ' + err.message, 'error');
-    }
-  };
-
-  const vaciarPadronEgresados = async () => {
-    const resp = window.prompt("Para confirmar el vaciado total del padrón de egresados, escribí VACIAR en mayúsculas:");
-    if (resp !== 'VACIAR') return;
-    try {
-      await supabase.from('invitados').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-      await supabase.from('egresados').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-      await recargar();
-      notify('Padrón de egresados vaciado correctamente.');
-    } catch (err) {
-      notify('Error al vaciar padrón: ' + err.message, 'error');
-    }
-  };
-
-  const vaciarPadronDocentes = async () => {
-    const resp = window.prompt("Para confirmar el vaciado total del padrón de docentes, escribí VACIAR en mayúsculas:");
-    if (resp !== 'VACIAR') return;
-    try {
-      await supabase.from('docentes').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-      await recargar();
-      notify('Padrón de docentes vaciado correctamente.');
-    } catch (err) {
-      notify('Error al vaciar docentes: ' + err.message, 'error');
-    }
-  };
-
-  const vaciarPadronVip = async () => {
-    const resp = window.prompt("Para confirmar el vaciado total del padrón VIP, escribí VACIAR en mayúsculas:");
-    if (resp !== 'VACIAR') return;
-    try {
-      await supabase.from('invitados_especiales').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-      await recargar();
-      notify('Padrón VIP vaciado correctamente.');
-    } catch (err) {
-      notify('Error al vaciar VIP: ' + err.message, 'error');
+      notify('Error al crear usuario: ' + err.message, 'error');
     }
   };
 
@@ -1346,42 +1160,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
       notify('Invitados egresados borrados correctamente.');
     } catch (err) {
       notify('Error al borrar invitados: ' + err.message, 'error');
-    }
-  };
-
-  const resolverSolicitud = async (sol, aprobar) => {
-    if (aprobar) {
-      const egr = egresados.find((e) => e.id === sol.egresado_id);
-      if (egr) {
-        await supabase.from('egresados').update({ cupo_asignado: Number(egr.cupo_asignado) + Number(sol.cantidad_solicitada) }).eq('id', egr.id);
-      }
-    }
-    await supabase.from('solicitudes_butacas').update({ estado: aprobar ? 'aprobada' : 'rechazada' }).eq('id', sol.id);
-    await recargar();
-    notify(aprobar ? 'Solicitud aprobada y cupo asignado.' : 'Solicitud rechazada.');
-  };
-
-  const crearUsuarioSistema = async (e) => {
-    e.preventDefault();
-    if (!nuevoNombreUsr.trim() || !nuevoEmailUsr.trim() || !nuevoPassUsr || nuevoPassUsr.length < 6) {
-      notify('Completá todos los campos y una contraseña de al menos 6 caracteres.', 'error');
-      return;
-    }
-    try {
-      const { error } = await supabase.from('usuarios_sistema').insert({
-        nombre: nuevoNombreUsr.trim(),
-        email: nuevoEmailUsr.trim().toLowerCase(),
-        rol: nuevoRolUsr,
-        activo: true
-      });
-      if (error) throw error;
-      setNuevoNombreUsr('');
-      setNuevoEmailUsr('');
-      setNuevoPassUsr('');
-      await recargar();
-      notify('Usuario del sistema creado correctamente.');
-    } catch (err) {
-      notify('Error al crear usuario: ' + err.message, 'error');
     }
   };
 
@@ -1462,26 +1240,205 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     }
   };
 
-  const egresadosFiltrados = egresados.filter((e) => {
-    const matchTexto = (e.nombre_completo || '').toLowerCase().includes(filtroEgresado.toLowerCase()) || (e.dni || '').includes(filtroEgresado);
-    const tieneWp = Boolean(e.celular && e.celular.replace(/\D/g, '').length >= 8);
-    if (filtroEgresadoEstado === 'CON_WP') return matchTexto && tieneWp;
-    if (filtroEgresadoEstado === 'SIN_WP') return matchTexto && !tieneWp;
-    return matchTexto;
+  const agregarEgresadoManual = async (e) => {
+    e.preventDefault();
+    const dniLimpio = sanitizeDNI(nuevoEgDni);
+    if (!nuevoEgNombre.trim() || dniLimpio.length < 7) {
+      notify('Completá Nombre y DNI válido (7 u 8 dígitos).', 'error');
+      return;
+    }
+    try {
+      const { error } = await supabase.from('egresados').insert({
+        nombre_completo: nuevoEgNombre.trim().toUpperCase(),
+        dni: dniLimpio,
+        cupo_asignado: config.cupo_base || CUPO_BASE_DEFECTO,
+        cerrado_por_alumno: false
+      });
+      if (error) throw error;
+      setNuevoEgNombre('');
+      setNuevoEgDni('');
+      setModalAgregarEgresado(false);
+      await recargar();
+      notify('Egresado agregado correctamente al padrón.');
+    } catch (err) {
+      notify('Error al agregar egresado: ' + err.message, 'error');
+    }
+  };
+
+  const agregarDocenteManual = async (e) => {
+    e.preventDefault();
+    const dniLimpio = sanitizeDNI(nuevoDocDni);
+    if (!nuevoDocNombre.trim() || dniLimpio.length < 7) {
+      notify('Completá Nombre y DNI válido.', 'error');
+      return;
+    }
+    try {
+      const { error } = await supabase.from('docentes').insert({
+        nombre_completo: nuevoDocNombre.trim().toUpperCase(),
+        dni: dniLimpio
+      });
+      if (error) throw error;
+      setNuevoDocNombre('');
+      setNuevoDocDni('');
+      setModalAgregarDocente(false);
+      await recargar();
+      notify('Docente agregado correctamente.');
+    } catch (err) {
+      notify('Error al agregar docente: ' + err.message, 'error');
+    }
+  };
+
+  const agregarVipManual = async (e) => {
+    e.preventDefault();
+    const dniLimpio = sanitizeDNI(nuevoVipDni);
+    if (!nuevoVipNombre.trim()) {
+      notify('Completá el nombre de la autoridad o invitado VIP.', 'error');
+      return;
+    }
+    try {
+      const { error } = await supabase.from('invitados_especiales').insert({
+        nombre_completo: nuevoVipNombre.trim().toUpperCase(),
+        dni: dniLimpio || null
+      });
+      if (error) throw error;
+      setNuevoVipNombre('');
+      setNuevoVipDni('');
+      setModalAgregarVip(false);
+      await recargar();
+      notify('Invitado VIP agregado correctamente.');
+    } catch (err) {
+      notify('Error al agregar VIP: ' + err.message, 'error');
+    }
+  };
+
+  const abrirModalEditar = (egr) => {
+    setModalEditarEgr(egr);
+    setEditNombre(egr.nombre_completo || '');
+    setEditDni(egr.dni || '');
+    setEditCelular(egr.celular || '');
+    setEditCupo(egr.cupo_asignado || 4);
+  };
+
+  const guardarEdicionEgresado = async (e) => {
+    e.preventDefault();
+    if (!modalEditarEgr) return;
+    setGuardandoEdicion(true);
+    try {
+      const { error } = await supabase
+        .from('egresados')
+        .update({
+          nombre_completo: editNombre.trim().toUpperCase(),
+          dni: sanitizeDNI(editDni),
+          celular: editCelular.trim(),
+          cupo_asignado: Number(editCupo)
+        })
+        .eq('id', modalEditarEgr.id);
+
+      if (error) throw error;
+      notify('Datos del egresado actualizados correctamente.');
+      setModalEditarEgr(null);
+      await recargar();
+    } catch (err) {
+      notify('Error al actualizar: ' + err.message, 'error');
+    } finally {
+      setGuardandoEdicion(false);
+    }
+  };
+
+  const abrirModalEditarDocente = (doc) => {
+    setModalEditarDoc(doc);
+    setEditDocNombre(doc.nombre_completo || '');
+    setEditDocDni(doc.dni || '');
+  };
+
+  const guardarEdicionDocente = async (e) => {
+    e.preventDefault();
+    if (!modalEditarDoc) return;
+    setGuardandoDocente(true);
+    try {
+      const { error } = await supabase
+        .from('docentes')
+        .update({
+          nombre_completo: editDocNombre.trim().toUpperCase(),
+          dni: sanitizeDNI(editDocDni)
+        })
+        .eq('id', modalEditarDoc.id);
+
+      if (error) throw error;
+      notify('Docente actualizado correctamente.');
+      setModalEditarDoc(null);
+      await recargar();
+    } catch (err) {
+      notify('Error al actualizar docente: ' + err.message, 'error');
+    } finally {
+      setGuardandoDocente(false);
+    }
+  };
+
+  const abrirModalEditarVip = (vip) => {
+    setModalEditarVip(vip);
+    setEditVipNombre(vip.nombre_completo || '');
+    setEditVipDni(vip.dni || '');
+  };
+
+  const guardarEdicionVip = async (e) => {
+    e.preventDefault();
+    if (!modalEditarVip) return;
+    setGuardandoVip(true);
+    try {
+      const { error } = await supabase
+        .from('invitados_especiales')
+        .update({
+          nombre_completo: editVipNombre.trim().toUpperCase(),
+          dni: sanitizeDNI(editVipDni) || null
+        })
+        .eq('id', modalEditarVip.id);
+
+      if (error) throw error;
+      notify('Invitado VIP actualizado correctamente.');
+      setModalEditarVip(null);
+      await recargar();
+    } catch (err) {
+      notify('Error al actualizar VIP: ' + err.message, 'error');
+    } finally {
+      setGuardandoVip(false);
+    }
+  };
+
+  const egresadosFiltrados = egresados.filter((e) =>
+    (e.nombre_completo || '').toLowerCase().includes(filtroEgresado.toLowerCase()) ||
+    (e.dni || '').includes(filtroEgresado)
+  );
+
+  const docentesFiltrados = docentes.filter((d) =>
+    (d.nombre_completo || '').toLowerCase().includes(filtroDocente.toLowerCase()) ||
+    (d.dni || '').includes(filtroDocente)
+  );
+
+  const vipsFiltrados = especiales.filter((v) =>
+    (v.nombre_completo || '').toLowerCase().includes(filtroVip.toLowerCase()) ||
+    (v.dni || '').includes(filtroVip)
+  );
+
+  const listaDocentesCeremonial = docentes.filter(d => {
+    const match = (d.nombre_completo || '').toLowerCase().includes(busquedaCeremonial.toLowerCase()) || (d.dni || '').includes(busquedaCeremonial);
+    if (filtroCeremonial === 'PRESENTES') return match && d.asistio;
+    if (filtroCeremonial === 'PENDIENTES') return match && !d.asistio;
+    return match;
   });
 
-  const docentesFiltrados = docentes.filter((d) => {
-    const matchTexto = (d.nombre_completo || '').toLowerCase().includes(filtroDocente.toLowerCase()) || (d.dni || '').includes(filtroDocente);
-    if (filtroDocenteEstado === 'PRESENTES') return matchTexto && d.asistio;
-    if (filtroDocenteEstado === 'PENDIENTES') return matchTexto && !d.asistio;
-    return matchTexto;
+  const listaVipsCeremonial = especiales.filter(v => {
+    const match = (v.nombre_completo || '').toLowerCase().includes(busquedaCeremonial.toLowerCase()) || (v.dni || '').includes(busquedaCeremonial);
+    if (filtroCeremonial === 'PRESENTES') return match && v.asistio;
+    if (filtroCeremonial === 'PENDIENTES') return match && !v.asistio;
+    return match;
   });
 
-  const vipsFiltrados = especiales.filter((v) => {
-    const matchTexto = (v.nombre_completo || '').toLowerCase().includes(filtroVip.toLowerCase()) || (v.dni || '').includes(filtroVip);
-    if (filtroVipEstado === 'PRESENTES') return matchTexto && v.asistio;
-    if (filtroVipEstado === 'PENDIENTES') return matchTexto && !v.asistio;
-    return matchTexto;
+  const listaEgresadosCeremonial = egresados.filter(e => {
+    const match = (e.nombre_completo || '').toLowerCase().includes(busquedaCeremonial.toLowerCase()) || (e.dni || '').includes(busquedaCeremonial);
+    if (filtroCeremonial === 'PRESENTES') return match && e.asistio;
+    if (filtroCeremonial === 'PENDIENTES') return match && !e.asistio;
+    return match;
   });
 
   const docentesPresentesCount = docentes.filter(d => d.asistio).length;
@@ -1494,6 +1451,70 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
 
   return (
     <div className="space-y-6">
+      {/* MODAL DE ADVERTENCIA CLARO PARA CIERRE PARCIAL */}
+      {mostrarModalCierreParcial && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50 animate-fadeIn">
+          <div className="bg-white rounded-3xl max-w-lg w-full shadow-2xl overflow-hidden border-4 border-amber-500">
+            <div className="bg-amber-500 text-white p-5 flex items-center gap-3">
+              <AlertTriangle className="w-8 h-8 shrink-0" />
+              <div>
+                <h3 className="font-extrabold text-lg leading-tight">⚠️ Advertencia Importante: Activación de Cierre Parcial</h3>
+                <p className="text-xs text-amber-100">Estás a punto de modificar la etapa operativa del evento</p>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-4 text-sm text-slate-700">
+              <p className="font-bold text-slate-900">¿Qué sucederá exactamente al activar el Cierre Parcial?</p>
+              
+              <ul className="space-y-2.5 text-xs text-slate-600 bg-slate-50 p-4 rounded-2xl border">
+                <li className="flex items-start gap-2">
+                  <span className="text-rose-600 font-bold">🔒</span>
+                  <span><b>Bloqueo de edición general:</b> Los egresados ya no podrán modificar libremente a los invitados que cargaron en sus cupos base, blindando el padrón para evitar cambios de última hora.</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-emerald-600 font-bold">🎟️</span>
+                  <span><b>Gestión de butacas extra:</b> Quedará habilitado el espacio para asignar y aprobar los lugares plus o adicionales basados en las solicitudes pendientes.</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-green-600 font-bold">📱</span>
+                  <span><b>Notificaciones activas:</b> Se habilitarán los botones de notificación instantánea por WhatsApp para avisar a los egresados que ya tienen sus cupos extra aprobados.</span>
+                </li>
+              </ul>
+
+              <p className="text-xs text-slate-500 italic">
+                Esta acción es segura y se puede revertir cambiando la etapa nuevamente, pero afectará de inmediato el acceso de los alumnos al portal.
+              </p>
+
+              <div className="flex gap-3 pt-4 border-t">
+                <button 
+                  type="button" 
+                  onClick={() => setMostrarModalCierreParcial(false)} 
+                  className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition cursor-pointer"
+                >
+                  Cancelar / Volver
+                </button>
+                <button 
+                  type="button" 
+                  onClick={async () => {
+                    if (config.id) {
+                      await supabase.from('configuracion').update({ estado_etapa: 'cierre_parcial' }).eq('id', config.id);
+                    } else {
+                      await supabase.from('configuracion').insert({ estado_etapa: 'cierre_parcial', cupo_base: CUPO_BASE_DEFECTO });
+                    }
+                    await recargar();
+                    setMostrarModalCierreParcial(false);
+                    notify('¡Cierre Parcial activado con éxito!');
+                  }} 
+                  className="flex-1 py-3 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-extrabold shadow-lg transition cursor-pointer"
+                >
+                  Sí, Activar Cierre Parcial
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Egresados</p><p className="text-2xl font-extrabold">{totalEgresados}</p></div>
         <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Docentes</p><p className="text-2xl font-extrabold">{totalDocentes}</p></div>
@@ -1543,12 +1564,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
             <h3 className="font-bold">Padrón de Egresados</h3>
             <div className="flex flex-wrap gap-2">
               <button
-                onClick={() => exportarCSV('egresados')}
-                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow"
-              >
-                <Download className="w-4 h-4" /> Exportar CSV
-              </button>
-              <button
                 onClick={() => setModalAgregarEgresado(true)}
                 className="px-3.5 py-2 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow"
               >
@@ -1566,30 +1581,15 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
             </div>
           </div>
 
-          <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
-            <div className="relative w-full sm:flex-1">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-              <input
-                type="text"
-                placeholder="Filtrar egresados por nombre o DNI..."
-                value={filtroEgresado}
-                onChange={(e) => setFiltroEgresado(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 rounded-xl border text-sm outline-none focus:border-[#6B1D2F]"
-              />
-            </div>
-            <div className="flex gap-1.5 w-full sm:w-auto">
-              {['TODOS', 'CON_WP', 'SIN_WP'].map((f) => (
-                <button
-                  key={f}
-                  onClick={() => setFiltroEgresadoEstado(f)}
-                  className={`px-3 py-2 rounded-lg text-xs font-bold border transition ${
-                    filtroEgresadoEstado === f ? 'bg-[#6B1D2F] text-white border-[#6B1D2F]' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'
-                  }`}
-                >
-                  {f === 'TODOS' ? 'Todos' : f === 'CON_WP' ? '📱 Con WhatsApp' : 'Sin Celular'}
-                </button>
-              ))}
-            </div>
+          <div className="relative">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+            <input
+              type="text"
+              placeholder="Filtrar egresados por nombre o DNI..."
+              value={filtroEgresado}
+              onChange={(e) => setFiltroEgresado(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 rounded-xl border text-sm outline-none focus:border-[#6B1D2F]"
+            />
           </div>
 
           <div className="max-h-96 overflow-y-auto divide-y">
@@ -1792,12 +1792,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
             <h3 className="font-bold">Padrón de Docentes ({docentes.length})</h3>
             <div className="flex flex-wrap gap-2">
               <button
-                onClick={() => exportarCSV('docentes')}
-                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow"
-              >
-                <Download className="w-4 h-4" /> Exportar CSV
-              </button>
-              <button
                 onClick={() => setModalAgregarDocente(true)}
                 className="px-3.5 py-2 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow"
               >
@@ -1815,30 +1809,15 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
             </div>
           </div>
 
-          <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
-            <div className="relative w-full sm:flex-1">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-              <input
-                type="text"
-                placeholder="Filtrar docentes por nombre o DNI..."
-                value={filtroDocente}
-                onChange={(e) => setFiltroDocente(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 rounded-xl border text-sm outline-none focus:border-[#6B1D2F]"
-              />
-            </div>
-            <div className="flex gap-1.5 w-full sm:w-auto">
-              {['TODOS', 'PRESENTES', 'PENDIENTES'].map((f) => (
-                <button
-                  key={f}
-                  onClick={() => setFiltroDocenteEstado(f)}
-                  className={`px-3 py-2 rounded-lg text-xs font-bold border transition ${
-                    filtroDocenteEstado === f ? 'bg-[#6B1D2F] text-white border-[#6B1D2F]' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'
-                  }`}
-                >
-                  {f === 'TODOS' ? 'Todos' : f === 'PRESENTES' ? '✓ Presentes' : 'Pendientes'}
-                </button>
-              ))}
-            </div>
+          <div className="relative">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+            <input
+              type="text"
+              placeholder="Filtrar docentes por nombre o DNI..."
+              value={filtroDocente}
+              onChange={(e) => setFiltroDocente(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 rounded-xl border text-sm outline-none focus:border-[#6B1D2F]"
+            />
           </div>
 
           <div className="max-h-96 overflow-y-auto divide-y">
@@ -1850,7 +1829,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                   <div>
                     <span className="font-semibold">{d.nombre_completo}</span> 
                     <span className="text-xs text-slate-500 ml-1">({d.dni})</span>
-                    {d.asistio && <span className="ml-2 px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full text-[10px] font-bold">Presente</span>}
                   </div>
                   <div className="flex items-center gap-2">
                     <button
@@ -1975,12 +1953,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
             <h3 className="font-bold">Padrón de Invitados VIP / Autoridades ({especiales.length})</h3>
             <div className="flex flex-wrap gap-2">
               <button
-                onClick={() => exportarCSV('vip')}
-                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow"
-              >
-                <Download className="w-4 h-4" /> Exportar CSV
-              </button>
-              <button
                 onClick={() => setModalAgregarVip(true)}
                 className="px-3.5 py-2 bg-amber-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow"
               >
@@ -1998,30 +1970,15 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
             </div>
           </div>
 
-          <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
-            <div className="relative w-full sm:flex-1">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-              <input
-                type="text"
-                placeholder="Filtrar invitados VIP por nombre o DNI..."
-                value={filtroVip}
-                onChange={(e) => setFiltroVip(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 rounded-xl border text-sm outline-none focus:border-amber-600"
-              />
-            </div>
-            <div className="flex gap-1.5 w-full sm:w-auto">
-              {['TODOS', 'PRESENTES', 'PENDIENTES'].map((f) => (
-                <button
-                  key={f}
-                  onClick={() => setFiltroVipEstado(f)}
-                  className={`px-3 py-2 rounded-lg text-xs font-bold border transition ${
-                    filtroVipEstado === f ? 'bg-amber-600 text-white border-amber-600' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'
-                  }`}
-                >
-                  {f === 'TODOS' ? 'Todos' : f === 'PRESENTES' ? '✓ Presentes' : 'Pendientes'}
-                </button>
-              ))}
-            </div>
+          <div className="relative">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+            <input
+              type="text"
+              placeholder="Filtrar invitados VIP por nombre o DNI..."
+              value={filtroVip}
+              onChange={(e) => setFiltroVip(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 rounded-xl border text-sm outline-none focus:border-amber-600"
+            />
           </div>
 
           <div className="max-h-96 overflow-y-auto divide-y">
@@ -2033,7 +1990,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                   <div>
                     <span className="font-semibold">{v.nombre_completo}</span> 
                     <span className="text-xs text-slate-500 ml-1">{v.dni ? `(${v.dni})` : '(Sin DNI)'}</span>
-                    {v.asistio && <span className="ml-2 px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full text-[10px] font-bold">Presente</span>}
                   </div>
                   <div className="flex items-center gap-2">
                     <button
