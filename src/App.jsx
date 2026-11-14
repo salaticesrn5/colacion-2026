@@ -649,7 +649,7 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
 }
 
 // ============================================================================
-// MÓDULO C: CONTROL DE ACCESO EN PUERTA (Con Tarjeta Visual Gigante de Éxito)
+// MÓDULO C: CONTROL DE ACCESO EN PUERTA
 // ============================================================================
 function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, notify }) {
   const [busqueda, setBusqueda] = useState('');
@@ -923,7 +923,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
 }
 
 // ============================================================================
-// MÓDULO A: PANEL DE ADMINISTRACIÓN Y COORDINACIÓN COMPLETO
+// MÓDULO A: PANEL DE ADMINISTRACIÓN Y COORDINACIÓN COMPLETO (Con Acreditación unificada de Docentes, VIP y Egresados)
 // ============================================================================
 function PanelAdministracion({ perfilStaff, config, egresados, invitados, docentes, especiales, solicitudes, usuariosSistema, totalEgresados, totalDocentes, totalEspeciales, totalCuposFamiliares, vacantesLibres, recargar, notify }) {
   const [tab, setTab] = useState('egresados');
@@ -980,8 +980,9 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
   const [editUsrRol, setEditUsrRol] = useState('puerta');
   const [guardandoUsr, setGuardandoUsr] = useState(false);
 
-  // Estados para la solapa de reportes (Acreditación en Vivo)
+  // Estados para la solapa de reportes (Acreditación en Vivo unificada)
   const [filtroCeremonial, setFiltroCeremonial] = useState('TODOS');
+  const [tipoCeremonial, setTipoCeremonial] = useState('docentes'); // 'docentes', 'vip', 'egresados'
   const [busquedaCeremonial, setBusquedaCeremonial] = useState('');
 
   const fileEgrRef = useRef(null);
@@ -1397,16 +1398,32 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     (v.dni || '').includes(filtroVip)
   );
 
-  const egresadosFiltradosCeremonial = egresados.filter((e) => {
-    const matchTexto = (e.nombre_completo || '').toLowerCase().includes(busquedaCeremonial.toLowerCase()) || (e.dni || '').includes(busquedaCeremonial);
-    if (filtroCeremonial === 'PRESENTES') return matchTexto && e.asistio;
-    if (filtroCeremonial === 'PENDIENTES') return matchTexto && !e.asistio;
-    return matchTexto;
+  // Listado unificado para Acreditación en Vivo
+  const listaDocentesCeremonial = docentes.filter(d => {
+    const match = (d.nombre_completo || '').toLowerCase().includes(busquedaCeremonial.toLowerCase()) || (d.dni || '').includes(busquedaCeremonial);
+    if (filtroCeremonial === 'PRESENTES') return match && d.asistio;
+    if (filtroCeremonial === 'PENDIENTES') return match && !d.asistio;
+    return match;
   });
 
-  const totalEgresadosCount = egresados.length || 1;
-  const presentesCount = egresados.filter(e => e.asistio).length;
-  const porcentajeAsistencia = Math.round((presentesCount / totalEgresadosCount) * 100);
+  const listaVipsCeremonial = especiales.filter(v => {
+    const match = (v.nombre_completo || '').toLowerCase().includes(busquedaCeremonial.toLowerCase()) || (v.dni || '').includes(busquedaCeremonial);
+    if (filtroCeremonial === 'PRESENTES') return match && v.asistio;
+    if (filtroCeremonial === 'PENDIENTES') return match && !v.asistio;
+    return match;
+  });
+
+  const listaEgresadosCeremonial = egresados.filter(e => {
+    const match = (e.nombre_completo || '').toLowerCase().includes(busquedaCeremonial.toLowerCase()) || (e.dni || '').includes(busquedaCeremonial);
+    if (filtroCeremonial === 'PRESENTES') return match && e.asistio;
+    if (filtroCeremonial === 'PENDIENTES') return match && !e.asistio;
+    return match;
+  });
+
+  const docentesPresentesCount = docentes.filter(d => d.asistio).length;
+  const vipsPresentesCount = especiales.filter(v => v.asistio).length;
+  const egresadosPresentesCount = egresados.filter(e => e.asistio).length;
+  const porcentajeAsistencia = Math.round((egresadosPresentesCount / (egresados.length || 1)) * 100);
 
   return (
     <div className="space-y-6">
@@ -2051,23 +2068,25 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
         </div>
       )}
 
+      {/* SECCIÓN REPORTES: ACREDITACIÓN EN VIVO UNIFICADA (Docentes, VIP y Egresados) */}
       {tab === 'reportes' && (
         <div className="bg-white rounded-2xl border p-5 space-y-5">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4">
             <div>
               <h3 className="font-bold text-base text-[#6B1D2F]">Acreditación en Vivo — Ceremonial</h3>
-              <p className="text-xs text-slate-500">Control en tiempo real de egresados presentes en sala.</p>
+              <p className="text-xs text-slate-500">Control en tiempo real de asistencia por categoría.</p>
             </div>
             <div className="flex items-center gap-2 bg-slate-100 p-2 rounded-xl text-xs font-bold">
-              <span>Porcentaje de Ingreso:</span>
-              <span className="text-emerald-700 font-mono text-sm">{porcentajeAsistencia}% ({presentesCount}/{egresados.length})</span>
+              <span>Asistencia Egresados:</span>
+              <span className="text-emerald-700 font-mono text-sm">{porcentajeAsistencia}% ({egresadosPresentesCount}/{egresados.length})</span>
             </div>
           </div>
 
+          {/* Tarjetas de Métricas */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200">
               <p className="text-[11px] text-emerald-700 font-bold">Egresados Presentes</p>
-              <p className="text-xl font-extrabold text-emerald-900">{presentesCount} / {egresados.length}</p>
+              <p className="text-xl font-extrabold text-emerald-900">{egresadosPresentesCount} / {egresados.length}</p>
             </div>
             <div className="p-3.5 rounded-xl bg-sky-50 border border-sky-200">
               <p className="text-[11px] text-sky-700 font-bold">Familiares Ingresados</p>
@@ -2075,31 +2094,28 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
             </div>
             <div className="p-3.5 rounded-xl bg-indigo-50 border border-indigo-200">
               <p className="text-[11px] text-indigo-700 font-bold">Docentes Presentes</p>
-              <p className="text-xl font-extrabold text-indigo-900">{docentes.filter(d => d.asistio).length} / {docentes.length}</p>
+              <p className="text-xl font-extrabold text-indigo-900">{docentesPresentesCount} / {docentes.length}</p>
             </div>
             <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200">
               <p className="text-[11px] text-amber-700 font-bold">VIP / Autoridades</p>
-              <p className="text-xl font-extrabold text-amber-900">{especiales.filter(v => v.asistio).length} / {especiales.length}</p>
+              <p className="text-xl font-extrabold text-amber-900">{vipsPresentesCount} / {especiales.length}</p>
             </div>
           </div>
 
-          <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
-            <div className="relative w-full sm:w-72">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-              <input
-                type="text"
-                placeholder="Buscar egresado en ceremonial..."
-                value={busquedaCeremonial}
-                onChange={(e) => setBusquedaCeremonial(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 rounded-xl border text-xs outline-none focus:border-[#6B1D2F]"
-              />
+          {/* Selector de Categoría (Docentes, VIP, Egresados) y Filtro */}
+          <div className="flex flex-col sm:flex-row gap-3 items-center justify-between pt-2">
+            <div className="flex gap-1.5 w-full sm:w-auto">
+              <button onClick={() => setTipoCeremonial('docentes')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${tipoCeremonial === 'docentes' ? 'bg-[#6B1D2F] text-white shadow' : 'bg-slate-100 text-slate-700'}`}>📚 Docentes ({docentes.length})</button>
+              <button onClick={() => setTipoCeremonial('vip')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${tipoCeremonial === 'vip' ? 'bg-amber-600 text-white shadow' : 'bg-slate-100 text-slate-700'}`}>⭐ Invitados VIP ({especiales.length})</button>
+              <button onClick={() => setTipoCeremonial('egresados')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${tipoCeremonial === 'egresados' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100 text-slate-700'}`}>🎓 Egresados ({egresados.length})</button>
             </div>
+
             <div className="flex gap-1.5 w-full sm:w-auto">
               {['TODOS', 'PRESENTES', 'PENDIENTES'].map((f) => (
                 <button
                   key={f}
                   onClick={() => setFiltroCeremonial(f)}
-                  className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-xs font-bold border transition ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${
                     filtroCeremonial === f ? 'bg-[#6B1D2F] text-white border-[#6B1D2F]' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'
                   }`}
                 >
@@ -2109,21 +2125,72 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
             </div>
           </div>
 
+          {/* Buscador */}
+          <div className="relative">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+            <input
+              type="text"
+              placeholder={`Buscar en ${tipoCeremonial} por nombre o DNI...`}
+              value={busquedaCeremonial}
+              onChange={(e) => setBusquedaCeremonial(e.target.value)}
+              className="w-full pl-10 pr-4 py-2.5 rounded-xl border text-xs outline-none focus:border-[#6B1D2F]"
+            />
+          </div>
+
+          {/* Listado Dinámico según la categoría seleccionada */}
           <div className="max-h-96 overflow-y-auto border rounded-xl divide-y text-xs">
-            {egresadosFiltradosCeremonial.length === 0 ? (
-              <p className="text-center text-slate-400 py-8">No se encontraron egresados con los filtros seleccionados.</p>
-            ) : (
-              egresadosFiltradosCeremonial.map((e) => (
-                <div key={e.id} className="p-3 flex items-center justify-between hover:bg-slate-50">
-                  <div>
-                    <p className="font-bold text-slate-900 text-sm">{e.nombre_completo}</p>
-                    <p className="text-slate-500">DNI: {e.dni} · Cupo: {e.cupo_asignado} lugares</p>
+            {tipoCeremonial === 'docentes' && (
+              listaDocentesCeremonial.length === 0 ? (
+                <p className="text-center text-slate-400 py-8">No se encontraron docentes con los filtros seleccionados.</p>
+              ) : (
+                listaDocentesCeremonial.map((d) => (
+                  <div key={d.id} className="p-3 flex items-center justify-between hover:bg-slate-50">
+                    <div>
+                      <p className="font-bold text-slate-900 text-sm">{d.nombre_completo}</p>
+                      <p className="text-slate-500">DNI: {d.dni} · <span className="text-indigo-600 font-bold uppercase">Docente</span></p>
+                    </div>
+                    <span className={`px-3 py-1 rounded-full font-bold uppercase ${d.asistio ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'}`}>
+                      {d.asistio ? '✓ Presente' : 'Pendiente'}
+                    </span>
                   </div>
-                  <span className={`px-3 py-1 rounded-full font-bold uppercase ${e.asistio ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'}`}>
-                    {e.asistio ? '✓ Presente' : 'Pendiente'}
-                  </span>
-                </div>
-              ))
+                ))
+              )
+            )}
+
+            {tipoCeremonial === 'vip' && (
+              listaVipsCeremonial.length === 0 ? (
+                <p className="text-center text-slate-400 py-8">No se encontraron invitados VIP con los filtros seleccionados.</p>
+              ) : (
+                listaVipsCeremonial.map((v) => (
+                  <div key={v.id} className="p-3 flex items-center justify-between hover:bg-slate-50">
+                    <div>
+                      <p className="font-bold text-slate-900 text-sm">{v.nombre_completo}</p>
+                      <p className="text-slate-500">DNI: {v.dni || 'Sin DNI'} · <span className="text-amber-600 font-bold uppercase">Invitado VIP</span></p>
+                    </div>
+                    <span className={`px-3 py-1 rounded-full font-bold uppercase ${v.asistio ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'}`}>
+                      {v.asistio ? '✓ Presente' : 'Pendiente'}
+                    </span>
+                  </div>
+                ))
+              )
+            )}
+
+            {tipoCeremonial === 'egresados' && (
+              listaEgresadosCeremonial.length === 0 ? (
+                <p className="text-center text-slate-400 py-8">No se encontraron egresados con los filtros seleccionados.</p>
+              ) : (
+                listaEgresadosCeremonial.map((e) => (
+                  <div key={e.id} className="p-3 flex items-center justify-between hover:bg-slate-50">
+                    <div>
+                      <p className="font-bold text-slate-900 text-sm">{e.nombre_completo}</p>
+                      <p className="text-slate-500">DNI: {e.dni} · Cupo: {e.cupo_asignado} lugares</p>
+                    </div>
+                    <span className={`px-3 py-1 rounded-full font-bold uppercase ${e.asistio ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'}`}>
+                      {e.asistio ? '✓ Presente' : 'Pendiente'}
+                    </span>
+                  </div>
+                ))
+              )
             )}
           </div>
         </div>
