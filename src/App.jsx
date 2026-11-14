@@ -4,7 +4,7 @@ import {
   Users, UserCheck, Shield, QrCode, Upload, Trash2, Plus, Search,
   CheckCircle2, XCircle, AlertTriangle, Lock, Unlock, Download,
   LogOut, Eye, EyeOff, Edit3, Save, X, RefreshCw, MessageCircle, Award,
-  UserPlus, FileSpreadsheet, Check, ArrowRight, Building2, Phone, Eye as EyeIcon, Edit2, Star, Key, UserX, UserCheck as UserCheckIcon, Camera, CameraOff, Printer, FileText, RotateCcw
+  UserPlus, FileSpreadsheet, Check, ArrowRight, Building2, Phone, Edit2, Star, Key, Camera, CameraOff, Printer, FileText, RotateCcw, Grid, LayoutDashboard
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 
@@ -38,7 +38,7 @@ export default function App() {
   const [perfilStaff, setPerfilStaff] = useState(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
 
-  const [config, setConfig] = useState({ id: null, estado_etapa: 'abierta', cupo_base: CUPO_BASE_DEFECTO });
+  const [config, setConfig] = useState({ id: null, estado_etapa: 'abierta', cupo_base: CUPO_BASE_DEFECTO, filas: 15, butacas_por_fila: 35 });
   const [egresados, setEgresados] = useState([]);
   const [invitados, setInvitados] = useState([]);
   const [docentes, setDocentes] = useState([]);
@@ -98,7 +98,13 @@ export default function App() {
         supabase.from('usuarios_sistema').select('*').order('created_at', { ascending: true }),
       ]);
 
-      if (resCfg.data) setConfig(resCfg.data);
+      if (resCfg.data) {
+        setConfig({
+          ...resCfg.data,
+          filas: resCfg.data.filas || 15,
+          butacas_por_fila: resCfg.data.butacas_por_fila || 35
+        });
+      }
       if (resEgr.data) setEgresados(resEgr.data);
       if (resInv.data) setInvitados(resInv.data);
       if (resDoc.data) setDocentes(resDoc.data);
@@ -254,7 +260,7 @@ export default function App() {
 }
 
 // ============================================================================
-// LOGIN PERSONAL (Con ojito para ver contraseña)
+// LOGIN PERSONAL
 // ============================================================================
 function LoginStaff({ onSuccess, notify }) {
   const [email, setEmail] = useState('');
@@ -311,7 +317,7 @@ function LoginStaff({ onSuccess, notify }) {
 }
 
 // ============================================================================
-// 1. PORTAL PRINCIPAL UNIFICADO POR DNI (Egresados, Docentes y VIP)
+// 1. PORTAL PRINCIPAL UNIFICADO POR DNI
 // ============================================================================
 function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales, solicitudes, recargar, notify }) {
   const [dni, setDni] = useState('');
@@ -321,7 +327,7 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
   const [celular, setCelular] = useState('');
   const [filasInvitados, setFilasInvitados] = useState([]);
   const [guardando, setGuardando] = useState(false);
-  const [editando, setEditando] = useState(false); // Controla si están bloqueados o editables los campos
+  const [editando, setEditando] = useState(false);
   const [cantExtra, setCantExtra] = useState(1);
   const [obsExtra, setObsExtra] = useState('');
   const [enviandoSol, setEnviandoSol] = useState(false);
@@ -339,7 +345,7 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
 
   const prepararFilasInvitados = (egr) => {
     const misInv = invitados.filter((i) => i.egresado_id === egr.id);
-    const cupo = Number(egr.cupo_asignado) || CUPO_BASE_DEFECTO;
+    const cupo = Number(egr.cupo_asignado) || config.cupo_base || CUPO_BASE_DEFECTO;
     const arr = [];
     for (let idx = 0; idx < cupo; idx++) {
       if (misInv[idx]) {
@@ -1017,7 +1023,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
 }
 
 // ============================================================================
-// MÓDULO A: PANEL DE ADMINISTRACIÓN Y COORDINACIÓN COMPLETO (Con botones de reinicio y limpieza)
+// MÓDULO A: PANEL DE ADMINISTRACIÓN Y COORDINACIÓN (Con Mapa de Butacas)
 // ============================================================================
 function PanelAdministracion({ perfilStaff, config, egresados, invitados, docentes, especiales, solicitudes, usuariosSistema, totalEgresados, totalDocentes, totalEspeciales, totalCuposFamiliares, vacantesLibres, recargar, notify }) {
   const [tab, setTab] = useState('egresados');
@@ -1025,6 +1031,12 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
   const [filtroDocente, setFiltroDocente] = useState('');
   const [filtroVip, setFiltroVip] = useState('');
   
+  // Configuración editable de aforo y sala
+  const [cupoBaseEdit, setCupoBaseEdit] = useState(config.cupo_base || CUPO_BASE_DEFECTO);
+  const [filasEdit, setFilasEdit] = useState(config.filas || 15);
+  const [butacasFilaEdit, setButacasFilaEdit] = useState(config.butacas_por_fila || 35);
+  const [guardandoConfig, setGuardandoConfig] = useState(false);
+
   // Modales
   const [modalEditarEgr, setModalEditarEgr] = useState(null);
   const [modalEditarDoc, setModalEditarDoc] = useState(null);
@@ -1034,63 +1046,53 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
   const [modalAgregarDocente, setModalAgregarDocente] = useState(false);
   const [modalAgregarVip, setModalAgregarVip] = useState(false);
   
-  // Modal cambio clave usuario sistema
   const [modalCambiarClaveUsr, setModalCambiarClaveUsr] = useState(null);
   const [nuevaClaveUsr, setNuevaClaveUsr] = useState('');
   const [guardandoClave, setGuardandoClave] = useState(false);
   
-  // Estados de formulario Agregar Egresado
   const [nuevoEgNombre, setNuevoEgNombre] = useState('');
   const [nuevoEgDni, setNuevoEgDni] = useState('');
 
-  // Estados de formulario Agregar Docente
   const [nuevoDocNombre, setNuevoDocNombre] = useState('');
   const [nuevoDocDni, setNuevoDocDni] = useState('');
 
-  // Estados de formulario Agregar VIP
   const [nuevoVipNombre, setNuevoVipNombre] = useState('');
   const [nuevoVipDni, setNuevoVipDni] = useState('');
 
-  // Estados de edición Egresado
   const [editNombre, setEditNombre] = useState('');
   const [editDni, setEditDni] = useState('');
   const [editCelular, setEditCelular] = useState('');
   const [editCupo, setEditCupo] = useState(4);
   const [guardandoEdicion, setGuardandoEdicion] = useState(false);
 
-  // Estados de edición Docente
   const [editDocNombre, setEditDocNombre] = useState('');
   const [editDocDni, setEditDocDni] = useState('');
   const [guardandoDocente, setGuardandoDocente] = useState(false);
 
-  // Estados de edición VIP
   const [editVipNombre, setEditVipNombre] = useState('');
   const [editVipDni, setEditVipDni] = useState('');
   const [guardandoVip, setGuardandoVip] = useState(false);
 
-  // Estados de edición Usuario de Sistema
   const [editUsrNombre, setEditUsrNombre] = useState('');
   const [editUsrEmail, setEditUsrEmail] = useState('');
   const [editUsrRol, setEditUsrRol] = useState('puerta');
   const [guardandoUsr, setGuardandoUsr] = useState(false);
 
-  // Estados para la solapa de reportes (Acreditación en Vivo unificada)
   const [filtroCeremonial, setFiltroCeremonial] = useState('TODOS');
-  const [tipoCeremonial, setTipoCeremonial] = useState('docentes'); // 'docentes', 'vip', 'egresados'
+  const [tipoCeremonial, setTipoCeremonial] = useState('docentes');
   const [busquedaCeremonial, setBusquedaCeremonial] = useState('');
 
   const fileEgrRef = useRef(null);
   const fileDocRef = useRef(null);
   const fileVipRef = useRef(null);
 
-  // Estados para gestión de usuarios
   const [nuevoNombreUsr, setNuevoNombreUsr] = useState('');
   const [nuevoEmailUsr, setNuevoEmailUsr] = useState('');
   const [nuevoPassUsr, setNuevoPassUsr] = useState('');
   const [nuevoRolUsr, setNuevoRolUsr] = useState('puerta');
   const [showPassUsr, setShowPassUsr] = useState(false);
 
-  // Funciones de Reinicio / Limpieza de Datos de Prueba
+  // Funciones de Reinicio / Limpieza
   const reiniciarAsistenciasGeneral = async () => {
     if (!window.confirm("¿Estás seguro de reiniciar todas las asistencias a 0 para las pruebas o el acto?")) return;
     try {
@@ -1105,15 +1107,42 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     }
   };
 
-  const vaciarInvitadosDePrueba = async () => {
-    const resp = window.prompt("Para eliminar todos los invitados cargados de prueba y liberar los cupos, escribí BORRAR en mayúsculas:");
+  const borrarInvitadosEgresados = async () => {
+    const resp = window.prompt("Para confirmar el borrado de todos los invitados egresados cargados, escribí BORRAR en mayúsculas:");
     if (resp !== 'BORRAR') return;
     try {
       await supabase.from('invitados').delete().neq('id', '00000000-0000-0000-0000-000000000000');
       await recargar();
-      notify('Padrón de invitados vaciado correctamente.');
+      notify('Invitados egresados borrados correctamente.');
     } catch (err) {
-      notify('Error al vaciar invitados: ' + err.message, 'error');
+      notify('Error al borrar invitados: ' + err.message, 'error');
+    }
+  };
+
+  const guardarConfiguracionAforo = async (e) => {
+    e.preventDefault();
+    setGuardandoConfig(true);
+    try {
+      if (config.id) {
+        await supabase.from('configuracion').update({
+          cupo_base: Number(cupoBaseEdit),
+          filas: Number(filasEdit),
+          butacas_por_fila: Number(butacasFilaEdit)
+        }).eq('id', config.id);
+      } else {
+        await supabase.from('configuracion').insert({
+          cupo_base: Number(cupoBaseEdit),
+          filas: Number(filasEdit),
+          butacas_por_fila: Number(butacasFilaEdit),
+          estado_etapa: 'abierta'
+        });
+      }
+      await recargar();
+      notify('Configuración de aforo y sala guardada correctamente.');
+    } catch (err) {
+      notify('Error guardando aforo: ' + err.message, 'error');
+    } finally {
+      setGuardandoConfig(false);
     }
   };
 
@@ -1178,7 +1207,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
       const { error } = await supabase.from('egresados').insert({
         nombre_completo: nuevoEgNombre.trim().toUpperCase(),
         dni: dniLimpio,
-        cupo_asignado: CUPO_BASE_DEFECTO,
+        cupo_asignado: config.cupo_base || CUPO_BASE_DEFECTO,
         cerrado_por_alumno: false
       });
       if (error) throw error;
@@ -1351,7 +1380,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
       const registros = rows.map((r) => ({
         dni: sanitizeDNI(r[0]),
         nombre_completo: (r[1] || '').toUpperCase(),
-        cupo_asignado: CUPO_BASE_DEFECTO,
+        cupo_asignado: config.cupo_base || CUPO_BASE_DEFECTO,
         cerrado: false,
       })).filter(x => x.dni.length >= 7 && x.nombre_completo);
 
@@ -1467,7 +1496,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     (v.dni || '').includes(filtroVip)
   );
 
-  // Listado unificado para Acreditación en Vivo
   const listaDocentesCeremonial = docentes.filter(d => {
     const match = (d.nombre_completo || '').toLowerCase().includes(busquedaCeremonial.toLowerCase()) || (d.dni || '').includes(busquedaCeremonial);
     if (filtroCeremonial === 'PRESENTES') return match && d.asistio;
@@ -1494,8 +1522,36 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
   const egresadosPresentesCount = egresados.filter(e => e.asistio).length;
   const porcentajeAsistencia = Math.round((egresadosPresentesCount / (egresados.length || 1)) * 100);
 
+  // Construcción del Mapa de Sala por filas y butacas
+  const totalFilas = Number(config.filas) || 15;
+  const butacasPorFila = Number(config.butacas_por_fila) || 35;
+
   return (
     <div className="space-y-6">
+      {/* 🛠️ BARRA DE HERRAMIENTAS SUPERIOR DESTACADA PARA PRUEBAS Y REINICIO */}
+      <div className="bg-gradient-to-r from-slate-900 to-[#6B1D2F] text-white p-5 rounded-2xl shadow-lg flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h3 className="font-extrabold text-sm uppercase tracking-wider text-rose-200">Panel de Control General</h3>
+          <p className="text-xs text-slate-200 mt-0.5">Herramientas globales de prueba y gestión para el Acto</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button 
+            onClick={reiniciarAsistenciasGeneral} 
+            className="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow transition cursor-pointer"
+            title="Reinicia todas las asistencias de puerta a cero"
+          >
+            <RotateCcw className="w-4 h-4" /> 🔄 Reiniciar Asistencias (Puerta)
+          </button>
+          <button 
+            onClick={borrarInvitadosEgresados} 
+            className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow transition cursor-pointer"
+            title="Borrar invitados egresados"
+          >
+            <Trash2 className="w-4 h-4" /> 🗑️ Borrar Invitados Egresados
+          </button>
+        </div>
+      </div>
+
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Egresados</p><p className="text-2xl font-extrabold">{totalEgresados}</p></div>
         <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Docentes</p><p className="text-2xl font-extrabold">{totalDocentes}</p></div>
@@ -1506,23 +1562,71 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
         </div>
       </div>
 
-      {/* Herramientas de Pruebas y Etapas */}
+      {/* 🎟️ NUEVO: PANEL DE CONFIGURACIÓN DE AFORO Y SALÓN */}
+      <div className="bg-white p-5 rounded-2xl border shadow-sm space-y-4">
+        <div className="flex items-center gap-2 border-b pb-3">
+          <LayoutDashboard className="w-5 h-5 text-[#6B1D2F]" />
+          <div>
+            <h3 className="font-bold text-sm text-[#6B1D2F]">Configuración de Aforo y Distribución del Salón</h3>
+            <p className="text-xs text-slate-500">Modificá el cupo base por egresado, las filas y butacas para armar el mapa de la sala.</p>
+          </div>
+        </div>
+
+        <form onSubmit={guardarConfiguracionAforo} className="grid grid-cols-1 sm:grid-cols-4 gap-4 items-end">
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">Cupo Base por Egresado</label>
+            <input 
+              type="number" 
+              min="1" 
+              max="10" 
+              value={cupoBaseEdit} 
+              onChange={(e) => setCupoBaseEdit(e.target.value)} 
+              className="w-full px-3 py-2 border rounded-xl text-sm font-semibold outline-none focus:border-[#6B1D2F]"
+              required 
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">Cantidad de Filas</label>
+            <input 
+              type="number" 
+              min="1" 
+              max="50" 
+              value={filasEdit} 
+              onChange={(e) => setFilasEdit(e.target.value)} 
+              className="w-full px-3 py-2 border rounded-xl text-sm font-semibold outline-none focus:border-[#6B1D2F]"
+              required 
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">Butacas por Fila</label>
+            <input 
+              type="number" 
+              min="1" 
+              max="100" 
+              value={butacasFilaEdit} 
+              onChange={(e) => setButacasFilaEdit(e.target.value)} 
+              className="w-full px-3 py-2 border rounded-xl text-sm font-semibold outline-none focus:border-[#6B1D2F]"
+              required 
+            />
+          </div>
+          <button 
+            type="submit" 
+            disabled={guardandoConfig}
+            className="w-full py-2.5 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-xl text-xs font-bold shadow cursor-pointer"
+          >
+            {guardandoConfig ? 'Guardando...' : 'Guardar Aforo y Sala'}
+          </button>
+        </form>
+      </div>
+
       <div className="bg-white p-4 rounded-2xl border flex flex-wrap items-center justify-between gap-4">
         <div>
-          <p className="text-xs font-bold uppercase text-slate-500">Etapa Global y Herramientas de Prueba</p>
+          <p className="text-xs font-bold uppercase text-slate-500">Etapa Global de Carga</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex gap-1.5 bg-slate-100 p-1 rounded-xl">
-            <button onClick={() => cambiarEtapaGlobal('abierta')} className={`px-3 py-1 rounded-lg text-xs font-bold ${config.estado_etapa === 'abierta' ? 'bg-[#6B1D2F] text-white' : 'text-slate-700'}`}>Abierta</button>
-            <button onClick={() => cambiarEtapaGlobal('cierre_parcial')} className={`px-3 py-1 rounded-lg text-xs font-bold ${config.estado_etapa === 'cierre_parcial' ? 'bg-amber-600 text-white' : 'text-slate-700'}`}>Cierre Parcial</button>
-            <button onClick={() => cambiarEtapaGlobal('cierre_definitivo')} className={`px-3 py-1 rounded-lg text-xs font-bold ${config.estado_etapa === 'cierre_definitivo' ? 'bg-rose-600 text-white' : 'text-slate-700'}`}>Definitivo</button>
-          </div>
-          <button onClick={reiniciarAsistenciasGeneral} className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 rounded-xl text-xs font-bold flex items-center gap-1 shadow-xs cursor-pointer" title="Reinicia a 0 las asistencias de puerta">
-            <RotateCcw className="w-3.5 h-3.5" /> Reiniciar Asistencias
-          </button>
-          <button onClick={vaciarInvitadosDePrueba} className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 rounded-xl text-xs font-bold flex items-center gap-1 shadow-xs cursor-pointer" title="Borra los invitados cargados de prueba">
-            <Trash2 className="w-3.5 h-3.5" /> Limpiar Invitados de Prueba
-          </button>
+        <div className="flex gap-2">
+          <button onClick={() => cambiarEtapaGlobal('abierta')} className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${config.estado_etapa === 'abierta' ? 'bg-[#6B1D2F] text-white shadow' : 'bg-slate-100 text-slate-700'}`}>Abierta</button>
+          <button onClick={() => cambiarEtapaGlobal('cierre_parcial')} className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${config.estado_etapa === 'cierre_parcial' ? 'bg-amber-600 text-white shadow' : 'bg-slate-100 text-slate-700'}`}>Cierre Parcial</button>
+          <button onClick={() => cambiarEtapaGlobal('cierre_definitivo')} className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${config.estado_etapa === 'cierre_definitivo' ? 'bg-rose-600 text-white shadow' : 'bg-slate-100 text-slate-700'}`}>Definitivo</button>
         </div>
       </div>
 
@@ -1532,6 +1636,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
         <button onClick={() => setTab('vip')} className={`px-4 py-2 rounded-xl text-xs font-bold ${tab === 'vip' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Invitados VIP ({especiales.length})</button>
         <button onClick={() => setTab('solicitudes')} className={`px-4 py-2 rounded-xl text-xs font-bold ${tab === 'solicitudes' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Solicitudes Butacas ({solicitudes.length})</button>
         <button onClick={() => setTab('reportes')} className={`px-4 py-2 rounded-xl text-xs font-bold ${tab === 'reportes' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Acreditación en Vivo</button>
+        <button onClick={() => setTab('mapa')} className={`px-4 py-2 rounded-xl text-xs font-bold ${tab === 'mapa' ? 'bg-indigo-700 text-white shadow' : 'bg-white border'}`}>🗺️ Mapa de Sala</button>
         {perfilStaff?.rol === 'admin' && (
           <button onClick={() => setTab('usuarios')} className={`px-4 py-2 rounded-xl text-xs font-bold ${tab === 'usuarios' ? 'bg-emerald-600 text-white' : 'bg-white border'}`}>Usuarios del Sistema ({usuariosSistema.length})</button>
         )}
@@ -1750,7 +1855,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
 
               <div className="flex gap-2 pt-3 border-t">
                 <button type="button" onClick={() => setModalEditarEgr(null)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold">Cancelar</button>
-                <button type="submit" disabled={guardandoEdicion} className="flex-1 py-2.5 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-xl text-xs font-bold shadow">
+                <button type="submit" disabled={guardandoEdicion} className="flex-1 py-2.5 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold shadow">
                   {guardandoEdicion ? 'Guardando...' : 'Guardar Cambios'}
                 </button>
               </div>
@@ -2269,6 +2374,76 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
         </div>
       )}
 
+      {/* 🗺️ NUEVO: SOLAPA DE MAPA DE SALA INTERACTIVO */}
+      {tab === 'mapa' && (
+        <div className="bg-white rounded-2xl border p-5 space-y-6">
+          <div className="border-b pb-3 flex flex-wrap justify-between items-center gap-3">
+            <div>
+              <h3 className="font-bold text-base text-[#6B1D2F]">Mapa Visual del Salón (Distribución de Butacas)</h3>
+              <p className="text-xs text-slate-500">Representación gráfica de las {totalFilas} filas y {butacasPorFila} butacas por fila.</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-3 text-xs font-semibold">
+              <span className="flex items-center gap-1"><span className="w-3 h-3 bg-emerald-500 rounded-sm"></span> Acreditado (Presente)</span>
+              <span className="flex items-center gap-1"><span className="w-3 h-3 bg-amber-400 rounded-sm"></span> Ocupado (Pendiente)</span>
+              <span className="flex items-center gap-1"><span className="w-3 h-3 bg-slate-200 rounded-sm"></span> Libre</span>
+            </div>
+          </div>
+
+          <div className="p-4 bg-slate-900 text-white text-center rounded-xl font-extrabold text-sm tracking-widest">
+            ESCENARIO PRINCIPAL 🎭
+          </div>
+
+          <div className="space-y-2 max-h-[500px] overflow-y-auto p-2 border rounded-xl bg-slate-50">
+            {Array.from({ length: totalFilas }, (_, filaIdx) => {
+              const nroFila = filaIdx + 1;
+              let zonaNombre = 'Zona Invitados / Familiares';
+              let zonaColor = 'bg-rose-100 text-rose-800 border-rose-300';
+              if (nroFila <= 2) {
+                zonaNombre = 'Zona VIP / Autoridades (Filas 1-2)';
+                zonaColor = 'bg-amber-100 text-amber-900 border-amber-300';
+              } else if (nroFila >= 3 && nroFila <= 5) {
+                zonaNombre = 'Zona Docentes (Filas 3-5)';
+                zonaColor = 'bg-indigo-100 text-indigo-900 border-indigo-300';
+              } else if (nroFila >= 6 && nroFila <= 12) {
+                zonaNombre = 'Zona Egresados (Filas 6-12)';
+                zonaColor = 'bg-teal-100 text-teal-900 border-teal-300';
+              }
+
+              return (
+                <div key={nroFila} className="bg-white p-3 rounded-xl border space-y-2">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="font-extrabold text-slate-800">Fila #{nroFila}</span>
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${zonaColor}`}>{zonaNombre}</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {Array.from({ length: butacasPorFila }, (_, butacaIdx) => {
+                      const nroButaca = butacaIdx + 1;
+                      // Simulación de ocupación basada en los datos reales cargados
+                      const ocupada = (filaIdx * butacasPorFila + butacaIdx) < totalOcupado;
+                      const acreditada = ocupada && (filaIdx % 2 === 0); // Visual de prueba
+
+                      return (
+                        <div
+                          key={butacaIdx}
+                          title={`Fila ${nroFila} - Butaca ${nroButaca} (${ocupada ? 'Ocupada' : 'Libre'})`}
+                          className={`w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-bold font-mono transition cursor-pointer ${
+                            acreditada ? 'bg-emerald-500 text-white shadow-xs' :
+                            ocupada ? 'bg-amber-400 text-slate-900 shadow-xs' :
+                            'bg-slate-200 text-slate-600 hover:bg-slate-300'
+                          }`}
+                        >
+                          {nroButaca}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {tab === 'usuarios' && perfilStaff?.rol === 'admin' && (
         <div className="bg-white rounded-2xl border p-5 space-y-5">
           <h3 className="font-bold">Gestión de Usuarios y Roles</h3>
@@ -2425,7 +2600,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
 }
 
 // ============================================================================
-// NUEVO COMPONENTE: REPORTE RESUMEN PARA PAPEL (Optimizado para impresión)
+// REPORTE RESUMEN PARA PAPEL
 // ============================================================================
 function ReporteResumenPapel({ egresados, invitados, docentes, especiales }) {
   const egresadosOrdenados = [...egresados].sort((a, b) => 
@@ -2447,7 +2622,6 @@ function ReporteResumenPapel({ egresados, invitados, docentes, especiales }) {
         </button>
       </div>
 
-      {/* 1. TABLA DE EGRESADOS E INVITADOS */}
       <div className="space-y-3">
         <h3 className="font-bold text-sm text-[#6B1D2F] uppercase tracking-wide">1. Padrón de Egresados y Grupo Familiar</h3>
         <div className="overflow-x-auto">
@@ -2498,7 +2672,6 @@ function ReporteResumenPapel({ egresados, invitados, docentes, especiales }) {
         </div>
       </div>
 
-      {/* 2. LISTA DE DOCENTES */}
       <div className="space-y-3 pt-4">
         <h3 className="font-bold text-sm text-[#6B1D2F] uppercase tracking-wide">2. Padrón de Docentes Confirmados</h3>
         <div className="overflow-x-auto">
@@ -2525,7 +2698,6 @@ function ReporteResumenPapel({ egresados, invitados, docentes, especiales }) {
         </div>
       </div>
 
-      {/* 3. LISTA DE VIP / AUTORIDADES */}
       <div className="space-y-3 pt-4">
         <h3 className="font-bold text-sm text-[#6B1D2F] uppercase tracking-wide">3. Padrón de Invitados VIP / Autoridades</h3>
         <div className="overflow-x-auto">
