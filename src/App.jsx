@@ -146,7 +146,7 @@ export default function App() {
   };
 
   const reiniciarAsistenciasGeneral = async () => {
-    if (!window.confirm("¿Estás seguro de reiniciar todas las asistencias a 0 para las pruebas o el acto?")) return;
+    if (!window.confirm("¿Estás seguro de reiniciar todas las asistencias a 0?")) return;
     try {
       await supabase.from('egresados').update({ asistio: false }).neq('id', '00000000-0000-0000-0000-000000000000');
       await supabase.from('invitados').update({ asistio: false, hora_ingreso: null }).neq('id', '00000000-0000-0000-0000-000000000000');
@@ -161,7 +161,7 @@ export default function App() {
   };
 
   const borrarInvitadosEgresados = async () => {
-    const resp = window.prompt("Para confirmar el borrado de todos los invitados egresados cargados, escribí BORRAR en mayúsculas:");
+    const resp = window.prompt("Para confirmar el borrado de todos los invitados, escribí BORRAR en mayúsculas:");
     if (resp !== 'BORRAR') return;
     try {
       await supabase.from('invitados').delete().neq('id', '00000000-0000-0000-0000-000000000000');
@@ -296,7 +296,6 @@ export default function App() {
         )}
       </main>
 
-      {/* Botón Flotante de Ayuda por WhatsApp */}
       <a
         href="https://wa.me/5492996326617?text=Hola,%20necesito%20ayuda%20con%20el%20sistema%20de%20acceso%20de%20la%20Colación%20ESRN%20N°%20005."
         target="_blank"
@@ -310,9 +309,6 @@ export default function App() {
   );
 }
 
-// ============================================================================
-// LOGIN PERSONAL
-// ============================================================================
 function LoginStaff({ onSuccess, notify }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -367,12 +363,9 @@ function LoginStaff({ onSuccess, notify }) {
   );
 }
 
-// ============================================================================
-// 1. PORTAL PRINCIPAL UNIFICADO POR DNI (Con WhatsApp obligatorio)
-// ============================================================================
 function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales, solicitudes, recargar, notify }) {
   const [dni, setDni] = useState('');
-  const [tipoUsuario, setTipoUsuario] = useState('egresado'); // 'egresado', 'docente', 'vip'
+  const [tipoUsuario, setTipoUsuario] = useState('egresado');
   const [datosPersona, setDatosPersona] = useState(null);
   const [error, setError] = useState('');
   const [celular, setCelular] = useState('');
@@ -756,7 +749,7 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
                           className="w-4 h-4 text-[#6B1D2F] rounded border-gray-300 focus:ring-[#6B1D2F] cursor-pointer"
                         />
                         <label htmlFor={`grupal-${idx}`} className="text-[11px] font-semibold text-slate-700 cursor-pointer">
-                          Ingresa de forma grupal con el egresado (Tildado = Grupal / Destildado = Individual)
+                          Ingresa de forma grupal con el egresado
                         </label>
                       </div>
                     </div>
@@ -804,9 +797,6 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
   );
 }
 
-// ============================================================================
-// MÓDULO C: CONTROL DE ACCESO EN PUERTA
-// ============================================================================
 function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, notify }) {
   const [busqueda, setBusqueda] = useState('');
   const [egresadoSeleccionado, setEgresadoSeleccionado] = useState(null);
@@ -836,13 +826,13 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
     let inv = invitados.find((i) => String(i.numero_entrada || '').toUpperCase() === code || String(i.dni || '') === code);
     if (inv) {
       if (inv.asistio) {
-        setResultadoIngreso({ tipo: 'error', titulo: '¡ALERTA DUPLICADO!', nombre: inv.nombre_completo, detalle: `Entrada ${inv.numero_entrada} (DNI ${inv.dni}) ya ingresó anteriormente.` });
+        setResultadoIngreso({ tipo: 'error', titulo: '¡ALERTA DUPLICADO!', nombre: inv.nombre_completo, detalle: `Entrada ${inv.numero_entrada} ya ingresó anteriormente.` });
         notify(`⚠️ ¡ALERTA DUPLICADO! La entrada ${inv.numero_entrada} ya ingresó.`, 'error');
         return;
       }
       await supabase.from('invitados').update({ asistio: true, hora_ingreso: new Date().toISOString() }).eq('id', inv.id);
       await recargar();
-      setResultadoIngreso({ tipo: 'success', titulo: '✓ INGRESO PERMITIDO (FAMILIAR)', nombre: inv.nombre_completo, detalle: `DNI: ${inv.dni} · ${inv.es_grupal ? 'Ingreso Grupal' : 'Ingreso Individual'}` });
+      setResultadoIngreso({ tipo: 'success', titulo: '✓ INGRESO PERMITIDO (FAMILIAR)', nombre: inv.nombre_completo, detalle: `DNI: ${inv.dni}` });
       notify(`✓ INGRESO PERMITIDO: ${inv.nombre_completo}`);
       return;
     }
@@ -875,7 +865,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
       return;
     }
 
-    setResultadoIngreso({ tipo: 'error', titulo: '❌ CÓDIGO NO ENCONTRADO', nombre: raw, detalle: 'Verifique el padrón o busque manualmente por DNI.' });
+    setResultadoIngreso({ tipo: 'error', titulo: '❌ CÓDIGO NO ENCONTRADO', nombre: raw, detalle: 'Verifique el padrón o busque manualmente.' });
     notify(`❌ Código o DNI no encontrado: ${raw}`, 'error');
   };
 
@@ -883,11 +873,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
     setEscaneandoCamara(true);
     setResultadoIngreso(null);
     try {
-      const constraints = {
-        video: {
-          facingMode: { ideal: 'environment' }
-        }
-      };
+      const constraints = { video: { facingMode: { ideal: 'environment' } } };
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       streamRef.current = stream;
       if (videoRef.current) {
@@ -902,15 +888,13 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
             try {
               const barcodes = await barcodeDetector.detect(videoRef.current);
               if (barcodes.length > 0) {
-                const scannedText = barcodes[0].rawValue;
-                validarCodigoEntrada(scannedText);
+                validarCodigoEntrada(barcodes[0].rawValue);
               }
             } catch (err) {}
           }
         }, 400);
       }
     } catch (err) {
-      console.error(err);
       notify('No se pudo acceder a la cámara trasera. Verifique los permisos.', 'error');
       setEscaneandoCamara(false);
     }
@@ -928,11 +912,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
     setEscaneandoCamara(false);
   };
 
-  useEffect(() => {
-    return () => {
-      apagarCamara();
-    };
-  }, []);
+  useEffect(() => { return () => { apagarCamara(); }; }, []);
 
   const termino = busqueda.trim().toLowerCase();
   const egresadosCoincidentes = termino ? egresados.filter((e) => (e.nombre_completo || '').toLowerCase().includes(termino) || e.dni.includes(termino)) : [];
@@ -948,35 +928,18 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
 
         <button
           type="button"
-          onClick={() => {
-            if (escaneandoCamara) {
-              apagarCamara();
-            } else {
-              iniciarCamara();
-            }
-          }}
+          onClick={() => { escaneandoCamara ? apagarCamara() : iniciarCamara(); }}
           className={`w-full py-6 px-6 rounded-2xl font-extrabold text-lg flex items-center justify-center gap-3 shadow-2xl transition-all cursor-pointer ${
-            escaneandoCamara 
-              ? 'bg-rose-700 hover:bg-rose-800 text-white animate-pulse' 
-              : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white scale-[1.02]'
+            escaneandoCamara ? 'bg-rose-700 hover:bg-rose-800 text-white animate-pulse' : 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white scale-[1.02]'
           }`}
         >
-          {escaneandoCamara ? (
-            <>
-              <CameraOff className="w-8 h-8" /> Apagar Cámara
-            </>
-          ) : (
-            <>
-              <Camera className="w-8 h-8" /> 📷 ESCANEAR CÓDIGO QR
-            </>
-          )}
+          {escaneandoCamara ? <><CameraOff className="w-8 h-8" /> Apagar Cámara</> : <><Camera className="w-8 h-8" /> 📷 ESCANEAR CÓDIGO QR</>}
         </button>
 
         {resultadoIngreso && (
           <div className={`p-5 rounded-2xl border-4 text-left space-y-2 shadow-2xl transition-all animate-bounce ${
             resultadoIngreso.tipo === 'success' ? 'bg-emerald-50 border-emerald-500 text-emerald-900' :
-            resultadoIngreso.tipo === 'warning' ? 'bg-amber-50 border-amber-500 text-amber-900' :
-            'bg-rose-50 border-rose-500 text-rose-900'
+            resultadoIngreso.tipo === 'warning' ? 'bg-amber-50 border-amber-500 text-amber-900' : 'bg-rose-50 border-rose-500 text-rose-900'
           }`}>
             <div className="flex justify-between items-start">
               <span className="font-extrabold text-sm uppercase tracking-wider">{resultadoIngreso.titulo}</span>
@@ -1020,7 +983,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
               {invitados.filter((i) => i.egresado_id === egresadoSeleccionado.id).map((inv) => (
                 <div key={inv.id} className="p-3 rounded-xl border flex items-center justify-between">
                   <div>
-                    <p className="font-bold text-sm">{inv.nombre_completo} {inv.es_grupal && <span className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-bold ml-1">Grupal</span>}</p>
+                    <p className="font-bold text-sm">{inv.nombre_completo}</p>
                     <p className="text-xs text-slate-500">DNI: {inv.dni} · <strong>{inv.numero_entrada}</strong></p>
                   </div>
                   <button onClick={async () => { await supabase.from('invitados').update({ asistio: !inv.asistio }).eq('id', inv.id); await recargar(); }} className={`px-3.5 py-1.5 rounded-xl text-xs font-bold shadow-xs ${inv.asistio ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-800'}`}>
@@ -1060,9 +1023,6 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
   );
 }
 
-// ============================================================================
-// MÓDULO A: PANEL DE ADMINISTRACIÓN
-// ============================================================================
 function PanelAdministracion({ perfilStaff, config, egresados, invitados, docentes, especiales, solicitudes, usuariosSistema, logsSistema, totalEgresados, totalDocentes, totalEspeciales, totalCuposFamiliares, totalOcupado, vacantesLibres, recargar, notify, reiniciarAsistenciasGeneral, borrarInvitadosEgresados, registrarLog }) {
   const [tab, setTab] = useState('egresados');
   const [filtroEgresado, setFiltroEgresado] = useState('');
@@ -1303,6 +1263,34 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     }
   };
 
+  const guardarConfiguracionAforo = async (e) => {
+    e.preventDefault();
+    setGuardandoConfig(true);
+    try {
+      if (config.id) {
+        await supabase.from('configuracion').update({
+          cupo_base: Number(cupoBaseEdit),
+          filas: Number(filasEdit),
+          butacas_por_fila: Number(butacasFilaEdit)
+        }).eq('id', config.id);
+      } else {
+        await supabase.from('configuracion').insert({
+          cupo_base: Number(cupoBaseEdit),
+          filas: Number(filasEdit),
+          butacas_por_fila: Number(butacasFilaEdit),
+          estado_etapa: 'abierta'
+        });
+      }
+      await registrarLog('CONFIGURACION', 'Aforo', 'Se actualizó la configuración de la sala.');
+      await recargar();
+      notify('Configuración de aforo y sala guardada correctamente.');
+    } catch (err) {
+      notify('Error guardando aforo: ' + err.message, 'error');
+    } finally {
+      setGuardandoConfig(false);
+    }
+  };
+
   const cambiarEtapaGlobalConAdvertencia = (nuevaEtapa) => {
     if (nuevaEtapa === 'cierre_parcial') {
       setModalCierreParcialAbierto(true);
@@ -1530,6 +1518,15 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
       notify('Error al vaciar padrón: ' + err.message, 'error');
     }
   };
+
+  const totalFilas = config.filas || 15;
+  const butacasPorFila = config.butacas_por_fila || 35;
+
+  const egresadosPresentesCount = egresados.filter(e => e.asistio).length;
+  const invitadosPresentesCount = invitados.filter(i => i.asistio).length;
+  const docentesPresentesCount = docentes.filter(d => d.asistio).length;
+  const vipsPresentesCount = especiales.filter(v => v.asistio).length;
+  const totalAsistentesPresentes = egresadosPresentesCount + invitadosPresentesCount + docentesPresentesCount + vipsPresentesCount;
 
   const egresadosFiltrados = egresados.filter((e) => (e.nombre_completo || '').toLowerCase().includes(filtroEgresado.toLowerCase()) || (e.dni || '').includes(filtroEgresado));
   const docentesFiltrados = docentes.filter((d) => (d.nombre_completo || '').toLowerCase().includes(filtroDocente.toLowerCase()) || (d.dni || '').includes(filtroDocente));
@@ -1806,7 +1803,273 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
         </div>
       )}
 
-      {/* SECCIÓN DE LOG DE AUDITORÍA (EXCLUSIVA PARA ADMIN, ABAJO DEL TODO) */}
+      {/* SECCIÓN DE SOLICITUDES DE BUTACAS EXTRA */}
+      {tab === 'solicitudes' && (
+        <div className="bg-white rounded-2xl border p-5 space-y-4">
+          <div className="flex justify-between items-center border-b pb-3">
+            <div>
+              <h3 className="font-bold text-base text-slate-900">Bandeja de Solicitudes de Butacas Extra (Plus)</h3>
+              <p className="text-xs text-slate-500">Aprobación o rechazo de cupos adicionales solicitados por los egresados.</p>
+            </div>
+            <span className="px-3 py-1 bg-indigo-50 text-indigo-700 rounded-full font-bold text-xs">{solicitudes.length} solicitudes</span>
+          </div>
+
+          <div className="space-y-3 max-h-96 overflow-y-auto">
+            {solicitudes.length === 0 ? (
+              <p className="text-center text-slate-400 py-8 text-sm">No hay solicitudes de butacas extra registradas.</p>
+            ) : (
+              solicitudes.map((s) => {
+                const numeroWp = s.egresado_celular ? s.egresado_celular.replace(/\D/g, '') : '';
+                const linkWpAprobada = `https://wa.me/549${numeroWp}?text=Hola%20${encodeURIComponent(s.egresado_nombre)},%20tu%20solicitud%20de%20+${s.cantidad_solicitada}%20butaca(s)%20fue%20APROBADA.%20Por%20favor%20volvé%20a%20ingresar%20al%20portal%20con%20tu%20DNI.`;
+                const linkWpRechazada = `https://wa.me/549${numeroWp}?text=Hola%20${encodeURIComponent(s.egresado_nombre)},%20tu%20solicitud%20de%20butacas%20extra%20fue%20rechazada%20por%20superar%20el%20aforo%20disponible.`;
+
+                return (
+                  <div key={s.id} className="p-4 border rounded-xl flex flex-wrap justify-between items-center gap-3 bg-slate-50">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-sm text-slate-900">{s.egresado_nombre}</span>
+                        <span className="text-xs text-slate-500">(DNI: {s.egresado_dni})</span>
+                        <span className="px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded font-bold text-xs">+{s.cantidad_solicitada} lugares</span>
+                      </div>
+                      <p className="text-xs text-slate-600"><b>Motivo/Observación:</b> {s.observacion || 'Sin observación'}</p>
+                      <p className="text-[11px] text-slate-400 font-mono">Solicitado el: {new Date(s.created_at).toLocaleString()}</p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {s.estado === 'pendiente' ? (
+                        <>
+                          <button
+                            onClick={() => resolverSolicitud(s, true)}
+                            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer"
+                          >
+                            ✓ Aprobar y Sumar Cupo
+                          </button>
+                          <button
+                            onClick={() => resolverSolicitud(s, false)}
+                            className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer"
+                          >
+                            ✕ Rechazar
+                          </button>
+                        </>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <span className={`px-3 py-1 rounded-lg text-xs font-bold uppercase ${s.estado === 'aprobada' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                            {s.estado}
+                          </span>
+                          {numeroWp && (
+                            <a
+                              href={s.estado === 'aprobada' ? linkWpAprobada : linkWpRechazada}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-xs"
+                            >
+                              <MessageCircle className="w-3.5 h-3.5" /> Notificar WhatsApp
+                            </a>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ACREDITACIÓN EN VIVO */}
+      {tab === 'reportes' && (
+        <div className="bg-white rounded-2xl border p-5 space-y-6">
+          <div className="flex justify-between items-center border-b pb-3">
+            <div>
+              <h3 className="font-bold text-base text-slate-900">📊 Panel de Acreditación y Asistencia en Vivo</h3>
+              <p className="text-xs text-slate-500">Monitoreo en tiempo real de ingresos a la sala en el evento.</p>
+            </div>
+            <button onClick={() => recargar()} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer">
+              <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Actualizar Datos
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+            <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl space-y-1">
+              <p className="text-xs font-bold text-emerald-800 uppercase">Egresados Presentes</p>
+              <p className="text-3xl font-black text-emerald-900">
+                {egresados.filter(e => e.asistio).length} <span className="text-sm font-semibold opacity-70">/ {egresados.length}</span>
+              </p>
+            </div>
+            <div className="p-4 bg-teal-50 border border-teal-200 rounded-2xl space-y-1">
+              <p className="text-xs font-bold text-teal-800 uppercase">Invitados / Familiares</p>
+              <p className="text-3xl font-black text-teal-900">
+                {invitados.filter(i => i.asistio).length} <span className="text-sm font-semibold opacity-70">/ {invitados.length}</span>
+              </p>
+            </div>
+            <div className="p-4 bg-indigo-50 border border-indigo-200 rounded-2xl space-y-1">
+              <p className="text-xs font-bold text-indigo-800 uppercase">Docentes Presentes</p>
+              <p className="text-3xl font-black text-indigo-900">
+                {docentes.filter(d => d.asistio).length} <span className="text-sm font-semibold opacity-70">/ {docentes.length}</span>
+              </p>
+            </div>
+            <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl space-y-1">
+              <p className="text-xs font-bold text-amber-800 uppercase">Invitados VIP / Autoridades</p>
+              <p className="text-3xl font-black text-amber-900">
+                {especiales.filter(v => v.asistio).length} <span className="text-sm font-semibold opacity-70">/ {especiales.length}</span>
+              </p>
+            </div>
+          </div>
+
+          <div className="p-5 bg-slate-900 text-white rounded-2xl flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wider text-rose-300">Total de Asistentes en la Sala</p>
+              <p className="text-4xl font-black mt-0.5">{totalAsistentesPresentes} <span className="text-lg font-normal opacity-70">/ {CAPACIDAD_MAXIMA} Máx</span></p>
+            </div>
+            <div className="w-full sm:w-72 bg-slate-800 p-3 rounded-xl border border-slate-700 space-y-1.5">
+              <div className="flex justify-between text-xs font-semibold">
+                <span>Ocupación del Salón</span>
+                <span>{Math.round((totalAsistentesPresentes / CAPACIDAD_MAXIMA) * 100)}%</span>
+              </div>
+              <div className="w-full bg-slate-700 h-2.5 rounded-full overflow-hidden">
+                <div className="bg-emerald-500 h-full transition-all" style={{ width: `${Math.min(100, Math.round((totalAsistentesPresentes / CAPACIDAD_MAXIMA) * 100))}%` }} />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CONFIGURACIÓN DE AFORO Y SALA */}
+      {tab === 'aforo' && (
+        <div className="bg-white rounded-2xl border p-5 space-y-6">
+          <div className="border-b pb-3">
+            <h3 className="font-bold text-base text-slate-900">⚙️ Configuración de Aforo y Distribución de Butacas</h3>
+            <p className="text-xs text-slate-500">Parámetros generales de la sala para el Acto de Colación 2026.</p>
+          </div>
+
+          <form onSubmit={guardarConfiguracionAforo} className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-2xl">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Cupo Base por Egresado</label>
+              <input
+                type="number"
+                min="1"
+                max="10"
+                value={cupoBaseEdit}
+                onChange={(e) => setCupoBaseEdit(e.target.value)}
+                className="w-full px-3 py-2 border rounded-xl text-sm bg-white"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Filas en el Salón</label>
+              <input
+                type="number"
+                min="5"
+                max="50"
+                value={filasEdit}
+                onChange={(e) => setFilasEdit(e.target.value)}
+                className="w-full px-3 py-2 border rounded-xl text-sm bg-white"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Butacas por Fila</label>
+              <input
+                type="number"
+                min="10"
+                max="100"
+                value={butacasFilaEdit}
+                onChange={(e) => setButacasFilaEdit(e.target.value)}
+                className="w-full px-3 py-2 border rounded-xl text-sm bg-white"
+                required
+              />
+            </div>
+            <div className="sm:col-span-3 pt-2">
+              <button
+                type="submit"
+                disabled={guardandoConfig}
+                className="px-5 py-2.5 bg-indigo-700 hover:bg-indigo-800 text-white rounded-xl text-xs font-bold shadow cursor-pointer"
+              >
+                {guardandoConfig ? 'Guardando...' : 'Guardar Configuración de Sala'}
+              </button>
+            </div>
+          </form>
+
+          {/* Mapa Visual Interactivo de la Sala */}
+          <div className="space-y-3 pt-4 border-t">
+            <div className="flex justify-between items-center">
+              <h4 className="font-bold text-sm text-slate-800 uppercase tracking-wide">Mapa Visual de Butacas ({totalFilas} filas x {butacasPorFila} asientos)</h4>
+              <div className="flex items-center gap-3 text-xs">
+                <span className="flex items-center gap-1"><span className="w-3 h-3 bg-emerald-500 rounded-sm inline-block" /> Ocupado / Presente</span>
+                <span className="flex items-center gap-1"><span className="w-3 h-3 bg-slate-200 rounded-sm inline-block" /> Libre</span>
+              </div>
+            </div>
+
+            <div className="bg-slate-900 text-white p-4 rounded-xl text-center font-bold text-xs tracking-widest uppercase mb-2">
+              — Escenario / Autoridades —
+            </div>
+
+            <div className="bg-slate-50 border p-4 rounded-xl overflow-x-auto max-h-96">
+              <div className="inline-grid gap-1.5" style={{ gridTemplateColumns: `repeat(${butacasPorFila}, minmax(18px, 1fr))` }}>
+                {Array.from({ length: totalFilas * butacasPorFila }).map((_, idx) => {
+                  const ocupado = idx < totalOcupado;
+                  return (
+                    <div
+                      key={idx}
+                      title={`Butaca #${idx + 1} (${ocupado ? 'Ocupada' : 'Libre'})`}
+                      className={`w-5 h-5 rounded-xs transition-colors text-[9px] flex items-center justify-center font-mono ${
+                        ocupado ? 'bg-emerald-500 text-white font-bold shadow-xs' : 'bg-slate-200 text-slate-500 hover:bg-slate-300'
+                      }`}
+                    >
+                      {idx + 1}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tab === 'usuarios' && perfilStaff?.rol === 'admin' && (
+        <div className="bg-white rounded-2xl border p-5 space-y-5">
+          <h3 className="font-bold">Gestión de Usuarios del Sistema</h3>
+          <form onSubmit={crearUsuarioSistema} className="grid grid-cols-1 sm:grid-cols-5 gap-3 bg-slate-50 p-4 rounded-xl border">
+            <input type="text" placeholder="Nombre" value={nuevoNombreUsr} onChange={(e) => setNuevoNombreUsr(e.target.value)} className="px-3 py-2 rounded-xl border text-sm bg-white" required />
+            <input type="email" placeholder="Correo electrónico" value={nuevoEmailUsr} onChange={(e) => setNuevoEmailUsr(e.target.value)} className="px-3 py-2 rounded-xl border text-sm bg-white" required />
+            <div className="relative">
+              <input type={showPassUsr ? "text" : "password"} placeholder="Contraseña" value={nuevoPassUsr} onChange={(e) => setNuevoPassUsr(e.target.value)} className="w-full px-3 py-2 rounded-xl border text-sm bg-white pr-10" required />
+              <button type="button" onClick={() => setShowPassUsr(!showPassUsr)} className="absolute right-3 top-2.5 text-slate-400 cursor-pointer">
+                {showPassUsr ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+            <select value={nuevoRolUsr} onChange={(e) => setNuevoRolUsr(e.target.value)} className="px-3 py-2 rounded-xl border text-sm bg-white font-medium">
+              <option value="puerta">Puerta</option>
+              <option value="coordinador">Coordinador</option>
+              <option value="admin">Administrador</option>
+            </select>
+            <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs cursor-pointer">+ Crear Usuario</button>
+          </form>
+
+          <div className="divide-y text-sm">
+            {usuariosSistema.map((u) => (
+              <div key={u.id} className="py-3 flex justify-between items-center">
+                <div>
+                  <p className="font-bold">{u.nombre}</p>
+                  <p className="text-xs text-slate-500">{u.email} · Rol: <strong className="uppercase">{u.rol}</strong></p>
+                </div>
+                <button onClick={async () => {
+                  if(!window.confirm(`¿Eliminar a ${u.nombre}?`)) return;
+                  await supabase.from('usuarios_sistema').delete().eq('id', u.id);
+                  await registrarLog('ELIMINAR_USUARIO', 'Sistema', `Se eliminó al usuario ${u.nombre}`);
+                  await recargar();
+                  notify('Usuario eliminado.');
+                }} className="text-rose-600 hover:text-rose-800 p-1 cursor-pointer">
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* SECCIÓN DE LOG DE AUDITORÍA (EXCLUSIVA PARA ADMIN, ABAJO DEL TODO EN ADMINISTRACIÓN) */}
       {perfilStaff?.rol === 'admin' && (
         <div className="bg-white rounded-2xl border p-5 space-y-4 mt-10 border-t-4 border-indigo-600">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
@@ -1817,7 +2080,13 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
               <p className="text-xs text-slate-500">Historial completo de acciones realizadas por los operadores del sistema.</p>
             </div>
             <div className="w-full sm:w-72">
-              <input type="text" placeholder="Buscar en logs..." value={filtroLogBusqueda} onChange={(e) => setFiltroLogBusqueda(e.target.value)} className="w-full px-3 py-2 rounded-xl border text-xs outline-none focus:border-indigo-600" />
+              <input
+                type="text"
+                placeholder="Buscar en logs..."
+                value={filtroLogBusqueda}
+                onChange={(e) => setFiltroLogBusqueda(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border text-xs outline-none focus:border-indigo-600"
+              />
             </div>
           </div>
 
@@ -1833,7 +2102,9 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                     <span className="font-semibold text-slate-700">{log.accion}:</span>
                     <span className="text-slate-600 ml-1">{log.detalle}</span>
                   </div>
-                  <span className="text-[11px] text-slate-400 font-mono">{new Date(log.created_at).toLocaleString()}</span>
+                  <span className="text-[11px] text-slate-400 font-mono">
+                    {new Date(log.created_at).toLocaleString()}
+                  </span>
                 </div>
               ))
             )}
