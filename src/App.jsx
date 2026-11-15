@@ -4,7 +4,7 @@ import {
   Users, UserCheck, Shield, QrCode, Upload, Trash2, Plus, Search,
   CheckCircle2, XCircle, AlertTriangle, Lock, Unlock, Download,
   LogOut, Eye, EyeOff, Edit3, Save, X, RefreshCw, MessageCircle, Award,
-  UserPlus, FileSpreadsheet, Check, ArrowRight, Building2, Phone, Edit2, Star, Key, Camera, CameraOff, Printer, FileText, RotateCcw, Grid, LayoutDashboard
+  UserPlus, FileSpreadsheet, Check, ArrowRight, Building2, Phone, Edit2, Star, Key, Camera, CameraOff, Printer, FileText, RotateCcw, Grid, LayoutDashboard, History
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 
@@ -45,7 +45,7 @@ export default function App() {
   const [especiales, setEspeciales] = useState([]);
   const [solicitudes, setSolicitudes] = useState([]);
   const [usuariosSistema, setUsuariosSistema] = useState([]);
-  const [cargandoDatos, setCargandoDatos] = useState(false);
+  const [logsSistema, setLogsSistema] = useState([]);
 
   const [toast, setToast] = useState(null);
   const notify = (msg, type = 'success') => {
@@ -68,7 +68,6 @@ export default function App() {
 
     cargarDatosGlobales();
 
-    // Actualización automática cada 5 segundos para tiempo real en acreditación
     const intervalId = setInterval(() => {
       cargarDatosGlobales();
     }, 5000);
@@ -78,6 +77,20 @@ export default function App() {
       clearInterval(intervalId);
     };
   }, []);
+
+  const registrarLog = async (accion, modulo, detalle) => {
+    try {
+      await supabase.from('logs_sistema').insert({
+        usuario: perfilStaff?.nombre || session?.user?.email || 'Sistema',
+        accion,
+        modulo,
+        detalle
+      });
+      cargarDatosGlobales();
+    } catch (e) {
+      console.error('Error registrando log:', e);
+    }
+  };
 
   const cargarPerfilStaff = async (user) => {
     try {
@@ -96,7 +109,7 @@ export default function App() {
 
   const cargarDatosGlobales = async () => {
     try {
-      const [resCfg, resEgr, resInv, resDoc, resEsp, resSol, resUsr] = await Promise.all([
+      const [resCfg, resEgr, resInv, resDoc, resEsp, resSol, resUsr, resLog] = await Promise.all([
         supabase.from('configuracion').select('*').limit(1).maybeSingle(),
         supabase.from('egresados').select('*').order('nombre_completo', { ascending: true }),
         supabase.from('invitados').select('*').order('numero_entrada', { ascending: true }),
@@ -104,6 +117,7 @@ export default function App() {
         supabase.from('invitados_especiales').select('*').order('nombre_completo', { ascending: true }),
         supabase.from('solicitudes_butacas').select('*').order('created_at', { ascending: false }),
         supabase.from('usuarios_sistema').select('*').order('created_at', { ascending: true }),
+        supabase.from('logs_sistema').select('*').order('created_at', { ascending: false }).limit(50),
       ]);
 
       if (resCfg.data) {
@@ -119,6 +133,7 @@ export default function App() {
       if (resEsp.data) setEspeciales(resEsp.data);
       if (resSol.data) setSolicitudes(resSol.data);
       if (resUsr.data) setUsuariosSistema(resUsr.data);
+      if (resLog.data) setLogsSistema(resLog.data);
     } catch (e) {
       console.error('Error cargando datos:', e);
     }
@@ -128,6 +143,34 @@ export default function App() {
     await supabase.auth.signOut();
     setPerfilStaff(null);
     setVista('portal');
+  };
+
+  const reiniciarAsistenciasGeneral = async () => {
+    if (!window.confirm("¿Estás seguro de reiniciar todas las asistencias a 0 para las pruebas o el acto?")) return;
+    try {
+      await supabase.from('egresados').update({ asistio: false }).neq('id', '00000000-0000-0000-0000-000000000000');
+      await supabase.from('invitados').update({ asistio: false, hora_ingreso: null }).neq('id', '00000000-0000-0000-0000-000000000000');
+      await supabase.from('docentes').update({ asistio: false }).neq('id', '00000000-0000-0000-0000-000000000000');
+      await supabase.from('invitados_especiales').update({ asistio: false }).neq('id', '00000000-0000-0000-0000-000000000000');
+      await registrarLog('REINICIO_ASISTENCIAS', 'Puerta', 'Se reiniciaron todas las asistencias a cero.');
+      await cargarDatosGlobales();
+      notify('Todas las asistencias han sido reiniciadas a cero.');
+    } catch (err) {
+      notify('Error al reiniciar asistencias: ' + err.message, 'error');
+    }
+  };
+
+  const borrarInvitadosEgresados = async () => {
+    const resp = window.prompt("Para confirmar el borrado de todos los invitados egresados cargados, escribí BORRAR en mayúsculas:");
+    if (resp !== 'BORRAR') return;
+    try {
+      await supabase.from('invitados').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      await registrarLog('BORRADO_INVITADOS', 'Administración', 'Se borraron todos los invitados egresados.');
+      await cargarDatosGlobales();
+      notify('Invitados egresados borrados correctamente.');
+    } catch (err) {
+      notify('Error al borrar invitados: ' + err.message, 'error');
+    }
   };
 
   const totalEgresados = egresados.length;
@@ -240,9 +283,11 @@ export default function App() {
         ) : vista === 'admin' && session ? (
           <PanelAdministracion
             perfilStaff={perfilStaff} config={config} egresados={egresados} invitados={invitados}
-            docentes={docentes} especiales={especiales} solicitudes={solicitudes} usuariosSistema={usuariosSistema}
+            docentes={docentes} especiales={especiales} solicitudes={solicitudes} usuariosSistema={usuariosSistema} logsSistema={logsSistema}
             totalEgresados={totalEgresados} totalDocentes={totalDocentes} totalEspeciales={totalEspeciales}
             totalCuposFamiliares={totalCuposFamiliares} totalOcupado={totalOcupado} vacantesLibres={vacantesLibres} recargar={cargarDatosGlobales} notify={notify}
+            reiniciarAsistenciasGeneral={reiniciarAsistenciasGeneral}
+            borrarInvitadosEgresados={borrarInvitadosEgresados} registrarLog={registrarLog}
           />
         ) : vista === 'reporte_papel' && session ? (
           <ReporteResumenPapel egresados={egresados} invitados={invitados} docentes={docentes} especiales={especiales} />
@@ -323,7 +368,7 @@ function LoginStaff({ onSuccess, notify }) {
 }
 
 // ============================================================================
-// 1. PORTAL PRINCIPAL UNIFICADO POR DNI
+// 1. PORTAL PRINCIPAL UNIFICADO POR DNI (Con WhatsApp obligatorio)
 // ============================================================================
 function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales, solicitudes, recargar, notify }) {
   const [dni, setDni] = useState('');
@@ -390,9 +435,9 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
     if (tipoUsuario === 'egresado') {
       encontrado = egresados.find((x) => sanitizeDNI(x.dni) === limpio);
     } else if (tipoUsuario === 'docente') {
-      encontrado = docentes.find((x) => sanitizeDNI(x.dni) === limpio);
+      encontrado = docentes.find((x) => sanitizeDNI(x.dni) === limpio || String(x.dni || '').trim() === dni.trim());
     } else {
-      encontrado = especiales.find((x) => sanitizeDNI(x.dni) === limpio);
+      encontrado = especiales.find((x) => sanitizeDNI(x.dni) === limpio || String(x.dni || '').trim() === dni.trim() || String(obtenerNombreReal(x)).toUpperCase().includes(dni.toUpperCase()));
     }
 
     if (!encontrado) {
@@ -501,6 +546,11 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
   };
 
   const guardarInvitados = async () => {
+    if (!celular || celular.trim().length < 6) {
+      notify('El número de celular/WhatsApp es obligatorio para continuar.', 'error');
+      return;
+    }
+
     setGuardando(true);
     try {
       await supabase.from('egresados').update({ celular }).eq('id', datosPersona.id);
@@ -631,7 +681,7 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
             {tipoUsuario === 'egresado' && (
               <>
                 <div className="border-2 border-emerald-500 bg-emerald-50 p-4 rounded-xl space-y-2">
-                  <label className="block text-xs font-bold text-emerald-900 uppercase">📱 Tu Celular / WhatsApp</label>
+                  <label className="block text-xs font-bold text-emerald-900 uppercase">📱 Tu Celular / WhatsApp <span className="text-rose-600">* Obligatorio</span></label>
                   <input 
                     type="text" 
                     maxLength={15}
@@ -639,6 +689,7 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
                     value={celular} 
                     onChange={(e) => setCelular(sanitizeDNI(e.target.value))} 
                     disabled={!editando}
+                    required
                     className={`w-full px-3 py-2 border-2 border-emerald-500 rounded-lg text-sm font-semibold text-emerald-900 outline-none ${!editando ? 'bg-slate-100 text-slate-600 cursor-not-allowed' : 'bg-white'}`} 
                   />
                 </div>
@@ -646,8 +697,8 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
                 <div className="border-2 border-[#6B1D2F] bg-rose-50/40 p-4 rounded-xl space-y-3">
                   <div className="bg-amber-100 border border-amber-300 p-3 rounded-lg flex justify-between items-center">
                     <div>
-                      <p className="text-xs font-bold text-amber-900">⚠️ Recomendación Importante</p>
-                      <p className="text-[11px] text-amber-800 mt-0.5">Revise bien los nombres y DNI antes de guardar.</p>
+                      <p className="text-xs font-bold text-amber-900">⚠️ Atención: Revise bien sus datos</p>
+                      <p className="text-[11px] text-amber-800 mt-0.5">Verifique nombre y DNI antes de guardar. Una vez guardado, asegúrese de revisar la exactitud de la información.</p>
                     </div>
                     {!editando && (
                       <button
@@ -754,11 +805,10 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
 }
 
 // ============================================================================
-// MÓDULO C: CONTROL DE ACCESO EN PUERTA
+// MÓDULO C: CONTROL DE ACCESO EN PUERTA (Sin campo manual inferior y título limpio sin "Plan B")
 // ============================================================================
 function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, notify }) {
   const [busqueda, setBusqueda] = useState('');
-  const [codigoManualQr, setCodigoManualQr] = useState('');
   const [egresadoSeleccionado, setEgresadoSeleccionado] = useState(null);
   const [escaneandoCamara, setEscaneandoCamara] = useState(false);
   const [resultadoIngreso, setResultadoIngreso] = useState(null);
@@ -825,7 +875,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
       return;
     }
 
-    setResultadoIngreso({ tipo: 'error', titulo: '❌ CÓDIGO NO ENCONTRADO', nombre: raw, detalle: 'Verifique el padrón o busque manualmente por DNI (Plan B).' });
+    setResultadoIngreso({ tipo: 'error', titulo: '❌ CÓDIGO NO ENCONTRADO', nombre: raw, detalle: 'Verifique el padrón o busque manualmente por DNI.' });
     notify(`❌ Código o DNI no encontrado: ${raw}`, 'error');
   };
 
@@ -855,9 +905,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
                 const scannedText = barcodes[0].rawValue;
                 validarCodigoEntrada(scannedText);
               }
-            } catch (err) {
-              // Ignorar errores transitorios
-            }
+            } catch (err) {}
           }
         }, 400);
       }
@@ -961,16 +1009,11 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
             </button>
           </div>
         )}
-
-        <form onSubmit={(e) => { e.preventDefault(); validarCodigoEntrada(codigoManualQr); setCodigoManualQr(''); }} className="flex gap-2 pt-2 border-t border-slate-800">
-          <input type="text" placeholder="O tipear código ENT-... o DNI" value={codigoManualQr} onChange={(e) => setCodigoManualQr(e.target.value)} className="flex-1 px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-sm text-white outline-none font-mono" />
-          <button type="submit" className="px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm">Registrar</button>
-        </form>
       </div>
 
-      {/* PLAN B: BÚSQUEDA MANUAL PARA CASOS SEPARADOS */}
+      {/* BÚSQUEDA MANUAL (Sin la etiqueta "PLAN B:") */}
       <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-4 shadow-sm">
-        <h3 className="font-bold text-xs text-slate-500 uppercase tracking-wider">Plan B: Búsqueda manual (Por si un invitado grupal llega por separado)</h3>
+        <h3 className="font-bold text-xs text-slate-500 uppercase tracking-wider">Búsqueda manual (Por si un invitado llega por separado)</h3>
         <div className="relative">
           <Search className="w-5 h-5 text-slate-400 absolute left-3.5 top-3" />
           <input type="text" placeholder="Escribí el nombre del egresado, docente o DNI..." value={busqueda} onChange={(e) => { setBusqueda(e.target.value); setEgresadoSeleccionado(null); }} className="w-full pl-11 pr-4 py-3 rounded-xl border border-slate-300 text-sm outline-none focus:border-[#6B1D2F]" />
@@ -1029,21 +1072,19 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
 }
 
 // ============================================================================
-// MÓDULO A: PANEL DE ADMINISTRACIÓN (Con panel de mantenimiento abajo del todo)
+// MÓDULO A: PANEL DE ADMINISTRACIÓN (Con descarga de QR para Egresados, Docentes y VIP para Admin y Coordinador, y Log al fondo)
 // ============================================================================
-function PanelAdministracion({ perfilStaff, config, egresados, invitados, docentes, especiales, solicitudes, usuariosSistema, totalEgresados, totalDocentes, totalEspeciales, totalCuposFamiliares, totalOcupado, vacantesLibres, recargar, notify }) {
+function PanelAdministracion({ perfilStaff, config, egresados, invitados, docentes, especiales, solicitudes, usuariosSistema, logsSistema, totalEgresados, totalDocentes, totalEspeciales, totalCuposFamiliares, totalOcupado, vacantesLibres, recargar, notify, reiniciarAsistenciasGeneral, borrarInvitadosEgresados, registrarLog }) {
   const [tab, setTab] = useState('egresados');
   const [filtroEgresado, setFiltroEgresado] = useState('');
   const [filtroDocente, setFiltroDocente] = useState('');
   const [filtroVip, setFiltroVip] = useState('');
   
-  // Configuración editable de aforo y sala
   const [cupoBaseEdit, setCupoBaseEdit] = useState(config.cupo_base || CUPO_BASE_DEFECTO);
   const [filasEdit, setFilasEdit] = useState(config.filas || 15);
   const [butacasFilaEdit, setButacasFilaEdit] = useState(config.butacas_por_fila || 35);
   const [guardandoConfig, setGuardandoConfig] = useState(false);
 
-  // Modales
   const [modalEditarEgr, setModalEditarEgr] = useState(null);
   const [modalEditarDoc, setModalEditarDoc] = useState(null);
   const [modalEditarVip, setModalEditarVip] = useState(null);
@@ -1084,13 +1125,13 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
   const [editUsrRol, setEditUsrRol] = useState('puerta');
   const [guardandoUsr, setGuardandoUsr] = useState(false);
 
-  const [filtroCeremonial, setFiltroCeremonial] = useState('TODOS');
-  const [tipoCeremonial, setTipoCeremonial] = useState('docentes');
-  const [busquedaCeremonial, setBusquedaCeremonial] = useState('');
+  // Estados para filtro de Logs de Auditoría
+  const [filtroLogBusqueda, setFiltroLogBusqueda] = useState('');
 
   const fileEgrRef = useRef(null);
   const fileDocRef = useRef(null);
   const fileVipRef = useRef(null);
+  const adminQrRef = useRef(null);
 
   const [nuevoNombreUsr, setNuevoNombreUsr] = useState('');
   const [nuevoEmailUsr, setNuevoEmailUsr] = useState('');
@@ -1098,30 +1139,198 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
   const [nuevoRolUsr, setNuevoRolUsr] = useState('puerta');
   const [showPassUsr, setShowPassUsr] = useState(false);
 
-  // Funciones de Reinicio / Limpieza
-  const reiniciarAsistenciasGeneral = async () => {
-    if (!window.confirm("¿Estás seguro de reiniciar todas las asistencias a 0 para las pruebas o el acto?")) return;
+  // Modal de advertencia para Cierre Parcial
+  const [modalCierreParcialAbierto, setModalCierreParcialAbierto] = useState(false);
+
+  const descargarTarjetaAdmin1080x1920 = (nombreQR, subtituloQR, textoRolQR) => {
+    const svgElement = adminQrRef.current?.querySelector('svg');
+    if (!svgElement) {
+      alert('Generando componente QR...');
+      return;
+    }
+
     try {
-      await supabase.from('egresados').update({ asistio: false }).neq('id', '00000000-0000-0000-0000-000000000000');
-      await supabase.from('invitados').update({ asistio: false, hora_ingreso: null }).neq('id', '00000000-0000-0000-0000-000000000000');
-      await supabase.from('docentes').update({ asistio: false }).neq('id', '00000000-0000-0000-0000-000000000000');
-      await supabase.from('invitados_especiales').update({ asistio: false }).neq('id', '00000000-0000-0000-0000-000000000000');
-      await recargar();
-      notify('Todas las asistencias han sido reiniciadas a cero.');
+      const svgData = new XMLSerializer().serializeToString(svgElement);
+      const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+      const URL = window.URL || window.webkitURL || window;
+      const blobURL = URL.createObjectURL(svgBlob);
+
+      const qrImage = new Image();
+      qrImage.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = 1080;
+          canvas.height = 1920;
+          const ctx = canvas.getContext('2d');
+
+          ctx.fillStyle = '#F3F4F6';
+          ctx.fillRect(0, 0, 1080, 1920);
+
+          ctx.fillStyle = '#6B1D2F';
+          ctx.fillRect(0, 0, 1080, 380);
+
+          ctx.fillStyle = '#FFFFFF';
+          ctx.font = 'bold 42px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('ESRN N° 005 — CIPOLLETTI', 540, 120);
+
+          ctx.fillStyle = '#FBCFE8';
+          ctx.font = '26px sans-serif';
+          ctx.fillText('Acto de Colación 2026 — Pase Oficial de Ingreso', 540, 180);
+
+          ctx.fillStyle = '#FFFFFF';
+          ctx.beginPath();
+          if (typeof ctx.roundRect === 'function') ctx.roundRect(120, 440, 840, 1280, 30);
+          else ctx.rect(120, 440, 840, 1280);
+          ctx.fill();
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = '#E5E7EB';
+          ctx.stroke();
+
+          ctx.fillStyle = '#111827';
+          ctx.font = 'bold 44px sans-serif';
+          ctx.fillText(String(nombreQR).toUpperCase(), 540, 580);
+
+          ctx.fillStyle = '#4B5563';
+          ctx.font = '32px sans-serif';
+          ctx.fillText(subtituloQR, 540, 650);
+
+          ctx.fillStyle = '#6B1D2F';
+          ctx.font = 'bold 28px sans-serif';
+          ctx.fillText(textoRolQR, 540, 710);
+
+          ctx.drawImage(qrImage, 290, 780, 500, 500);
+
+          ctx.fillStyle = '#374151';
+          ctx.font = 'bold 30px sans-serif';
+          ctx.fillText('Pase Autorizado para Ingreso', 540, 1370);
+
+          ctx.fillStyle = '#6B7280';
+          ctx.font = '24px sans-serif';
+          ctx.fillText('Presentar en puerta (digital o impreso)', 540, 1430);
+
+          ctx.fillStyle = '#9CA3AF';
+          ctx.font = '24px sans-serif';
+          ctx.fillText('ESRN N° 005 — Cipolletti', 540, 1810);
+
+          const pngUrl = canvas.toDataURL('image/png');
+          const downloadLink = document.createElement('a');
+          downloadLink.href = pngUrl;
+          downloadLink.download = `Pase-Oficial-${nombreQR.replace(/\s+/g, '-')}.png`;
+          document.body.appendChild(downloadLink);
+          downloadLink.click();
+          document.body.removeChild(downloadLink);
+        } catch (canvasErr) {
+          console.error(canvasErr);
+        }
+      };
+      qrImage.src = blobURL;
     } catch (err) {
-      notify('Error al reiniciar asistencias: ' + err.message, 'error');
+      console.error(err);
     }
   };
 
-  const borrarInvitadosEgresados = async () => {
-    const resp = window.prompt("Para confirmar el borrado de todos los invitados egresados cargados, escribí BORRAR en mayúsculas:");
-    if (resp !== 'BORRAR') return;
+  const exportarCSV = (tipo) => {
+    let contenidoCSV = "data:text/csv;charset=utf-8,";
+    let nombreArchivo = "";
+
+    if (tipo === 'egresados') {
+      contenidoCSV += "DNI,Nombre Completo,Celular,Cupo Asignado,Asistio
+";
+      egresados.forEach(e => {
+        contenidoCSV += `"${e.dni}","${e.nombre_completo}","${e.celular || ''}",${e.cupo_asignado},${e.asistio ? 'SI' : 'NO'}
+`;
+      });
+      nombreArchivo = "padron-egresados-esrn5.csv";
+    } else if (tipo === 'docentes') {
+      contenidoCSV += "DNI,Nombre Completo,Asistio
+";
+      docentes.forEach(d => {
+        contenidoCSV += `"${d.dni}","${d.nombre_completo}",${d.asistio ? 'SI' : 'NO'}
+`;
+      });
+      nombreArchivo = "padron-docentes-esrn5.csv";
+    } else if (tipo === 'vip') {
+      contenidoCSV += "DNI,Nombre e Institucion,Asistio
+";
+      especiales.forEach(v => {
+        contenidoCSV += `"${v.dni || 'S/D'}","${v.nombre_completo}",${v.asistio ? 'SI' : 'NO'}
+`;
+      });
+      nombreArchivo = "padron-vip-esrn5.csv";
+    }
+
+    const encodedUri = encodeURI(contenidoCSV);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", nombreArchivo);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    notify(`Exportado ${nombreArchivo} con éxito.`);
+  };
+
+  const handleImportarCSVEgresados = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
     try {
-      await supabase.from('invitados').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      const text = await file.text();
+      const rows = parseCSV(text);
+      const registros = rows.map((r) => ({
+        dni: sanitizeDNI(r[0]),
+        nombre_completo: (r[1] || '').toUpperCase(),
+        cupo_asignado: config.cupo_base || CUPO_BASE_DEFECTO,
+        cerrado: false,
+      })).filter(x => x.dni.length >= 7 && x.nombre_completo);
+
+      await supabase.from('egresados').upsert(registros, { onConflict: 'dni' });
+      await registrarLog('IMPORTAR_CSV', 'Egresados', `Se importaron ${registros.length} egresados.`);
       await recargar();
-      notify('Invitados egresados borrados correctamente.');
+      notify(`Importados ${registros.length} egresados.`);
     } catch (err) {
-      notify('Error al borrar invitados: ' + err.message, 'error');
+      notify('Error importando CSV: ' + err.message, 'error');
+    }
+  };
+
+  const handleImportarCSVDocentes = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const rows = parseCSV(text);
+      const registros = rows.map((r) => ({
+        dni: sanitizeDNI(r[0]),
+        nombre_completo: (r[1] || '').toUpperCase(),
+        asistio: false,
+      })).filter(x => x.dni.length >= 7 && x.nombre_completo);
+
+      await supabase.from('docentes').upsert(registros, { onConflict: 'dni' });
+      await registrarLog('IMPORTAR_CSV', 'Docentes', `Se importaron ${registros.length} docentes.`);
+      await recargar();
+      notify(`Importados ${registros.length} docentes.`);
+    } catch (err) {
+      notify('Error importando CSV Docentes: ' + err.message, 'error');
+    }
+  };
+
+  const handleImportarCSVVips = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const rows = parseCSV(text);
+      const registros = rows.map((r) => ({
+        dni: sanitizeDNI(r[0]),
+        nombre_completo: (r[1] || '').toUpperCase(),
+        asistio: false,
+      })).filter(x => x.nombre_completo);
+
+      await supabase.from('invitados_especiales').upsert(registros, { onConflict: 'dni' });
+      await registrarLog('IMPORTAR_CSV', 'VIP', `Se importaron ${registros.length} invitados VIP.`);
+      await recargar();
+      notify(`Importados ${registros.length} invitados VIP.`);
+    } catch (err) {
+      notify('Error importando CSV VIP: ' + err.message, 'error');
     }
   };
 
@@ -1143,6 +1352,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
           estado_etapa: 'abierta'
         });
       }
+      await registrarLog('CONFIGURACION', 'Aforo', 'Se actualizó la configuración de la sala.');
       await recargar();
       notify('Configuración de aforo y sala guardada correctamente.');
     } catch (err) {
@@ -1150,6 +1360,26 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     } finally {
       setGuardandoConfig(false);
     }
+  };
+
+  const cambiarEtapaGlobalConAdvertencia = (nuevaEtapa) => {
+    if (nuevaEtapa === 'cierre_parcial') {
+      setModalCierreParcialAbierto(true);
+    } else {
+      cambiarEtapaGlobalDirecto(nuevaEtapa);
+    }
+  };
+
+  const cambiarEtapaGlobalDirecto = async (nuevaEtapa) => {
+    setModalCierreParcialAbierto(false);
+    if (config.id) {
+      await supabase.from('configuracion').update({ estado_etapa: nuevaEtapa }).eq('id', config.id);
+    } else {
+      await supabase.from('configuracion').insert({ estado_etapa: nuevaEtapa, cupo_base: CUPO_BASE_DEFECTO });
+    }
+    await registrarLog('CAMBIO_ETAPA', 'Configuración', `Se cambió la etapa global a: ${nuevaEtapa.toUpperCase()}`);
+    await recargar();
+    notify(`Etapa actualizada a: ${nuevaEtapa.toUpperCase()}`);
   };
 
   const abrirModalEditarUsuario = (usr) => {
@@ -1174,6 +1404,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
         .eq('id', modalEditarUsr.id);
 
       if (error) throw error;
+      await registrarLog('EDITAR_USUARIO', 'Sistema', `Se editó el usuario ${editUsrNombre.trim()}`);
       notify('Usuario del sistema actualizado correctamente.');
       setModalEditarUsr(null);
       await recargar();
@@ -1184,7 +1415,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     }
   };
 
-    const crearUsuarioSistema = async (e) => {
+  const crearUsuarioSistema = async (e) => {
     e.preventDefault();
     const nombre = nuevoNombreUsr.trim();
     const email = nuevoEmailUsr.trim().toLowerCase();
@@ -1213,6 +1444,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
 
       if (dbError) throw dbError;
 
+      await registrarLog('CREAR_USUARIO', 'Sistema', `Se creó el usuario ${nombre} (${email})`);
       setNuevoNombreUsr('');
       setNuevoEmailUsr('');
       setNuevoPassUsr('');
@@ -1231,6 +1463,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     }
     setGuardandoClave(true);
     try {
+      await registrarLog('CAMBIAR_CLAVE', 'Sistema', `Se cambió la clave del usuario ${modalCambiarClaveUsr.nombre}`);
       notify(`Contraseña actualizada correctamente para ${modalCambiarClaveUsr.nombre}.`);
       setModalCambiarClaveUsr(null);
       setNuevaClaveUsr('');
@@ -1243,24 +1476,19 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
 
   const agregarEgresadoManual = async (e) => {
     e.preventDefault();
-    const dniLimpio = sanitizeDNI(nuevoEgDni);
-    if (!nuevoEgNombre.trim() || dniLimpio.length < 7) {
-      notify('Completá Nombre y DNI válido (7 u 8 dígitos).', 'error');
-      return;
-    }
     try {
-      const { error } = await supabase.from('egresados').insert({
+      await supabase.from('egresados').insert({
+        dni: sanitizeDNI(nuevoEgDni),
         nombre_completo: nuevoEgNombre.trim().toUpperCase(),
-        dni: dniLimpio,
         cupo_asignado: config.cupo_base || CUPO_BASE_DEFECTO,
-        cerrado_por_alumno: false
+        activo: true
       });
-      if (error) throw error;
+      await registrarLog('AGREGAR', 'Egresados', `Se agregó al egresado ${nuevoEgNombre.trim().toUpperCase()}`);
       setNuevoEgNombre('');
       setNuevoEgDni('');
       setModalAgregarEgresado(false);
       await recargar();
-      notify('Egresado agregado correctamente al padrón.');
+      notify('Egresado agregado con éxito.');
     } catch (err) {
       notify('Error al agregar egresado: ' + err.message, 'error');
     }
@@ -1268,22 +1496,18 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
 
   const agregarDocenteManual = async (e) => {
     e.preventDefault();
-    const dniLimpio = sanitizeDNI(nuevoDocDni);
-    if (!nuevoDocNombre.trim() || dniLimpio.length < 7) {
-      notify('Completá Nombre y DNI válido.', 'error');
-      return;
-    }
     try {
-      const { error } = await supabase.from('docentes').insert({
+      await supabase.from('docentes').insert({
+        dni: sanitizeDNI(nuevoDocDni),
         nombre_completo: nuevoDocNombre.trim().toUpperCase(),
-        dni: dniLimpio
+        activo: true
       });
-      if (error) throw error;
+      await registrarLog('AGREGAR', 'Docentes', `Se agregó al docente ${nuevoDocNombre.trim().toUpperCase()}`);
       setNuevoDocNombre('');
       setNuevoDocDni('');
       setModalAgregarDocente(false);
       await recargar();
-      notify('Docente agregado correctamente.');
+      notify('Docente agregado con éxito.');
     } catch (err) {
       notify('Error al agregar docente: ' + err.message, 'error');
     }
@@ -1291,33 +1515,29 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
 
   const agregarVipManual = async (e) => {
     e.preventDefault();
-    const dniLimpio = sanitizeDNI(nuevoVipDni);
-    if (!nuevoVipNombre.trim()) {
-      notify('Completá el nombre de la autoridad o invitado VIP.', 'error');
-      return;
-    }
     try {
-      const { error } = await supabase.from('invitados_especiales').insert({
+      await supabase.from('invitados_especiales').insert({
+        dni: nuevoVipDni ? sanitizeDNI(nuevoVipDni) : null,
         nombre_completo: nuevoVipNombre.trim().toUpperCase(),
-        dni: dniLimpio || null
+        activo: true
       });
-      if (error) throw error;
+      await registrarLog('AGREGAR', 'VIP', `Se agregó al VIP ${nuevoVipNombre.trim().toUpperCase()}`);
       setNuevoVipNombre('');
       setNuevoVipDni('');
       setModalAgregarVip(false);
       await recargar();
-      notify('Invitado VIP agregado correctamente.');
+      notify('Invitado VIP agregado con éxito.');
     } catch (err) {
       notify('Error al agregar VIP: ' + err.message, 'error');
     }
   };
 
-  const abrirModalEditar = (egr) => {
-    setModalEditarEgr(egr);
-    setEditNombre(egr.nombre_completo || '');
-    setEditDni(egr.dni || '');
-    setEditCelular(egr.celular || '');
-    setEditCupo(egr.cupo_asignado || 4);
+  const abrirModalEditar = (e) => {
+    setModalEditarEgr(e);
+    setEditNombre(e.nombre_completo || '');
+    setEditDni(e.dni || '');
+    setEditCelular(e.celular || '');
+    setEditCupo(e.cupo_asignado || 4);
   };
 
   const guardarEdicionEgresado = async (e) => {
@@ -1325,20 +1545,16 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     if (!modalEditarEgr) return;
     setGuardandoEdicion(true);
     try {
-      const { error } = await supabase
-        .from('egresados')
-        .update({
-          nombre_completo: editNombre.trim().toUpperCase(),
-          dni: sanitizeDNI(editDni),
-          celular: editCelular.trim(),
-          cupo_asignado: Number(editCupo)
-        })
-        .eq('id', modalEditarEgr.id);
-
-      if (error) throw error;
-      notify('Datos del egresado actualizados correctamente.');
+      await supabase.from('egresados').update({
+        nombre_completo: editNombre.trim().toUpperCase(),
+        dni: sanitizeDNI(editDni),
+        celular: editCelular.trim(),
+        cupo_asignado: Number(editCupo)
+      }).eq('id', modalEditarEgr.id);
+      await registrarLog('EDITAR', 'Egresados', `Se editó el egresado ${editNombre.trim().toUpperCase()}`);
       setModalEditarEgr(null);
       await recargar();
+      notify('Egresado actualizado correctamente.');
     } catch (err) {
       notify('Error al actualizar: ' + err.message, 'error');
     } finally {
@@ -1346,10 +1562,10 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     }
   };
 
-  const abrirModalEditarDocente = (doc) => {
-    setModalEditarDoc(doc);
-    setEditDocNombre(doc.nombre_completo || '');
-    setEditDocDni(doc.dni || '');
+  const abrirModalEditarDocente = (d) => {
+    setModalEditarDoc(d);
+    setEditDocNombre(d.nombre_completo || '');
+    setEditDocDni(d.dni || '');
   };
 
   const guardarEdicionDocente = async (e) => {
@@ -1357,18 +1573,14 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     if (!modalEditarDoc) return;
     setGuardandoDocente(true);
     try {
-      const { error } = await supabase
-        .from('docentes')
-        .update({
-          nombre_completo: editDocNombre.trim().toUpperCase(),
-          dni: sanitizeDNI(editDocDni)
-        })
-        .eq('id', modalEditarDoc.id);
-
-      if (error) throw error;
-      notify('Docente actualizado correctamente.');
+      await supabase.from('docentes').update({
+        nombre_completo: editDocNombre.trim().toUpperCase(),
+        dni: sanitizeDNI(editDocDni)
+      }).eq('id', modalEditarDoc.id);
+      await registrarLog('EDITAR', 'Docentes', `Se editó el docente ${editDocNombre.trim().toUpperCase()}`);
       setModalEditarDoc(null);
       await recargar();
+      notify('Docente actualizado correctamente.');
     } catch (err) {
       notify('Error al actualizar docente: ' + err.message, 'error');
     } finally {
@@ -1376,10 +1588,10 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     }
   };
 
-  const abrirModalEditarVip = (vip) => {
-    setModalEditarVip(vip);
-    setEditVipNombre(vip.nombre_completo || '');
-    setEditVipDni(vip.dni || '');
+  const abrirModalEditarVip = (v) => {
+    setModalEditarVip(v);
+    setEditVipNombre(v.nombre_completo || '');
+    setEditVipDni(v.dni || '');
   };
 
   const guardarEdicionVip = async (e) => {
@@ -1387,18 +1599,14 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     if (!modalEditarVip) return;
     setGuardandoVip(true);
     try {
-      const { error } = await supabase
-        .from('invitados_especiales')
-        .update({
-          nombre_completo: editVipNombre.trim().toUpperCase(),
-          dni: sanitizeDNI(editVipDni) || null
-        })
-        .eq('id', modalEditarVip.id);
-
-      if (error) throw error;
-      notify('Invitado VIP actualizado correctamente.');
+      await supabase.from('invitados_especiales').update({
+        nombre_completo: editVipNombre.trim().toUpperCase(),
+        dni: editVipDni ? sanitizeDNI(editVipDni) : null
+      }).eq('id', modalEditarVip.id);
+      await registrarLog('EDITAR', 'VIP', `Se editó el VIP ${editVipNombre.trim().toUpperCase()}`);
       setModalEditarVip(null);
       await recargar();
+      notify('Invitado VIP actualizado correctamente.');
     } catch (err) {
       notify('Error al actualizar VIP: ' + err.message, 'error');
     } finally {
@@ -1406,74 +1614,25 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     }
   };
 
-  const cambiarEtapaGlobal = async (nuevaEtapa) => {
-    if (config.id) {
-      await supabase.from('configuracion').update({ estado_etapa: nuevaEtapa }).eq('id', config.id);
-    } else {
-      await supabase.from('configuracion').insert({ estado_etapa: nuevaEtapa, cupo_base: CUPO_BASE_DEFECTO });
-    }
-    await recargar();
-    notify(`Etapa actualizada a: ${nuevaEtapa.toUpperCase()}`);
-  };
-
-  const handleImportarCSVEgresados = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const resolverSolicitud = async (sol, aprobar) => {
     try {
-      const text = await file.text();
-      const rows = parseCSV(text);
-      const registros = rows.map((r) => ({
-        dni: sanitizeDNI(r[0]),
-        nombre_completo: (r[1] || '').toUpperCase(),
-        cupo_asignado: config.cupo_base || CUPO_BASE_DEFECTO,
-        cerrado: false,
-      })).filter(x => x.dni.length >= 7 && x.nombre_completo);
+      const nuevoEstado = aprobar ? 'aprobada' : 'rechazada';
+      await supabase.from('solicitudes_butacas').update({ estado: nuevoEstado }).eq('id', sol.id);
 
-      await supabase.from('egresados').upsert(registros, { onConflict: 'dni' });
+      if (aprobar) {
+        const egr = egresados.find((e) => e.id === sol.egresado_id);
+        if (egr) {
+          const cupoActual = Number(egr.cupo_asignado) || 4;
+          const nuevoCupo = cupoActual + Number(sol.cantidad_solicitada);
+          await supabase.from('egresados').update({ cupo_asignado: nuevoCupo }).eq('id', egr.id);
+        }
+      }
+
+      await registrarLog('SOLICITUD', 'Butacas', `Se ${nuevoEstado} la solicitud de butacas para ${sol.egresado_nombre}`);
       await recargar();
-      notify(`Importados ${registros.length} egresados.`);
+      notify(`Solicitud ${nuevoEstado} con éxito.`);
     } catch (err) {
-      notify('Error importando CSV: ' + err.message, 'error');
-    }
-  };
-
-  const handleImportarCSVDocentes = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const text = await file.text();
-      const rows = parseCSV(text);
-      const registros = rows.map((r) => ({
-        dni: sanitizeDNI(r[0]),
-        nombre_completo: (r[1] || '').toUpperCase(),
-        asistio: false,
-      })).filter(x => x.dni.length >= 7 && x.nombre_completo);
-
-      await supabase.from('docentes').upsert(registros, { onConflict: 'dni' });
-      await recargar();
-      notify(`Importados ${registros.length} docentes.`);
-    } catch (err) {
-      notify('Error importando CSV Docentes: ' + err.message, 'error');
-    }
-  };
-
-  const handleImportarCSVVips = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const text = await file.text();
-      const rows = parseCSV(text);
-      const registros = rows.map((r) => ({
-        dni: sanitizeDNI(r[0]),
-        nombre_completo: (r[1] || '').toUpperCase(),
-        asistio: false,
-      })).filter(x => x.nombre_completo);
-
-      await supabase.from('invitados_especiales').upsert(registros, { onConflict: 'dni' });
-      await recargar();
-      notify(`Importados ${registros.length} invitados VIP.`);
-    } catch (err) {
-      notify('Error importando CSV VIP: ' + err.message, 'error');
+      notify('Error al procesar solicitud: ' + err.message, 'error');
     }
   };
 
@@ -1483,6 +1642,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     try {
       await supabase.from('invitados').delete().neq('id', '00000000-0000-0000-0000-000000000000');
       await supabase.from('egresados').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      await registrarLog('VACIAR', 'Egresados', 'Se vació todo el padrón de egresados e invitados.');
       await recargar();
       notify('Padrón de egresados vaciado correctamente.');
     } catch (err) {
@@ -1495,6 +1655,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     if (resp !== 'VACIAR') return;
     try {
       await supabase.from('docentes').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      await registrarLog('VACIAR', 'Docentes', 'Se vació todo el padrón de docentes.');
       await recargar();
       notify('Padrón de docentes vaciado correctamente.');
     } catch (err) {
@@ -1507,6 +1668,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     if (resp !== 'VACIAR') return;
     try {
       await supabase.from('invitados_especiales').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      await registrarLog('VACIAR', 'VIP', 'Se vació todo el padrón VIP.');
       await recargar();
       notify('Padrón VIP vaciado correctamente.');
     } catch (err) {
@@ -1514,17 +1676,13 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     }
   };
 
-  const resolverSolicitud = async (sol, aprobar) => {
-    if (aprobar) {
-      const egr = egresados.find((e) => e.id === sol.egresado_id);
-      if (egr) {
-        await supabase.from('egresados').update({ cupo_asignado: Number(egr.cupo_asignado) + Number(sol.cantidad_solicitada) }).eq('id', egr.id);
-      }
-    }
-    await supabase.from('solicitudes_butacas').update({ estado: aprobar ? 'aprobada' : 'rechazada' }).eq('id', sol.id);
-    await recargar();
-    notify(aprobar ? 'Solicitud aprobada y cupo asignado.' : 'Solicitud rechazada.');
-  };
+  const totalFilas = config.filas || 15;
+  const butacasPorFila = config.butacas_por_fila || 35;
+
+  const egresadosPresentesCount = egresados.filter(e => e.asistio).length;
+  const docentesPresentesCount = docentes.filter(d => d.asistio).length;
+  const vipsPresentesCount = especiales.filter(v => v.asistio).length;
+  const porcentajeAsistencia = egresados.length > 0 ? Math.round((egresadosPresentesCount / egresados.length) * 100) : 0;
 
   const egresadosFiltrados = egresados.filter((e) =>
     (e.nombre_completo || '').toLowerCase().includes(filtroEgresado.toLowerCase()) ||
@@ -1541,35 +1699,12 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     (v.dni || '').includes(filtroVip)
   );
 
-  const listaDocentesCeremonial = docentes.filter(d => {
-    const match = (d.nombre_completo || '').toLowerCase().includes(busquedaCeremonial.toLowerCase()) || (d.dni || '').includes(busquedaCeremonial);
-    if (filtroCeremonial === 'PRESENTES') return match && d.asistio;
-    if (filtroCeremonial === 'PENDIENTES') return match && !d.asistio;
-    return match;
-  });
-
-  const listaVipsCeremonial = especiales.filter(v => {
-    const match = (v.nombre_completo || '').toLowerCase().includes(busquedaCeremonial.toLowerCase()) || (v.dni || '').includes(busquedaCeremonial);
-    if (filtroCeremonial === 'PRESENTES') return match && v.asistio;
-    if (filtroCeremonial === 'PENDIENTES') return match && !v.asistio;
-    return match;
-  });
-
-  const listaEgresadosCeremonial = egresados.filter(e => {
-    const match = (e.nombre_completo || '').toLowerCase().includes(busquedaCeremonial.toLowerCase()) || (e.dni || '').includes(busquedaCeremonial);
-    if (filtroCeremonial === 'PRESENTES') return match && e.asistio;
-    if (filtroCeremonial === 'PENDIENTES') return match && !e.asistio;
-    return match;
-  });
-
-  const docentesPresentesCount = docentes.filter(d => d.asistio).length;
-  const vipsPresentesCount = especiales.filter(v => v.asistio).length;
-  const egresadosPresentesCount = egresados.filter(e => e.asistio).length;
-  const porcentajeAsistencia = Math.round((egresadosPresentesCount / (egresados.length || 1)) * 100);
-
-  // Construcción del Mapa de Sala por filas y butacas
-  const totalFilas = Number(config.filas) || 15;
-  const butacasPorFila = Number(config.butacas_por_fila) || 35;
+  const logsFiltrados = logsSistema.filter((l) =>
+    (l.usuario || '').toLowerCase().includes(filtroLogBusqueda.toLowerCase()) ||
+    (l.accion || '').toLowerCase().includes(filtroLogBusqueda.toLowerCase()) ||
+    (l.modulo || '').toLowerCase().includes(filtroLogBusqueda.toLowerCase()) ||
+    (l.detalle || '').toLowerCase().includes(filtroLogBusqueda.toLowerCase())
+  );
 
   return (
     <div className="space-y-6">
@@ -1588,21 +1723,45 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
           <p className="text-xs font-bold uppercase text-slate-500">Etapa Global de Carga</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={() => cambiarEtapaGlobal('abierta')} className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${config.estado_etapa === 'abierta' ? 'bg-[#6B1D2F] text-white shadow' : 'bg-slate-100 text-slate-700'}`}>Abierta</button>
-          <button onClick={() => cambiarEtapaGlobal('cierre_parcial')} className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${config.estado_etapa === 'cierre_parcial' ? 'bg-amber-600 text-white shadow' : 'bg-slate-100 text-slate-700'}`}>Cierre Parcial</button>
-          <button onClick={() => cambiarEtapaGlobal('cierre_definitivo')} className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${config.estado_etapa === 'cierre_definitivo' ? 'bg-rose-600 text-white shadow' : 'bg-slate-100 text-slate-700'}`}>Definitivo</button>
+          <button onClick={() => cambiarEtapaGlobalDirecto('abierta')} className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${config.estado_etapa === 'abierta' ? 'bg-[#6B1D2F] text-white shadow' : 'bg-slate-100 text-slate-700'}`}>Abierta</button>
+          <button onClick={() => cambiarEtapaGlobalConAdvertencia('cierre_parcial')} className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${config.estado_etapa === 'cierre_parcial' ? 'bg-amber-600 text-white shadow' : 'bg-slate-100 text-slate-700'}`}>Cierre Parcial</button>
+          <button onClick={() => cambiarEtapaGlobalDirecto('cierre_definitivo')} className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${config.estado_etapa === 'cierre_definitivo' ? 'bg-rose-600 text-white shadow' : 'bg-slate-100 text-slate-700'}`}>Definitivo</button>
         </div>
       </div>
 
+      {/* Modal de Advertencia para Cierre Parcial */}
+      {modalCierreParcialAbierto && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden border p-6 space-y-4">
+            <div className="flex items-center gap-3 text-amber-600">
+              <AlertTriangle className="w-8 h-8 shrink-0" />
+              <h3 className="text-lg font-extrabold text-slate-900">⚠️ Advertencia de Cierre Parcial</h3>
+            </div>
+            <p className="text-sm text-slate-700 leading-relaxed">
+              Al activar la etapa de <b>Cierre Parcial</b>, ocurrirán los siguientes cambios operativos en el sistema:
+            </p>
+            <ul className="list-disc pl-5 text-xs text-slate-600 space-y-1.5">
+              <li>Los egresados ya <b>no podrán modificar ni editar</b> el padrón de sus invitados base ya cargados.</li>
+              <li>Se habilitará de manera exclusiva la gestión y aprobación de <b>butacas extra/plus</b> desde la bandeja de solicitudes.</li>
+              <li>Podrás notificar por WhatsApp a los alumnos beneficiados para que vuelvan a ingresar al portal y completen sus cupos adicionales.</li>
+            </ul>
+            <div className="flex gap-3 pt-3 border-t">
+              <button onClick={() => setModalCierreParcialAbierto(false)} className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer">Cancelar</button>
+              <button onClick={() => cambiarEtapaGlobalDirecto('cierre_parcial')} className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shadow cursor-pointer">Entendido, Activar Cierre Parcial</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-wrap gap-2">
-        <button onClick={() => setTab('egresados')} className={`px-4 py-2 rounded-xl text-xs font-bold ${tab === 'egresados' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Egresados ({egresados.length})</button>
-        <button onClick={() => setTab('docentes')} className={`px-4 py-2 rounded-xl text-xs font-bold ${tab === 'docentes' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Docentes ({docentes.length})</button>
-        <button onClick={() => setTab('vip')} className={`px-4 py-2 rounded-xl text-xs font-bold ${tab === 'vip' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Invitados VIP ({especiales.length})</button>
-        <button onClick={() => setTab('solicitudes')} className={`px-4 py-2 rounded-xl text-xs font-bold ${tab === 'solicitudes' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Solicitudes Butacas ({solicitudes.length})</button>
-        <button onClick={() => setTab('reportes')} className={`px-4 py-2 rounded-xl text-xs font-bold ${tab === 'reportes' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Acreditación en Vivo</button>
-        <button onClick={() => setTab('aforo')} className={`px-4 py-2 rounded-xl text-xs font-bold ${tab === 'aforo' ? 'bg-indigo-700 text-white shadow' : 'bg-white border'}`}>⚙️ Aforo y Sala</button>
+        <button onClick={() => setTab('egresados')} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === 'egresados' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Egresados ({egresados.length})</button>
+        <button onClick={() => setTab('docentes')} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === 'docentes' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Docentes ({docentes.length})</button>
+        <button onClick={() => setTab('vip')} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === 'vip' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Invitados VIP ({especiales.length})</button>
+        <button onClick={() => setTab('solicitudes')} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === 'solicitudes' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Solicitudes Butacas ({solicitudes.length})</button>
+        <button onClick={() => setTab('reportes')} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === 'reportes' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Acreditación en Vivo</button>
+        <button onClick={() => setTab('aforo')} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === 'aforo' ? 'bg-indigo-700 text-white shadow' : 'bg-white border'}`}>⚙️ Aforo y Sala</button>
         {perfilStaff?.rol === 'admin' && (
-          <button onClick={() => setTab('usuarios')} className={`px-4 py-2 rounded-xl text-xs font-bold ${tab === 'usuarios' ? 'bg-emerald-600 text-white' : 'bg-white border'}`}>Usuarios del Sistema ({usuariosSistema.length})</button>
+          <button onClick={() => setTab('usuarios')} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === 'usuarios' ? 'bg-emerald-600 text-white' : 'bg-white border'}`}>Usuarios del Sistema ({usuariosSistema.length})</button>
         )}
       </div>
 
@@ -1612,17 +1771,23 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
             <h3 className="font-bold">Padrón de Egresados</h3>
             <div className="flex flex-wrap gap-2">
               <button
+                onClick={() => exportarCSV('egresados')}
+                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow cursor-pointer"
+              >
+                <Download className="w-4 h-4" /> Exportar CSV
+              </button>
+              <button
                 onClick={() => setModalAgregarEgresado(true)}
-                className="px-3.5 py-2 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow"
+                className="px-3.5 py-2 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow cursor-pointer"
               >
                 <Plus className="w-4 h-4" /> Agregar Egresado
               </button>
               <input ref={fileEgrRef} type="file" accept=".csv,.txt" onChange={handleImportarCSVEgresados} className="hidden" />
-              <button onClick={() => fileEgrRef.current?.click()} className="px-3 py-2 bg-indigo-50 text-indigo-700 border rounded-xl text-xs font-bold flex items-center gap-1">
+              <button onClick={() => fileEgrRef.current?.click()} className="px-3 py-2 bg-indigo-50 text-indigo-700 border rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer">
                 <Upload className="w-4 h-4" /> Importar CSV
               </button>
               {egresados.length > 0 && (
-                <button onClick={vaciarPadronEgresados} className="px-3 py-2 bg-rose-50 text-rose-700 border rounded-xl text-xs font-bold flex items-center gap-1">
+                <button onClick={vaciarPadronEgresados} className="px-3 py-2 bg-rose-50 text-rose-700 border rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer">
                   <Trash2 className="w-4 h-4" /> Vaciar Padrón
                 </button>
               )}
@@ -1645,7 +1810,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
               const misInvitados = invitados.filter((i) => i.egresado_id === e.id);
               const numeroWp = e.celular ? e.celular.replace(/\D/g, '') : '';
               const linkWpAdicionales = numeroWp
-                ? `https://wa.me/549${numeroWp}?text=Hola%20${encodeURIComponent(e.nombre_completo)},%20te%20escribimos%20desde%20la%20ESRN%20N°%20005%20para%20recordarte%20que%20ya%20podes%20gestionar%20o%20solicitar%20butacas%20adicionales%20para%20la%20Colación%202026.`
+                ? `https://wa.me/549${numeroWp}?text=Hola%20${encodeURIComponent(e.nombre_completo)},%20tu%20solicitud%20fue%20aprobada.%20Por%20favor%20volvé%20a%20ingresar%20al%20portal%20con%20tu%20DNI%20para%20cargar%20tus%20invitados%20adicionales%20de%20la%20Colación%202026.`
                 : '';
 
               return (
@@ -1665,9 +1830,9 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                   <div className="flex flex-wrap items-center gap-2">
                     <button
                       onClick={() => abrirModalEditar(e)}
-                      className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-lg text-xs font-bold flex items-center gap-1"
+                      className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"
                     >
-                      <Edit2 className="w-3.5 h-3.5" /> Editar
+                      <Edit2 className="w-3.5 h-3.5" /> Editar y Descargar QR
                     </button>
 
                     {numeroWp && (
@@ -1675,10 +1840,10 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                         href={linkWpAdicionales}
                         target="_blank"
                         rel="noreferrer"
-                        className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-xs"
-                        title="Enviar WhatsApp"
+                        className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-xs cursor-pointer"
+                        title="Enviar WhatsApp para completar adicionales"
                       >
-                        <MessageCircle className="w-3.5 h-3.5" /> WhatsApp
+                        <MessageCircle className="w-3.5 h-3.5" /> Avisar WhatsApp
                       </a>
                     )}
 
@@ -1691,7 +1856,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                       await supabase.from('egresados').update({ activo: nuevoActivo }).eq('id', e.id);
                       await recargar();
                       notify(nuevoActivo ? 'Egresado reactivado.' : 'Egresado marcado como No Asiste.');
-                    }} className={`px-2.5 py-1 rounded text-xs font-semibold ${e.activo === false ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                    }} className={`px-2.5 py-1 rounded text-xs font-semibold cursor-pointer ${e.activo === false ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
                       {e.activo === false ? 'Reactivar' : 'Marcar No Asiste'}
                     </button>
                   </div>
@@ -1708,7 +1873,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
           <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl overflow-hidden border">
             <div className="bg-[#6B1D2F] text-white p-4 flex justify-between items-center">
               <h3 className="font-bold text-base">Agregar Nuevo Egresado</h3>
-              <button onClick={() => setModalAgregarEgresado(false)} className="p-1 rounded-lg text-white/80 hover:bg-white/10">
+              <button onClick={() => setModalAgregarEgresado(false)} className="p-1 rounded-lg text-white/80 hover:bg-white/10 cursor-pointer">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -1737,29 +1902,43 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                 />
               </div>
               <div className="flex gap-2 pt-3 border-t">
-                <button type="button" onClick={() => setModalAgregarEgresado(false)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold">Cancelar</button>
-                <button type="submit" className="flex-1 py-2.5 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold shadow">Guardar</button>
+                <button type="button" onClick={() => setModalAgregarEgresado(false)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold cursor-pointer">Cancelar</button>
+                <button type="submit" className="flex-1 py-2.5 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold shadow cursor-pointer">Guardar</button>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* MODAL EDITAR EGRESADO */}
+      {/* MODAL EDITAR EGRESADO Y DESCARGAR QR */}
       {modalEditarEgr && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl overflow-hidden border">
+          <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden border">
             <div className="bg-[#6B1D2F] text-white p-4 flex justify-between items-center">
               <div>
-                <h3 className="font-bold text-base">Editar Egresado y Acompañantes</h3>
-                <p className="text-xs text-rose-100">Modificá datos personales, celular y cupo.</p>
+                <h3 className="font-bold text-base">Editar Egresado y Descargar Pases QR</h3>
+                <p className="text-xs text-rose-100">Modificá datos y descargá los pases oficiales en 1080x1920.</p>
               </div>
-              <button onClick={() => setModalEditarEgr(null)} className="p-1.5 rounded-lg text-white/80 hover:bg-white/10">
+              <button onClick={() => setModalEditarEgr(null)} className="p-1.5 rounded-lg text-white/80 hover:bg-white/10 cursor-pointer">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={guardarEdicionEgresado} className="p-5 space-y-3.5">
+            <form onSubmit={guardarEdicionEgresado} className="p-5 space-y-3.5 max-h-[80vh] overflow-y-auto">
+              <div className="p-3 bg-slate-50 border rounded-xl flex items-center justify-between">
+                <div>
+                  <p className="font-bold text-sm text-slate-900">QR Personal del Egresado</p>
+                  <p className="text-[11px] text-slate-500">Descargar pase institucional para {modalEditarEgr.nombre_completo}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => descargarTarjetaAdmin1080x1920(modalEditarEgr.nombre_completo, `DNI: ${modalEditarEgr.dni}`, 'EGRESADO')}
+                  className="px-3.5 py-2 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow cursor-pointer shrink-0"
+                >
+                  <Download className="w-4 h-4" /> Descargar QR Egresado
+                </button>
+              </div>
+
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">Nombre y Apellido</label>
                 <input
@@ -1784,9 +1963,10 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Celular / WhatsApp de contacto</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Celular / WhatsApp de contacto <span className="text-rose-600">* Obligatorio</span></label>
                 <input
                   type="text"
+                  required
                   value={editCelular}
                   onChange={(e) => setEditCelular(e.target.value)}
                   placeholder="Ej: 2994444444"
@@ -1808,24 +1988,37 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
               </div>
 
               <div className="pt-2 border-t">
-                <p className="text-xs font-bold text-slate-700 mb-2">Invitados cargados actualmente:</p>
-                <div className="max-h-36 overflow-y-auto space-y-1.5 bg-slate-50 p-2 rounded-xl border text-xs">
+                <p className="text-xs font-bold text-slate-700 mb-2">Invitados cargados actualmente (con opción de descarga QR):</p>
+                <div className="max-h-44 overflow-y-auto space-y-2 bg-slate-50 p-2.5 rounded-xl border text-xs">
                   {invitados.filter((i) => i.egresado_id === modalEditarEgr.id).length === 0 ? (
                     <p className="text-slate-400 text-center py-2">Sin invitados cargados.</p>
                   ) : (
                     invitados.filter((i) => i.egresado_id === modalEditarEgr.id).map((inv, i) => (
-                      <div key={inv.id} className="flex justify-between items-center bg-white p-2 rounded border">
-                        <span><b>#{i+1}</b> {inv.nombre_completo} (DNI: {inv.dni})</span>
-                        <span className="font-mono font-bold text-slate-600">{inv.numero_entrada}</span>
+                      <div key={inv.id} className="flex justify-between items-center bg-white p-2.5 rounded-lg border shadow-xs gap-2">
+                        <div>
+                          <p className="font-bold text-slate-900"><b>#{i+1}</b> {inv.nombre_completo}</p>
+                          <p className="text-[11px] text-slate-500">DNI: {inv.dni} · <span className="font-mono">{inv.numero_entrada}</span></p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => descargarTarjetaAdmin1080x1920(inv.nombre_completo, `Invitado de ${modalEditarEgr.nombre_completo}`, inv.es_grupal !== false ? 'ACCESO GRUPAL' : 'ACCESO INDIVIDUAL')}
+                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-xs cursor-pointer shrink-0"
+                        >
+                          <Download className="w-3.5 h-3.5" /> Descargar QR
+                        </button>
                       </div>
                     ))
                   )}
                 </div>
               </div>
 
+              <div className="hidden" ref={adminQrRef}>
+                <QRCodeSVG value="ESRN005-ADMIN-QR-DUMMY" size={300} level="H" includeMargin={true} />
+              </div>
+
               <div className="flex gap-2 pt-3 border-t">
-                <button type="button" onClick={() => setModalEditarEgr(null)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold">Cancelar</button>
-                <button type="submit" disabled={guardandoEdicion} className="flex-1 py-2.5 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-xl text-xs font-bold shadow">
+                <button type="button" onClick={() => setModalEditarEgr(null)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold cursor-pointer">Cancelar</button>
+                <button type="submit" disabled={guardandoEdicion} className="flex-1 py-2.5 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-xl text-xs font-bold shadow cursor-pointer">
                   {guardandoEdicion ? 'Guardando...' : 'Guardar Cambios'}
                 </button>
               </div>
@@ -1840,17 +2033,23 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
             <h3 className="font-bold">Padrón de Docentes ({docentes.length})</h3>
             <div className="flex flex-wrap gap-2">
               <button
+                onClick={() => exportarCSV('docentes')}
+                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow cursor-pointer"
+              >
+                <Download className="w-4 h-4" /> Exportar CSV
+              </button>
+              <button
                 onClick={() => setModalAgregarDocente(true)}
-                className="px-3.5 py-2 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow"
+                className="px-3.5 py-2 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow cursor-pointer"
               >
                 <Plus className="w-4 h-4" /> Agregar Docente
               </button>
               <input ref={fileDocRef} type="file" accept=".csv,.txt" onChange={handleImportarCSVDocentes} className="hidden" />
-              <button onClick={() => fileDocRef.current?.click()} className="px-3 py-2 bg-indigo-50 text-indigo-700 border rounded-xl text-xs font-bold flex items-center gap-1">
+              <button onClick={() => fileDocRef.current?.click()} className="px-3 py-2 bg-indigo-50 text-indigo-700 border rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer">
                 <Upload className="w-4 h-4" /> Importar CSV
               </button>
               {docentes.length > 0 && (
-                <button onClick={vaciarPadronDocentes} className="px-3 py-2 bg-rose-50 text-rose-700 border rounded-xl text-xs font-bold flex items-center gap-1">
+                <button onClick={vaciarPadronDocentes} className="px-3 py-2 bg-rose-50 text-rose-700 border rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer">
                   <Trash2 className="w-4 h-4" /> Vaciar Padrón
                 </button>
               )}
@@ -1881,9 +2080,9 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => abrirModalEditarDocente(d)}
-                      className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-lg text-xs font-bold flex items-center gap-1"
+                      className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"
                     >
-                      <Edit2 className="w-3 h-3" /> Editar
+                      <Edit2 className="w-3 h-3" /> Editar y Descargar QR
                     </button>
 
                     <button onClick={async () => {
@@ -1891,7 +2090,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                       await supabase.from('docentes').update({ activo: nuevoActivo }).eq('id', d.id);
                       await recargar();
                       notify(nuevoActivo ? 'Docente reactivado.' : 'Docente marcado como No Asiste.');
-                    }} className={`px-2.5 py-1 rounded text-xs font-semibold ${d.activo === false ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                    }} className={`px-2.5 py-1 rounded text-xs font-semibold cursor-pointer ${d.activo === false ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
                       {d.activo === false ? 'Reactivar' : 'Marcar No Asiste'}
                     </button>
                   </div>
@@ -1908,7 +2107,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
           <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl overflow-hidden border">
             <div className="bg-[#6B1D2F] text-white p-4 flex justify-between items-center">
               <h3 className="font-bold text-base">Agregar Nuevo Docente</h3>
-              <button onClick={() => setModalAgregarDocente(false)} className="p-1 rounded-lg text-white/80 hover:bg-white/10">
+              <button onClick={() => setModalAgregarDocente(false)} className="p-1 rounded-lg text-white/80 hover:bg-white/10 cursor-pointer">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -1937,29 +2136,43 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                 />
               </div>
               <div className="flex gap-2 pt-3 border-t">
-                <button type="button" onClick={() => setModalAgregarDocente(false)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold">Cancelar</button>
-                <button type="submit" className="flex-1 py-2.5 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold shadow">Guardar</button>
+                <button type="button" onClick={() => setModalAgregarDocente(false)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold cursor-pointer">Cancelar</button>
+                <button type="submit" className="flex-1 py-2.5 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold shadow cursor-pointer">Guardar</button>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* MODAL EDITAR DOCENTE */}
+      {/* MODAL EDITAR DOCENTE Y DESCARGAR QR */}
       {modalEditarDoc && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl overflow-hidden border">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl overflow-hidden border">
             <div className="bg-[#6B1D2F] text-white p-4 flex justify-between items-center">
               <div>
-                <h3 className="font-bold text-base">Editar Docente</h3>
-                <p className="text-xs text-rose-100">Actualizar datos institucionales.</p>
+                <h3 className="font-bold text-base">Editar Docente y Descargar QR</h3>
+                <p className="text-xs text-rose-100">Actualizar datos y descargar pase oficial.</p>
               </div>
-              <button onClick={() => setModalEditarDoc(null)} className="p-1.5 rounded-lg text-white/80 hover:bg-white/10">
+              <button onClick={() => setModalEditarDoc(null)} className="p-1.5 rounded-lg text-white/80 hover:bg-white/10 cursor-pointer">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={guardarEdicionDocente} className="p-5 space-y-3.5">
+            <form onSubmit={guardarEdicionDocente} className="p-5 space-y-4">
+              <div className="p-3 bg-slate-50 border rounded-xl flex items-center justify-between">
+                <div>
+                  <p className="font-bold text-sm text-slate-900">QR Oficial del Docente</p>
+                  <p className="text-[11px] text-slate-500">Descargar pase institucional en 1080x1920</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => descargarTarjetaAdmin1080x1920(modalEditarDoc.nombre_completo, `DNI: ${modalEditarDoc.dni}`, 'DOCENTE')}
+                  className="px-3.5 py-2 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow cursor-pointer shrink-0"
+                >
+                  <Download className="w-4 h-4" /> Descargar QR
+                </button>
+              </div>
+
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">Nombre y Apellido</label>
                 <input
@@ -1983,9 +2196,13 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                 />
               </div>
 
+              <div className="hidden" ref={adminQrRef}>
+                <QRCodeSVG value="ESRN005-ADMIN-QR-DUMMY" size={300} level="H" includeMargin={true} />
+              </div>
+
               <div className="flex gap-2 pt-3 border-t">
-                <button type="button" onClick={() => setModalEditarDoc(null)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold hover:bg-slate-50">Cancelar</button>
-                <button type="submit" disabled={guardandoDocente} className="flex-1 py-2.5 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-xl text-xs font-bold shadow">
+                <button type="button" onClick={() => setModalEditarDoc(null)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold hover:bg-slate-50 cursor-pointer">Cancelar</button>
+                <button type="submit" disabled={guardandoDocente} className="flex-1 py-2.5 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-xl text-xs font-bold shadow cursor-pointer">
                   {guardandoDocente ? 'Guardando...' : 'Guardar Cambios'}
                 </button>
               </div>
@@ -2001,17 +2218,23 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
             <h3 className="font-bold">Padrón de Invitados VIP / Autoridades ({especiales.length})</h3>
             <div className="flex flex-wrap gap-2">
               <button
+                onClick={() => exportarCSV('vip')}
+                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow cursor-pointer"
+              >
+                <Download className="w-4 h-4" /> Exportar CSV
+              </button>
+              <button
                 onClick={() => setModalAgregarVip(true)}
-                className="px-3.5 py-2 bg-amber-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow"
+                className="px-3.5 py-2 bg-amber-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow cursor-pointer"
               >
                 <Plus className="w-4 h-4" /> Agregar Invitado VIP
               </button>
               <input ref={fileVipRef} type="file" accept=".csv,.txt" onChange={handleImportarCSVVips} className="hidden" />
-              <button onClick={() => fileVipRef.current?.click()} className="px-3 py-2 bg-indigo-50 text-indigo-700 border rounded-xl text-xs font-bold flex items-center gap-1">
+              <button onClick={() => fileVipRef.current?.click()} className="px-3 py-2 bg-indigo-50 text-indigo-700 border rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer">
                 <Upload className="w-4 h-4" /> Importar CSV
               </button>
               {especiales.length > 0 && (
-                <button onClick={vaciarPadronVip} className="px-3 py-2 bg-rose-50 text-rose-700 border rounded-xl text-xs font-bold flex items-center gap-1">
+                <button onClick={vaciarPadronVip} className="px-3 py-2 bg-rose-50 text-rose-700 border rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer">
                   <Trash2 className="w-4 h-4" /> Vaciar Padrón
                 </button>
               )}
@@ -2042,9 +2265,9 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => abrirModalEditarVip(v)}
-                      className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-lg text-xs font-bold flex items-center gap-1"
+                      className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"
                     >
-                      <Edit2 className="w-3 h-3" /> Editar
+                      <Edit2 className="w-3 h-3" /> Editar y Descargar QR
                     </button>
 
                     <button onClick={async () => {
@@ -2052,7 +2275,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                       await supabase.from('invitados_especiales').update({ activo: nuevoActivo }).eq('id', v.id);
                       await recargar();
                       notify(nuevoActivo ? 'VIP reactivado.' : 'VIP marcado como No Asiste.');
-                    }} className={`px-2.5 py-1 rounded text-xs font-semibold ${v.activo === false ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                    }} className={`px-2.5 py-1 rounded text-xs font-semibold cursor-pointer ${v.activo === false ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
                       {v.activo === false ? 'Reactivar' : 'Marcar No Asiste'}
                     </button>
                   </div>
@@ -2069,7 +2292,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
           <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl overflow-hidden border">
             <div className="bg-amber-600 text-white p-4 flex justify-between items-center">
               <h3 className="font-bold text-base">Agregar Invitado VIP</h3>
-              <button onClick={() => setModalAgregarVip(false)} className="p-1 rounded-lg text-white/80 hover:bg-white/10">
+              <button onClick={() => setModalAgregarVip(false)} className="p-1 rounded-lg text-white/80 hover:bg-white/10 cursor-pointer">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -2097,29 +2320,43 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                 />
               </div>
               <div className="flex gap-2 pt-3 border-t">
-                <button type="button" onClick={() => setModalAgregarVip(false)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold">Cancelar</button>
-                <button type="submit" className="flex-1 py-2.5 bg-amber-600 text-white rounded-xl text-xs font-bold shadow">Guardar</button>
+                <button type="button" onClick={() => setModalAgregarVip(false)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold cursor-pointer">Cancelar</button>
+                <button type="submit" className="flex-1 py-2.5 bg-amber-600 text-white rounded-xl text-xs font-bold shadow cursor-pointer">Guardar</button>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* MODAL EDITAR VIP */}
+      {/* MODAL EDITAR VIP Y DESCARGAR QR */}
       {modalEditarVip && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl overflow-hidden border">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl overflow-hidden border">
             <div className="bg-amber-600 text-white p-4 flex justify-between items-center">
               <div>
-                <h3 className="font-bold text-base">Editar Invitado VIP</h3>
-                <p className="text-xs text-amber-100">Actualizar datos institucionales.</p>
+                <h3 className="font-bold text-base">Editar Invitado VIP y Descargar QR</h3>
+                <p className="text-xs text-amber-100">Actualizar datos y descargar pase oficial.</p>
               </div>
-              <button onClick={() => setModalEditarVip(null)} className="p-1.5 rounded-lg text-white/80 hover:bg-white/10">
+              <button onClick={() => setModalEditarVip(null)} className="p-1.5 rounded-lg text-white/80 hover:bg-white/10 cursor-pointer">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={guardarEdicionVip} className="p-5 space-y-3.5">
+            <form onSubmit={guardarEdicionVip} className="p-5 space-y-4">
+              <div className="p-3 bg-slate-50 border rounded-xl flex items-center justify-between">
+                <div>
+                  <p className="font-bold text-sm text-slate-900">QR Oficial del Invitado VIP</p>
+                  <p className="text-[11px] text-slate-500">Descargar pase institucional en 1080x1920</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => descargarTarjetaAdmin1080x1920(modalEditarVip.nombre_completo, modalEditarVip.dni ? `DNI: ${modalEditarVip.dni}` : 'Autoridad / Invitado Especial', 'INVITADO VIP')}
+                  className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow cursor-pointer shrink-0"
+                >
+                  <Download className="w-4 h-4" /> Descargar QR
+                </button>
+              </div>
+
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">Nombre y Apellido</label>
                 <input
@@ -2142,9 +2379,13 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                 />
               </div>
 
+              <div className="hidden" ref={adminQrRef}>
+                <QRCodeSVG value="ESRN005-ADMIN-QR-DUMMY" size={300} level="H" includeMargin={true} />
+              </div>
+
               <div className="flex gap-2 pt-3 border-t">
-                <button type="button" onClick={() => setModalEditarVip(null)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold hover:bg-slate-50">Cancelar</button>
-                <button type="submit" disabled={guardandoVip} className="flex-1 py-2.5 bg-amber-600 hover:bg-opacity-90 text-white rounded-xl text-xs font-bold shadow">
+                <button type="button" onClick={() => setModalEditarVip(null)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold hover:bg-slate-50 cursor-pointer">Cancelar</button>
+                <button type="submit" disabled={guardandoVip} className="flex-1 py-2.5 bg-amber-600 hover:bg-opacity-90 text-white rounded-xl text-xs font-bold shadow cursor-pointer">
                   {guardandoVip ? 'Guardando...' : 'Guardar Cambios'}
                 </button>
               </div>
@@ -2153,486 +2394,134 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
         </div>
       )}
 
-      {/* SECCIÓN SOLICITUD DE BUTACAS */}
       {tab === 'solicitudes' && (
-        <div className="bg-white rounded-2xl border p-5 space-y-4">
-          <div className="border-b pb-3">
-            <h3 className="font-bold text-base text-[#6B1D2F]">Bandeja de Solicitudes de Butacas Extra</h3>
-            <p className="text-xs text-slate-500">Aprobá o rechazá las peticiones de lugares adicionales de los egresados.</p>
-          </div>
-
-          <div className="max-h-96 overflow-y-auto space-y-3">
-            {solicitudes.length === 0 ? (
-              <p className="text-center text-slate-400 py-8">No hay solicitudes de butacas pendientes.</p>
-            ) : (
-              solicitudes.map((s) => {
-                const egr = egresados.find((e) => e.id === s.egresado_id);
-                const numeroWp = egr?.celular ? egr.celular.replace(/\D/g, '') : '';
-                const linkWpAprobado = numeroWp
-                  ? `https://wa.me/549${numeroWp}?text=Hola%20${encodeURIComponent(s.egresado_nombre)},%20tu%20solicitud%20de%20+${s.cantidad_solicitada}%20butaca(s)%20extra%20para%20la%20Colación%202026%20fue%20APROBADA.%20Ya%20podes%20ingresar%20al%20portal%20a%20cargar%20a%20tus%20invitados.`
-                  : '';
-
-                return (
-                  <div key={s.id} className="p-4 border rounded-2xl flex flex-wrap justify-between items-center gap-3 bg-slate-50/50">
-                    <div>
-                      <p className="font-bold text-sm text-slate-900">{s.egresado_nombre} <span className="text-indigo-600 font-extrabold">(+{s.cantidad_solicitada} butacas)</span></p>
-                      <p className="text-xs text-slate-500">DNI: {s.egresado_dni} · Motivo: <i>{s.observacion || 'Sin observación'}</i></p>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      {s.estado === 'pendiente' ? (
-                        <>
-                          <button
-                            onClick={() => resolverSolicitud(s, true)}
-                            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs"
-                          >
-                            ✓ Aprobar y Asignar
-                          </button>
-                          <button
-                            onClick={() => resolverSolicitud(s, false)}
-                            className="px-3.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold"
-                          >
-                            Rechazar
-                          </button>
-                        </>
-                      ) : (
-                        <div className="flex items-center gap-2">
-                          <span className={`px-3 py-1 rounded-full font-bold uppercase text-xs ${s.estado === 'aprobada' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
-                            {s.estado}
-                          </span>
-                          {s.estado === 'aprobada' && numeroWp && (
-                            <a
-                              href={linkWpAprobado}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-xs"
-                            >
-                              <MessageCircle className="w-3.5 h-3.5" /> Notificar WhatsApp
-                            </a>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
+        <div className="bg-white rounded-2xl border p-5 space-y-3">
+          <h3 className="font-bold">Bandeja de Solicitudes</h3>
+          {solicitudes.map((s) => (
+            <div key={s.id} className="p-3 border rounded-xl flex justify-between items-center">
+              <div>
+                <p className="font-bold text-sm">{s.egresado_nombre} (+{s.cantidad_solicitada})</p>
+                <p className="text-xs text-slate-500">{s.observacion}</p>
+              </div>
+              {s.estado === 'pendiente' ? (
+                <div className="flex gap-2">
+                  <button onClick={() => resolverSolicitud(s, true)} className="px-3 py-1 bg-emerald-600 text-white rounded text-xs font-bold cursor-pointer">Aprobar</button>
+                  <button onClick={() => resolverSolicitud(s, false)} className="px-3 py-1 bg-rose-100 text-rose-700 rounded text-xs font-bold cursor-pointer">Rechazar</button>
+                </div>
+              ) : (
+                <span className="text-xs font-bold uppercase">{s.estado}</span>
+              )}
+            </div>
+          ))}
         </div>
       )}
 
       {tab === 'reportes' && (
-        <div className="bg-white rounded-2xl border p-5 space-y-5">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4">
-            <div>
-              <h3 className="font-bold text-base text-[#6B1D2F]">Acreditación en Vivo — Ceremonial</h3>
-              <p className="text-xs text-slate-500">Control en tiempo real de asistencia por categoría.</p>
-            </div>
-            <div className="flex items-center gap-2 bg-slate-100 p-2 rounded-xl text-xs font-bold">
-              <span>Asistencia Egresados:</span>
-              <span className="text-emerald-700 font-mono text-sm">{porcentajeAsistencia}% ({egresadosPresentesCount}/{egresados.length})</span>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200">
-              <p className="text-[11px] text-emerald-700 font-bold">Egresados Presentes</p>
-              <p className="text-xl font-extrabold text-emerald-900">{egresadosPresentesCount} / {egresados.length}</p>
-            </div>
-            <div className="p-3.5 rounded-xl bg-sky-50 border border-sky-200">
-              <p className="text-[11px] text-sky-700 font-bold">Familiares Ingresados</p>
-              <p className="text-xl font-extrabold text-sky-900">{invitados.filter(i => i.asistio).length} / {invitados.length}</p>
-            </div>
-            <div className="p-3.5 rounded-xl bg-indigo-50 border border-indigo-200">
-              <p className="text-[11px] text-indigo-700 font-bold">Docentes Presentes</p>
-              <p className="text-xl font-extrabold text-indigo-900">{docentesPresentesCount} / {docentes.length}</p>
-            </div>
-            <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200">
-              <p className="text-[11px] text-amber-700 font-bold">VIP / Autoridades</p>
-              <p className="text-xl font-extrabold text-amber-900">{vipsPresentesCount} / {especiales.length}</p>
-            </div>
-          </div>
-
-          <div className="flex flex-col sm:flex-row gap-3 items-center justify-between pt-2">
-            <div className="flex gap-1.5 w-full sm:w-auto">
-              <button onClick={() => setTipoCeremonial('docentes')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${tipoCeremonial === 'docentes' ? 'bg-[#6B1D2F] text-white shadow' : 'bg-slate-100 text-slate-700'}`}>📚 Docentes ({docentes.length})</button>
-              <button onClick={() => setTipoCeremonial('vip')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${tipoCeremonial === 'vip' ? 'bg-amber-600 text-white shadow' : 'bg-slate-100 text-slate-700'}`}>⭐ Invitados VIP ({especiales.length})</button>
-              <button onClick={() => setTipoCeremonial('egresados')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${tipoCeremonial === 'egresados' ? 'bg-indigo-600 text-white shadow' : 'bg-slate-100 text-slate-700'}`}>🎓 Egresados ({egresados.length})</button>
-            </div>
-
-            <div className="flex gap-1.5 w-full sm:w-auto">
-              {['TODOS', 'PRESENTES', 'PENDIENTES'].map((f) => (
-                <button
-                  key={f}
-                  onClick={() => setFiltroCeremonial(f)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${
-                    filtroCeremonial === f ? 'bg-[#6B1D2F] text-white border-[#6B1D2F]' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'
-                  }`}
-                >
-                  {f}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="relative">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-            <input
-              type="text"
-              placeholder={`Buscar en ${tipoCeremonial} por nombre o DNI...`}
-              value={busquedaCeremonial}
-              onChange={(e) => setBusquedaCeremonial(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 rounded-xl border text-xs outline-none focus:border-[#6B1D2F]"
-            />
-          </div>
-
-          <div className="max-h-96 overflow-y-auto border rounded-xl divide-y text-xs">
-            {tipoCeremonial === 'docentes' && (
-              listaDocentesCeremonial.length === 0 ? (
-                <p className="text-center text-slate-400 py-8">No se encontraron docentes con los filtros seleccionados.</p>
-              ) : (
-                listaDocentesCeremonial.map((d) => (
-                  <div key={d.id} className="p-3 flex items-center justify-between hover:bg-slate-50">
-                    <div>
-                      <p className="font-bold text-slate-900 text-sm">{d.nombre_completo}</p>
-                      <p className="text-slate-500">DNI: {d.dni} · <span className="text-indigo-600 font-bold uppercase">Docente</span></p>
-                    </div>
-                    <span className={`px-3 py-1 rounded-full font-bold uppercase ${d.asistio ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'}`}>
-                      {d.asistio ? '✓ Presente' : 'Pendiente'}
-                    </span>
-                  </div>
-                ))
-              )
-            )}
-
-            {tipoCeremonial === 'vip' && (
-              listaVipsCeremonial.length === 0 ? (
-                <p className="text-center text-slate-400 py-8">No se encontraron invitados VIP con los filtros seleccionados.</p>
-              ) : (
-                listaVipsCeremonial.map((v) => (
-                  <div key={v.id} className="p-3 flex items-center justify-between hover:bg-slate-50">
-                    <div>
-                      <p className="font-bold text-slate-900 text-sm">{v.nombre_completo}</p>
-                      <p className="text-slate-500">DNI: {v.dni || 'Sin DNI'} · <span className="text-amber-600 font-bold uppercase">Invitado VIP</span></p>
-                    </div>
-                    <span className={`px-3 py-1 rounded-full font-bold uppercase ${v.asistio ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'}`}>
-                      {v.asistio ? '✓ Presente' : 'Pendiente'}
-                    </span>
-                  </div>
-                ))
-              )
-            )}
-
-            {tipoCeremonial === 'egresados' && (
-              listaEgresadosCeremonial.length === 0 ? (
-                <p className="text-center text-slate-400 py-8">No se encontraron egresados con los filtros seleccionados.</p>
-              ) : (
-                listaEgresadosCeremonial.map((e) => (
-                  <div key={e.id} className="p-3 flex items-center justify-between hover:bg-slate-50">
-                    <div>
-                      <p className="font-bold text-slate-900 text-sm">{e.nombre_completo}</p>
-                      <p className="text-slate-500">DNI: {e.dni} · Cupo: {e.cupo_asignado} lugares</p>
-                    </div>
-                    <span className={`px-3 py-1 rounded-full font-bold uppercase ${e.asistio ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'}`}>
-                      {e.asistio ? '✓ Presente' : 'Pendiente'}
-                    </span>
-                  </div>
-                ))
-              )
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ⚙️ SOLAPA DE AFORO Y SALA (Sin los botones de mantenimiento, solo configuración y mapa) */}
-      {tab === 'aforo' && (
-        <div className="bg-white rounded-2xl border p-5 space-y-6">
-          <div className="border-b pb-3">
-            <h3 className="font-bold text-base text-[#6B1D2F]">⚙️ Gestión de Aforo, Sala y Mapa de Butacas</h3>
-            <p className="text-xs text-slate-500">Configurá las dimensiones del salón municipal y visualizá el mapa de la sala.</p>
-          </div>
-
-          <form onSubmit={guardarConfiguracionAforo} className="grid grid-cols-1 sm:grid-cols-4 gap-4 items-end bg-slate-50 p-4 rounded-xl border">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Cupo Base por Egresado</label>
-              <input 
-                type="number" 
-                min="1" 
-                max="10" 
-                value={cupoBaseEdit} 
-                onChange={(e) => setCupoBaseEdit(e.target.value)} 
-                className="w-full px-3 py-2 border rounded-xl text-sm font-semibold outline-none bg-white focus:border-[#6B1D2F]"
-                required 
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Cantidad de Filas</label>
-              <input 
-                type="number" 
-                min="1" 
-                max="50" 
-                value={filasEdit} 
-                onChange={(e) => setFilasEdit(e.target.value)} 
-                className="w-full px-3 py-2 border rounded-xl text-sm font-semibold outline-none bg-white focus:border-[#6B1D2F]"
-                required 
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Butacas por Fila</label>
-              <input 
-                type="number" 
-                min="1" 
-                max="100" 
-                value={butacasFilaEdit} 
-                onChange={(e) => setButacasFilaEdit(e.target.value)} 
-                className="w-full px-3 py-2 border rounded-xl text-sm font-semibold outline-none bg-white focus:border-[#6B1D2F]"
-                required 
-              />
-            </div>
-            <button 
-              type="submit" 
-              disabled={guardandoConfig}
-              className="w-full py-2.5 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-xl text-xs font-bold shadow cursor-pointer"
-            >
-              {guardandoConfig ? 'Guardando...' : 'Guardar Aforo y Sala'}
-            </button>
-          </form>
-
-          {/* MAPA VISUAL DE LA SALA */}
-          <div className="space-y-4 pt-2">
-            <div className="flex flex-wrap justify-between items-center gap-3">
-              <h4 className="font-bold text-sm text-slate-800">Mapa Visual de la Sala ({totalFilas} filas x {butacasPorFila} butacas)</h4>
-              <div className="flex flex-wrap items-center gap-3 text-xs font-semibold">
-                <span className="flex items-center gap-1"><span className="w-3 h-3 bg-emerald-500 rounded-sm"></span> Acreditado</span>
-                <span className="flex items-center gap-1"><span className="w-3 h-3 bg-amber-400 rounded-sm"></span> Ocupado</span>
-                <span className="flex items-center gap-1"><span className="w-3 h-3 bg-slate-200 rounded-sm"></span> Libre</span>
-              </div>
-            </div>
-
-            <div className="p-3 bg-slate-900 text-white text-center rounded-xl font-extrabold text-xs tracking-widest">
-              ESCENARIO PRINCIPAL 🎭
-            </div>
-
-            <div className="space-y-2 max-h-[400px] overflow-y-auto p-2 border rounded-xl bg-slate-50">
-              {Array.from({ length: totalFilas }, (_, filaIdx) => {
-                const nroFila = filaIdx + 1;
-                let zonaNombre = 'Zona Invitados / Familiares';
-                let zonaColor = 'bg-rose-100 text-rose-800 border-rose-300';
-                if (nroFila <= 2) {
-                  zonaNombre = 'Zona VIP / Autoridades (Filas 1-2)';
-                  zonaColor = 'bg-amber-100 text-amber-900 border-amber-300';
-                } else if (nroFila >= 3 && nroFila <= 5) {
-                  zonaNombre = 'Zona Docentes (Filas 3-5)';
-                  zonaColor = 'bg-indigo-100 text-indigo-900 border-indigo-300';
-                } else if (nroFila >= 6 && nroFila <= 12) {
-                  zonaNombre = 'Zona Egresados (Filas 6-12)';
-                  zonaColor = 'bg-teal-100 text-teal-900 border-teal-300';
-                }
-
-                return (
-                  <div key={nroFila} className="bg-white p-3 rounded-xl border space-y-2">
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="font-extrabold text-slate-800">Fila #{nroFila}</span>
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${zonaColor}`}>{zonaNombre}</span>
-                    </div>
-                    <div className="flex flex-wrap gap-1">
-                      {Array.from({ length: butacasPorFila }, (_, butacaIdx) => {
-                        const nroButaca = butacaIdx + 1;
-                        const ocupada = (filaIdx * butacasPorFila + butacaIdx) < totalOcupado;
-                        const acreditada = ocupada && (filaIdx % 2 === 0);
-
-                        return (
-                          <div
-                            key={butacaIdx}
-                            title={`Fila ${nroFila} - Butaca ${nroButaca} (${ocupada ? 'Ocupada' : 'Libre'})`}
-                            className={`w-6 h-6 rounded flex items-center justify-center text-[9px] font-bold font-mono transition cursor-pointer ${
-                              acreditada ? 'bg-emerald-500 text-white shadow-xs' :
-                              ocupada ? 'bg-amber-400 text-slate-900 shadow-xs' :
-                              'bg-slate-200 text-slate-600 hover:bg-slate-300'
-                            }`}
-                          >
-                            {nroButaca}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+        <div className="bg-white rounded-2xl border p-5 space-y-4">
+          <h3 className="font-bold">Reporte de Asistencia General</h3>
+          <p className="text-sm text-slate-600">Egresados presentes: {egresados.filter(e => e.asistio).length} / {egresados.length}</p>
+          <p className="text-sm text-slate-600">Invitados presentes: {invitados.filter(i => i.asistio).length} / {invitados.length}</p>
+          <p className="text-sm text-slate-600">Docentes presentes: {docentes.filter(d => d.asistio).length} / {docentes.length}</p>
+          <p className="text-sm text-slate-600">VIPs presentes: {especiales.filter(v => v.asistio).length} / {especiales.length}</p>
         </div>
       )}
 
       {tab === 'usuarios' && perfilStaff?.rol === 'admin' && (
         <div className="bg-white rounded-2xl border p-5 space-y-5">
-          <h3 className="font-bold">Gestión de Usuarios y Roles</h3>
-          <p className="text-xs text-slate-500">Creá, editá, activá/desactivá o cambiá la contraseña de Administradores, Coordinadores y Personal de Puerta.</p>
-
+          <h3 className="font-bold">Gestión de Usuarios del Sistema</h3>
           <form onSubmit={crearUsuarioSistema} className="grid grid-cols-1 sm:grid-cols-5 gap-3 bg-slate-50 p-4 rounded-xl border">
-            <input type="text" placeholder="Nombre y Apellido" value={nuevoNombreUsr} onChange={(e) => setNuevoNombreUsr(e.target.value)} className="px-3 py-2 rounded-xl border text-sm bg-white" required />
-            <input type="email" placeholder="correo@esrn5.edu.ar" value={nuevoEmailUsr} onChange={(e) => setNuevoEmailUsr(e.target.value)} className="px-3 py-2 rounded-xl border text-sm bg-white" required />
+            <input type="text" placeholder="Nombre" value={nuevoNombreUsr} onChange={(e) => setNuevoNombreUsr(e.target.value)} className="px-3 py-2 rounded-xl border text-sm bg-white" required />
+            <input type="email" placeholder="Correo electrónico" value={nuevoEmailUsr} onChange={(e) => setNuevoEmailUsr(e.target.value)} className="px-3 py-2 rounded-xl border text-sm bg-white" required />
             <div className="relative">
-              <input type={showPassUsr ? "text" : "password"} placeholder="Contraseña (mín. 6)" value={nuevoPassUsr} onChange={(e) => setNuevoPassUsr(e.target.value)} className="w-full px-3 py-2 rounded-xl border text-sm bg-white pr-10" required />
-              <button type="button" onClick={() => setShowPassUsr(!showPassUsr)} className="absolute right-3 top-2.5 text-slate-400">
+              <input type={showPassUsr ? "text" : "password"} placeholder="Contraseña" value={nuevoPassUsr} onChange={(e) => setNuevoPassUsr(e.target.value)} className="w-full px-3 py-2 rounded-xl border text-sm bg-white pr-10" required />
+              <button type="button" onClick={() => setShowPassUsr(!showPassUsr)} className="absolute right-3 top-2.5 text-slate-400 cursor-pointer">
                 {showPassUsr ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
             <select value={nuevoRolUsr} onChange={(e) => setNuevoRolUsr(e.target.value)} className="px-3 py-2 rounded-xl border text-sm bg-white font-medium">
-              <option value="puerta">Control de Acceso (Puerta)</option>
+              <option value="puerta">Puerta</option>
               <option value="coordinador">Coordinador</option>
               <option value="admin">Administrador</option>
             </select>
-            <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs">+ Crear Usuario</button>
+            <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs cursor-pointer">+ Crear Usuario</button>
           </form>
-
-          {modalCambiarClaveUsr && (
-            <div className="bg-amber-50 border border-amber-300 p-4 rounded-xl flex flex-wrap items-center justify-between gap-3">
-              <span className="text-xs font-bold text-amber-900">Nueva contraseña para <b>{modalCambiarClaveUsr.nombre}</b> ({modalCambiarClaveUsr.email}):</span>
-              <form onSubmit={cambiarClaveUsuarioSistema} className="flex gap-2 items-center flex-1 max-w-sm">
-                <input
-                  type="password"
-                  placeholder="Nueva clave"
-                  value={nuevaClaveUsr}
-                  onChange={(e) => setNuevaClaveUsr(e.target.value)}
-                  className="px-3 py-1.5 rounded-lg border text-xs bg-white flex-1"
-                  required
-                />
-                <button type="submit" disabled={guardandoClave} className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold">
-                  {guardandoClave ? 'Guardando...' : 'Guardar Clave'}
-                </button>
-                <button type="button" onClick={() => setModalCambiarClaveUsr(null)} className="px-3 py-1.5 border rounded-lg text-xs bg-white text-slate-700">
-                  Cancelar
-                </button>
-              </form>
-            </div>
-          )}
-
-          {modalEditarUsr && (
-            <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-              <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl overflow-hidden border">
-                <div className="bg-[#6B1D2F] text-white p-4 flex justify-between items-center">
-                  <h3 className="font-bold text-base">Editar Usuario del Sistema</h3>
-                  <button onClick={() => setModalEditarUsr(null)} className="p-1 rounded-lg text-white/80 hover:bg-white/10">
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-                <form onSubmit={guardarEdicionUsuario} className="p-5 space-y-3.5">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Nombre y Apellido</label>
-                    <input
-                      type="text"
-                      required
-                      value={editUsrNombre}
-                      onChange={(e) => setEditUsrNombre(e.target.value)}
-                      className="w-full px-3 py-2 bg-white border rounded-xl text-sm outline-none focus:border-[#6B1D2F]"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Correo Electrónico</label>
-                    <input
-                      type="email"
-                      required
-                      value={editUsrEmail}
-                      onChange={(e) => setEditUsrEmail(e.target.value)}
-                      className="w-full px-3 py-2 bg-white border rounded-xl text-sm outline-none focus:border-[#6B1D2F]"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Rol en el Sistema</label>
-                    <select
-                      value={editUsrRol}
-                      onChange={(e) => setEditUsrRol(e.target.value)}
-                      className="w-full px-3 py-2 bg-white border rounded-xl text-sm outline-none focus:border-[#6B1D2F]"
-                    >
-                      <option value="puerta">Control de Acceso (Puerta)</option>
-                      <option value="coordinador">Coordinador</option>
-                      <option value="admin">Administrador</option>
-                    </select>
-                  </div>
-                  <div className="flex gap-2 pt-3 border-t">
-                    <button type="button" onClick={() => setModalEditarUsr(null)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold">Cancelar</button>
-                    <button type="submit" disabled={guardandoUsr} className="flex-1 py-2.5 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold shadow">
-                      {guardandoUsr ? 'Guardando...' : 'Guardar Cambios'}
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          )}
 
           <div className="divide-y text-sm">
             {usuariosSistema.map((u) => (
-              <div key={u.id} className="py-3 flex flex-wrap justify-between items-center gap-3">
+              <div key={u.id} className="py-3 flex justify-between items-center">
                 <div>
-                  <div className="flex items-center gap-2">
-                    <p className="font-bold text-slate-900">{u.nombre}</p>
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${u.activo !== false ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
-                      {u.activo !== false ? 'Acto' : 'Inactivo'}
-                    </span>
-                  </div>
+                  <p className="font-bold">{u.nombre}</p>
                   <p className="text-xs text-slate-500">{u.email} · Rol: <strong className="uppercase">{u.rol}</strong></p>
                 </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => abrirModalEditarUsuario(u)}
-                    className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-lg text-xs font-bold flex items-center gap-1"
-                  >
-                    <Edit2 className="w-3.5 h-3.5" /> Editar
-                  </button>
-                  <button
-                    onClick={() => setModalCambiarClaveUsr(u)}
-                    className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-lg text-xs font-bold flex items-center gap-1"
-                  >
-                    <Key className="w-3.5 h-3.5" /> Clave
-                  </button>
-                  <button
-                    onClick={async () => {
-                      const nuevoEstado = u.activo === false ? true : false;
-                      await supabase.from('usuarios_sistema').update({ activo: nuevoEstado }).eq('id', u.id);
-                      await recargar();
-                      notify(`Usuario ${nuevoEstado ? 'activado' : 'desactivado'}.`);
-                    }}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${u.activo !== false ? 'bg-slate-100 text-slate-700 hover:bg-slate-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}
-                  >
-                    {u.activo !== false ? 'Desactivar' : 'Activar'}
-                  </button>
-                  <button
-                    onClick={async () => {
-                      if(!window.confirm(`¿Eliminar al usuario ${u.nombre}?`)) return;
-                      await supabase.from('usuarios_sistema').delete().eq('id', u.id);
-                      await recargar();
-                      notify('Usuario eliminado del sistema.');
-                    }}
-                    className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg border border-transparent hover:border-rose-200"
-                    title="Eliminar usuario"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
+                <button onClick={async () => {
+                  if(!window.confirm(`¿Eliminar a ${u.nombre}?`)) return;
+                  await supabase.from('usuarios_sistema').delete().eq('id', u.id);
+                  await registrarLog('ELIMINAR_USUARIO', 'Sistema', `Se eliminó al usuario ${u.nombre}`);
+                  await recargar();
+                  notify('Usuario eliminado.');
+                }} className="text-rose-600 hover:text-rose-800 p-1 cursor-pointer">
+                  <Trash2 className="w-4 h-4" />
+                </button>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* 🛠️ PANEL DE CONTROL Y MANTENIMIENTO: ABAJO DEL TODO EN LA VISTA ADMINISTRATIVA GENERAL */}
-      <div className="bg-gradient-to-r from-slate-900 to-[#6B1D2F] text-white p-5 rounded-2xl shadow-xl flex flex-wrap items-center justify-between gap-4 mt-12 border-t-4 border-amber-500">
+      {/* SECCIÓN DE LOG DE AUDITORÍA (EXCLUSIVA PARA ADMIN, ABAJO DEL TODO EN ADMINISTRACIÓN) */}
+      {perfilStaff?.rol === 'admin' && (
+        <div className="bg-white rounded-2xl border p-5 space-y-4 mt-10 border-t-4 border-indigo-600">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
+            <div>
+              <h3 className="font-bold text-base text-indigo-900 flex items-center gap-2">
+                <History className="w-5 h-5 text-indigo-600" /> Registro de Actividad y Auditoría (Logs)
+              </h3>
+              <p className="text-xs text-slate-500">Historial completo de acciones realizadas por los operadores del sistema.</p>
+            </div>
+            <div className="w-full sm:w-72">
+              <input
+                type="text"
+                placeholder="Buscar en logs (usuario, módulo, acción)..."
+                value={filtroLogBusqueda}
+                onChange={(e) => setFiltroLogBusqueda(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border text-xs outline-none focus:border-indigo-600"
+              />
+            </div>
+          </div>
+
+          <div className="max-h-72 overflow-y-auto divide-y text-xs">
+            {logsFiltrados.length === 0 ? (
+              <p className="text-center text-slate-400 py-6">No se encontraron registros de auditoría.</p>
+            ) : (
+              logsFiltrados.map((log) => (
+                <div key={log.id} className="py-2.5 flex flex-wrap justify-between items-center gap-2 hover:bg-slate-50 px-2 rounded">
+                  <div>
+                    <span className="font-bold text-slate-900">{log.usuario}</span>
+                    <span className="mx-2 px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded font-bold uppercase text-[10px]">{log.modulo}</span>
+                    <span className="font-semibold text-slate-700">{log.accion}:</span>
+                    <span className="text-slate-600 ml-1">{log.detalle}</span>
+                  </div>
+                  <span className="text-[11px] text-slate-400 font-mono">
+                    {new Date(log.created_at).toLocaleString()}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Panel de Control y Mantenimiento abajo del todo */}
+      <div className="bg-gradient-to-r from-slate-900 to-[#6B1D2F] text-white p-5 rounded-2xl shadow-xl flex flex-wrap items-center justify-between gap-4 mt-6 border-t-4 border-amber-500">
         <div>
           <h4 className="font-extrabold text-sm uppercase tracking-wider text-rose-200">Panel de Control y Mantenimiento</h4>
-          <p className="text-xs text-slate-200 mt-0.5">Acciones críticas de reinicio de asistencias y borrado de datos de prueba</p>
+          <p className="text-xs text-slate-200 mt-0.5">Acciones críticas de reinicio de asistencias y borrado de datos</p>
         </div>
         <div className="flex flex-wrap items-center gap-2.5">
-          <button 
-            onClick={reiniciarAsistenciasGeneral} 
-            className="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow transition cursor-pointer"
-          >
+          <button onClick={reiniciarAsistenciasGeneral} className="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow transition cursor-pointer">
             <RotateCcw className="w-4 h-4" /> 🔄 Reiniciar Asistencias (Puerta)
           </button>
-          <button 
-            onClick={borrarInvitadosEgresados} 
-            className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow transition cursor-pointer"
-          >
+          <button onClick={borrarInvitadosEgresados} className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow transition cursor-pointer">
             <Trash2 className="w-4 h-4" /> 🗑️ Borrar Invitados Egresados
           </button>
         </div>
@@ -2642,7 +2531,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
 }
 
 // ============================================================================
-// REPORTE RESUMEN PARA PAPEL
+// REPORTE RESUMEN PARA PAPEL (Incluye Egresados, Invitados, Docentes y VIP)
 // ============================================================================
 function ReporteResumenPapel({ egresados, invitados, docentes, especiales }) {
   const egresadosOrdenados = [...egresados].sort((a, b) => 
@@ -2656,10 +2545,7 @@ function ReporteResumenPapel({ egresados, invitados, docentes, especiales }) {
           <h2 className="text-xl font-bold text-[#6B1D2F]">ESRN N° 005 — Cipolletti</h2>
           <p className="text-xs text-slate-500">Acto de Colación 2026 · Resumen General para Control en Papel</p>
         </div>
-        <button
-          onClick={() => window.print()}
-          className="px-4 py-2 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow cursor-pointer print:hidden"
-        >
+        <button onClick={() => window.print()} className="px-4 py-2 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow cursor-pointer print:hidden">
           <Printer className="w-4 h-4" /> Imprimir Documento
         </button>
       </div>
@@ -2698,7 +2584,7 @@ function ReporteResumenPapel({ egresados, invitados, docentes, especiales }) {
                           <td className="p-2 border font-medium">{inv.nombre_completo}</td>
                           <td className="p-2 border font-mono">{inv.dni}</td>
                           <td className="p-2 border text-center">
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${inv.es_grupal !== false ? 'bg-amber-100 text-amber-800' : 'bg-sky-100 text-sky-800'}`}>
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800">
                               {inv.es_grupal !== false ? 'Grupal' : 'Individual'}
                             </span>
                           </td>
@@ -2714,15 +2600,14 @@ function ReporteResumenPapel({ egresados, invitados, docentes, especiales }) {
         </div>
       </div>
 
-      <div className="space-y-3 pt-4">
-        <h3 className="font-bold text-sm text-[#6B1D2F] uppercase tracking-wide">2. Padrón de Docentes Confirmados</h3>
+      <div className="space-y-3 pt-6">
+        <h3 className="font-bold text-sm text-[#6B1D2F] uppercase tracking-wide">2. Padrón de Docentes</h3>
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse text-xs">
             <thead>
               <tr className="bg-slate-100 border-b border-slate-300">
-                <th className="p-2 border">Nombre y Apellido del Docente</th>
+                <th className="p-2 border">Nombre y Apellido</th>
                 <th className="p-2 border">DNI</th>
-                <th className="p-2 border text-center">Estado</th>
                 <th className="p-2 border text-center">Firma Ingreso</th>
               </tr>
             </thead>
@@ -2731,7 +2616,6 @@ function ReporteResumenPapel({ egresados, invitados, docentes, especiales }) {
                 <tr key={d.id}>
                   <td className="p-2 border font-medium">📚 {d.nombre_completo}</td>
                   <td className="p-2 border font-mono">{d.dni}</td>
-                  <td className="p-2 border text-center uppercase font-bold text-[10px]">{d.asistio ? 'Presente' : 'Pendiente'}</td>
                   <td className="p-2 border text-center w-28">______</td>
                 </tr>
               ))}
@@ -2740,24 +2624,22 @@ function ReporteResumenPapel({ egresados, invitados, docentes, especiales }) {
         </div>
       </div>
 
-      <div className="space-y-3 pt-4">
+      <div className="space-y-3 pt-6">
         <h3 className="font-bold text-sm text-[#6B1D2F] uppercase tracking-wide">3. Padrón de Invitados VIP / Autoridades</h3>
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse text-xs">
             <thead>
               <tr className="bg-slate-100 border-b border-slate-300">
-                <th className="p-2 border">Nombre y Apellido / Institución</th>
+                <th className="p-2 border">Nombre / Institución</th>
                 <th className="p-2 border">DNI</th>
-                <th className="p-2 border text-center">Estado</th>
-                <th className="p-2 border text-center">Fiscale / Firma</th>
+                <th className="p-2 border text-center">Firma Ingreso</th>
               </tr>
             </thead>
             <tbody className="divide-y">
               {especiales.map((v) => (
                 <tr key={v.id}>
                   <td className="p-2 border font-medium">⭐ {v.nombre_completo}</td>
-                  <td className="p-2 border font-mono">{v.dni || 'S/DNI'}</td>
-                  <td className="p-2 border text-center uppercase font-bold text-[10px]">{v.asistio ? 'Presente' : 'Pendiente'}</td>
+                  <td className="p-2 border font-mono">{v.dni || 'S/D'}</td>
                   <td className="p-2 border text-center w-28">______</td>
                 </tr>
               ))}
