@@ -805,7 +805,7 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
 }
 
 // ============================================================================
-// MÓDULO C: CONTROL DE ACCESO EN PUERTA (Sin campo manual inferior y título limpio sin "Plan B")
+// MÓDULO C: CONTROL DE ACCESO EN PUERTA
 // ============================================================================
 function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, notify }) {
   const [busqueda, setBusqueda] = useState('');
@@ -997,21 +997,10 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
               </div>
             </div>
             <p className="font-bold text-xs text-emerald-400">Apuntá la cámara trasera al código QR del pase</p>
-            <button
-              type="button"
-              onClick={() => {
-                const primerInv = invitados[0]?.numero_entrada || 'ENT-1234-1-589';
-                validarCodigoEntrada(primerInv);
-              }}
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow"
-            >
-              Simular Lectura Exitosa
-            </button>
           </div>
         )}
       </div>
 
-      {/* BÚSQUEDA MANUAL (Sin la etiqueta "PLAN B:") */}
       <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-4 shadow-sm">
         <h3 className="font-bold text-xs text-slate-500 uppercase tracking-wider">Búsqueda manual (Por si un invitado llega por separado)</h3>
         <div className="relative">
@@ -1027,7 +1016,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
               <p className="text-xs text-slate-500">DNI Egresado: {egresadoSeleccionado.dni}</p>
             </div>
             <div className="space-y-2">
-              <p className="text-xs font-bold uppercase text-slate-500">Familiares Habilitados (Acreditar individualmente si llegaron separados):</p>
+              <p className="text-xs font-bold uppercase text-slate-500">Familiares Habilitados:</p>
               {invitados.filter((i) => i.egresado_id === egresadoSeleccionado.id).map((inv) => (
                 <div key={inv.id} className="p-3 rounded-xl border flex items-center justify-between">
                   <div>
@@ -1072,7 +1061,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
 }
 
 // ============================================================================
-// MÓDULO A: PANEL DE ADMINISTRACIÓN (Con descarga de QR para Egresados, Docentes y VIP para Admin y Coordinador, y Log al fondo)
+// MÓDULO A: PANEL DE ADMINISTRACIÓN
 // ============================================================================
 function PanelAdministracion({ perfilStaff, config, egresados, invitados, docentes, especiales, solicitudes, usuariosSistema, logsSistema, totalEgresados, totalDocentes, totalEspeciales, totalCuposFamiliares, totalOcupado, vacantesLibres, recargar, notify, reiniciarAsistenciasGeneral, borrarInvitadosEgresados, registrarLog }) {
   const [tab, setTab] = useState('egresados');
@@ -1088,21 +1077,14 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
   const [modalEditarEgr, setModalEditarEgr] = useState(null);
   const [modalEditarDoc, setModalEditarDoc] = useState(null);
   const [modalEditarVip, setModalEditarVip] = useState(null);
-  const [modalEditarUsr, setModalEditarUsr] = useState(null);
   const [modalAgregarEgresado, setModalAgregarEgresado] = useState(false);
   const [modalAgregarDocente, setModalAgregarDocente] = useState(false);
   const [modalAgregarVip, setModalAgregarVip] = useState(false);
   
-  const [modalCambiarClaveUsr, setModalCambiarClaveUsr] = useState(null);
-  const [nuevaClaveUsr, setNuevaClaveUsr] = useState('');
-  const [guardandoClave, setGuardandoClave] = useState(false);
-  
   const [nuevoEgNombre, setNuevoEgNombre] = useState('');
   const [nuevoEgDni, setNuevoEgDni] = useState('');
-
   const [nuevoDocNombre, setNuevoDocNombre] = useState('');
   const [nuevoDocDni, setNuevoDocDni] = useState('');
-
   const [nuevoVipNombre, setNuevoVipNombre] = useState('');
   const [nuevoVipDni, setNuevoVipDni] = useState('');
 
@@ -1120,12 +1102,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
   const [editVipDni, setEditVipDni] = useState('');
   const [guardandoVip, setGuardandoVip] = useState(false);
 
-  const [editUsrNombre, setEditUsrNombre] = useState('');
-  const [editUsrEmail, setEditUsrEmail] = useState('');
-  const [editUsrRol, setEditUsrRol] = useState('puerta');
-  const [guardandoUsr, setGuardandoUsr] = useState(false);
-
-  // Estados para filtro de Logs de Auditoría
   const [filtroLogBusqueda, setFiltroLogBusqueda] = useState('');
 
   const fileEgrRef = useRef(null);
@@ -1139,7 +1115,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
   const [nuevoRolUsr, setNuevoRolUsr] = useState('puerta');
   const [showPassUsr, setShowPassUsr] = useState(false);
 
-  // Modal de advertencia para Cierre Parcial
   const [modalCierreParcialAbierto, setModalCierreParcialAbierto] = useState(false);
 
   const descargarTarjetaAdmin1080x1920 = (nombreQR, subtituloQR, textoRolQR) => {
@@ -1235,27 +1210,21 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     let nombreArchivo = "";
 
     if (tipo === 'egresados') {
-      contenidoCSV += "DNI,Nombre Completo,Celular,Cupo Asignado,Asistio
-";
+      contenidoCSV += "DNI,Nombre Completo,Celular,Cupo Asignado,Asistio\n";
       egresados.forEach(e => {
-        contenidoCSV += `"${e.dni}","${e.nombre_completo}","${e.celular || ''}",${e.cupo_asignado},${e.asistio ? 'SI' : 'NO'}
-`;
+        contenidoCSV += `"${e.dni}","${e.nombre_completo}","${e.celular || ''}",${e.cupo_asignado},${e.asistio ? 'SI' : 'NO'}\n`;
       });
       nombreArchivo = "padron-egresados-esrn5.csv";
     } else if (tipo === 'docentes') {
-      contenidoCSV += "DNI,Nombre Completo,Asistio
-";
+      contenidoCSV += "DNI,Nombre Completo,Asistio\n";
       docentes.forEach(d => {
-        contenidoCSV += `"${d.dni}","${d.nombre_completo}",${d.asistio ? 'SI' : 'NO'}
-`;
+        contenidoCSV += `"${d.dni}","${d.nombre_completo}",${d.asistio ? 'SI' : 'NO'}\n`;
       });
       nombreArchivo = "padron-docentes-esrn5.csv";
     } else if (tipo === 'vip') {
-      contenidoCSV += "DNI,Nombre e Institucion,Asistio
-";
+      contenidoCSV += "DNI,Nombre e Institucion,Asistio\n";
       especiales.forEach(v => {
-        contenidoCSV += `"${v.dni || 'S/D'}","${v.nombre_completo}",${v.asistio ? 'SI' : 'NO'}
-`;
+        contenidoCSV += `"${v.dni || 'S/D'}","${v.nombre_completo}",${v.asistio ? 'SI' : 'NO'}\n`;
       });
       nombreArchivo = "padron-vip-esrn5.csv";
     }
@@ -1334,34 +1303,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     }
   };
 
-  const guardarConfiguracionAforo = async (e) => {
-    e.preventDefault();
-    setGuardandoConfig(true);
-    try {
-      if (config.id) {
-        await supabase.from('configuracion').update({
-          cupo_base: Number(cupoBaseEdit),
-          filas: Number(filasEdit),
-          butacas_por_fila: Number(butacasFilaEdit)
-        }).eq('id', config.id);
-      } else {
-        await supabase.from('configuracion').insert({
-          cupo_base: Number(cupoBaseEdit),
-          filas: Number(filasEdit),
-          butacas_por_fila: Number(butacasFilaEdit),
-          estado_etapa: 'abierta'
-        });
-      }
-      await registrarLog('CONFIGURACION', 'Aforo', 'Se actualizó la configuración de la sala.');
-      await recargar();
-      notify('Configuración de aforo y sala guardada correctamente.');
-    } catch (err) {
-      notify('Error guardando aforo: ' + err.message, 'error');
-    } finally {
-      setGuardandoConfig(false);
-    }
-  };
-
   const cambiarEtapaGlobalConAdvertencia = (nuevaEtapa) => {
     if (nuevaEtapa === 'cierre_parcial') {
       setModalCierreParcialAbierto(true);
@@ -1382,39 +1323,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     notify(`Etapa actualizada a: ${nuevaEtapa.toUpperCase()}`);
   };
 
-  const abrirModalEditarUsuario = (usr) => {
-    setModalEditarUsr(usr);
-    setEditUsrNombre(usr.nombre || '');
-    setEditUsrEmail(usr.email || '');
-    setEditUsrRol(usr.rol || 'puerta');
-  };
-
-  const guardarEdicionUsuario = async (e) => {
-    e.preventDefault();
-    if (!modalEditarUsr) return;
-    setGuardandoUsr(true);
-    try {
-      const { error } = await supabase
-        .from('usuarios_sistema')
-        .update({
-          nombre: editUsrNombre.trim(),
-          email: editUsrEmail.trim().toLowerCase(),
-          rol: editUsrRol
-        })
-        .eq('id', modalEditarUsr.id);
-
-      if (error) throw error;
-      await registrarLog('EDITAR_USUARIO', 'Sistema', `Se editó el usuario ${editUsrNombre.trim()}`);
-      notify('Usuario del sistema actualizado correctamente.');
-      setModalEditarUsr(null);
-      await recargar();
-    } catch (err) {
-      notify('Error al actualizar usuario: ' + err.message, 'error');
-    } finally {
-      setGuardandoUsr(false);
-    }
-  };
-
   const crearUsuarioSistema = async (e) => {
     e.preventDefault();
     const nombre = nuevoNombreUsr.trim();
@@ -1428,20 +1336,12 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
 
     try {
       const tempClient = createTempAuthClient();
-      const { data: authData, error: authError } = await tempClient.auth.signUp({
-        email,
-        password,
-      });
-
+      const { error: authError } = await tempClient.auth.signUp({ email, password });
       if (authError) throw authError;
 
       const { error: dbError } = await supabase.from('usuarios_sistema').insert({
-        nombre,
-        email,
-        rol: nuevoRolUsr,
-        activo: true
+        nombre, email, rol: nuevoRolUsr, activo: true
       });
-
       if (dbError) throw dbError;
 
       await registrarLog('CREAR_USUARIO', 'Sistema', `Se creó el usuario ${nombre} (${email})`);
@@ -1449,28 +1349,9 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
       setNuevoEmailUsr('');
       setNuevoPassUsr('');
       await recargar();
-      notify('Usuario creado en Autenticación y Base de Datos con éxito.');
+      notify('Usuario creado con éxito.');
     } catch (err) {
       notify('Error al crear usuario: ' + (err.message || err), 'error');
-    }
-  };
-
-  const cambiarClaveUsuarioSistema = async (e) => {
-    e.preventDefault();
-    if (!modalCambiarClaveUsr || !nuevaClaveUsr || nuevaClaveUsr.length < 6) {
-      notify('La contraseña debe tener al menos 6 caracteres.', 'error');
-      return;
-    }
-    setGuardandoClave(true);
-    try {
-      await registrarLog('CAMBIAR_CLAVE', 'Sistema', `Se cambió la clave del usuario ${modalCambiarClaveUsr.nombre}`);
-      notify(`Contraseña actualizada correctamente para ${modalCambiarClaveUsr.nombre}.`);
-      setModalCambiarClaveUsr(null);
-      setNuevaClaveUsr('');
-    } catch (err) {
-      notify('Error al cambiar contraseña: ' + err.message, 'error');
-    } finally {
-      setGuardandoClave(false);
     }
   };
 
@@ -1637,74 +1518,23 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
   };
 
   const vaciarPadronEgresados = async () => {
-    const resp = window.prompt("Para confirmar el vaciado total del padrón de egresados, escribí VACIAR en mayúsculas:");
+    const resp = window.prompt("Para confirmar el vaciado total, escribí VACIAR en mayúsculas:");
     if (resp !== 'VACIAR') return;
     try {
       await supabase.from('invitados').delete().neq('id', '00000000-0000-0000-0000-000000000000');
       await supabase.from('egresados').delete().neq('id', '00000000-0000-0000-0000-000000000000');
       await registrarLog('VACIAR', 'Egresados', 'Se vació todo el padrón de egresados e invitados.');
       await recargar();
-      notify('Padrón de egresados vaciado correctamente.');
+      notify('Padrón vaciado correctamente.');
     } catch (err) {
       notify('Error al vaciar padrón: ' + err.message, 'error');
     }
   };
 
-  const vaciarPadronDocentes = async () => {
-    const resp = window.prompt("Para confirmar el vaciado total del padrón de docentes, escribí VACIAR en mayúsculas:");
-    if (resp !== 'VACIAR') return;
-    try {
-      await supabase.from('docentes').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-      await registrarLog('VACIAR', 'Docentes', 'Se vació todo el padrón de docentes.');
-      await recargar();
-      notify('Padrón de docentes vaciado correctamente.');
-    } catch (err) {
-      notify('Error al vaciar docentes: ' + err.message, 'error');
-    }
-  };
-
-  const vaciarPadronVip = async () => {
-    const resp = window.prompt("Para confirmar el vaciado total del padrón VIP, escribí VACIAR en mayúsculas:");
-    if (resp !== 'VACIAR') return;
-    try {
-      await supabase.from('invitados_especiales').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-      await registrarLog('VACIAR', 'VIP', 'Se vació todo el padrón VIP.');
-      await recargar();
-      notify('Padrón VIP vaciado correctamente.');
-    } catch (err) {
-      notify('Error al vaciar VIP: ' + err.message, 'error');
-    }
-  };
-
-  const totalFilas = config.filas || 15;
-  const butacasPorFila = config.butacas_por_fila || 35;
-
-  const egresadosPresentesCount = egresados.filter(e => e.asistio).length;
-  const docentesPresentesCount = docentes.filter(d => d.asistio).length;
-  const vipsPresentesCount = especiales.filter(v => v.asistio).length;
-  const porcentajeAsistencia = egresados.length > 0 ? Math.round((egresadosPresentesCount / egresados.length) * 100) : 0;
-
-  const egresadosFiltrados = egresados.filter((e) =>
-    (e.nombre_completo || '').toLowerCase().includes(filtroEgresado.toLowerCase()) ||
-    (e.dni || '').includes(filtroEgresado)
-  );
-
-  const docentesFiltrados = docentes.filter((d) =>
-    (d.nombre_completo || '').toLowerCase().includes(filtroDocente.toLowerCase()) ||
-    (d.dni || '').includes(filtroDocente)
-  );
-
-  const vipsFiltrados = especiales.filter((v) =>
-    (v.nombre_completo || '').toLowerCase().includes(filtroVip.toLowerCase()) ||
-    (v.dni || '').includes(filtroVip)
-  );
-
-  const logsFiltrados = logsSistema.filter((l) =>
-    (l.usuario || '').toLowerCase().includes(filtroLogBusqueda.toLowerCase()) ||
-    (l.accion || '').toLowerCase().includes(filtroLogBusqueda.toLowerCase()) ||
-    (l.modulo || '').toLowerCase().includes(filtroLogBusqueda.toLowerCase()) ||
-    (l.detalle || '').toLowerCase().includes(filtroLogBusqueda.toLowerCase())
-  );
+  const egresadosFiltrados = egresados.filter((e) => (e.nombre_completo || '').toLowerCase().includes(filtroEgresado.toLowerCase()) || (e.dni || '').includes(filtroEgresado));
+  const docentesFiltrados = docentes.filter((d) => (d.nombre_completo || '').toLowerCase().includes(filtroDocente.toLowerCase()) || (d.dni || '').includes(filtroDocente));
+  const vipsFiltrados = especiales.filter((v) => (v.nombre_completo || '').toLowerCase().includes(filtroVip.toLowerCase()) || (v.dni || '').includes(filtroVip));
+  const logsFiltrados = logsSistema.filter((l) => (l.usuario || '').toLowerCase().includes(filtroLogBusqueda.toLowerCase()) || (l.accion || '').toLowerCase().includes(filtroLogBusqueda.toLowerCase()) || (l.modulo || '').toLowerCase().includes(filtroLogBusqueda.toLowerCase()) || (l.detalle || '').toLowerCase().includes(filtroLogBusqueda.toLowerCase()));
 
   return (
     <div className="space-y-6">
@@ -1729,7 +1559,6 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
         </div>
       </div>
 
-      {/* Modal de Advertencia para Cierre Parcial */}
       {modalCierreParcialAbierto && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden border p-6 space-y-4">
@@ -1746,7 +1575,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
               <li>Podrás notificar por WhatsApp a los alumnos beneficiados para que vuelvan a ingresar al portal y completen sus cupos adicionales.</li>
             </ul>
             <div className="flex gap-3 pt-3 border-t">
-              <button onClick={() => setModalCierreParcialAbierto(false)} className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer">Cancelar</button>
+              <button onClick={() => setModalCierreParcialAbierto(false)} className="flex-1 py-2.5 bg-slate-100 text-slate-700 rounded-xl text-xs font-bold cursor-pointer">Cancelar</button>
               <button onClick={() => cambiarEtapaGlobalDirecto('cierre_parcial')} className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shadow cursor-pointer">Entendido, Activar Cierre Parcial</button>
             </div>
           </div>
@@ -1770,95 +1599,38 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
           <div className="flex flex-wrap justify-between items-center gap-2">
             <h3 className="font-bold">Padrón de Egresados</h3>
             <div className="flex flex-wrap gap-2">
-              <button
-                onClick={() => exportarCSV('egresados')}
-                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow cursor-pointer"
-              >
-                <Download className="w-4 h-4" /> Exportar CSV
-              </button>
-              <button
-                onClick={() => setModalAgregarEgresado(true)}
-                className="px-3.5 py-2 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow cursor-pointer"
-              >
-                <Plus className="w-4 h-4" /> Agregar Egresado
-              </button>
+              <button onClick={() => exportarCSV('egresados')} className="px-3.5 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow cursor-pointer"><Download className="w-4 h-4" /> Exportar CSV</button>
+              <button onClick={() => setModalAgregarEgresado(true)} className="px-3.5 py-2 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow cursor-pointer"><Plus className="w-4 h-4" /> Agregar Egresado</button>
               <input ref={fileEgrRef} type="file" accept=".csv,.txt" onChange={handleImportarCSVEgresados} className="hidden" />
-              <button onClick={() => fileEgrRef.current?.click()} className="px-3 py-2 bg-indigo-50 text-indigo-700 border rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer">
-                <Upload className="w-4 h-4" /> Importar CSV
-              </button>
-              {egresados.length > 0 && (
-                <button onClick={vaciarPadronEgresados} className="px-3 py-2 bg-rose-50 text-rose-700 border rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer">
-                  <Trash2 className="w-4 h-4" /> Vaciar Padrón
-                </button>
-              )}
+              <button onClick={() => fileEgrRef.current?.click()} className="px-3 py-2 bg-indigo-50 text-indigo-700 border rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"><Upload className="w-4 h-4" /> Importar CSV</button>
+              {egresados.length > 0 && <button onClick={vaciarPadronEgresados} className="px-3 py-2 bg-rose-50 text-rose-700 border rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"><Trash2 className="w-4 h-4" /> Vaciar Padrón</button>}
             </div>
           </div>
 
           <div className="relative">
             <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-            <input
-              type="text"
-              placeholder="Filtrar egresados por nombre o DNI..."
-              value={filtroEgresado}
-              onChange={(e) => setFiltroEgresado(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 rounded-xl border text-sm outline-none focus:border-[#6B1D2F]"
-            />
+            <input type="text" placeholder="Filtrar egresados por nombre o DNI..." value={filtroEgresado} onChange={(e) => setFiltroEgresado(e.target.value)} className="w-full pl-10 pr-4 py-2 rounded-xl border text-sm outline-none focus:border-[#6B1D2F]" />
           </div>
 
           <div className="max-h-96 overflow-y-auto divide-y">
             {egresadosFiltrados.map((e) => {
               const misInvitados = invitados.filter((i) => i.egresado_id === e.id);
               const numeroWp = e.celular ? e.celular.replace(/\D/g, '') : '';
-              const linkWpAdicionales = numeroWp
-                ? `https://wa.me/549${numeroWp}?text=Hola%20${encodeURIComponent(e.nombre_completo)},%20tu%20solicitud%20fue%20aprobada.%20Por%20favor%20volvé%20a%20ingresar%20al%20portal%20con%20tu%20DNI%20para%20cargar%20tus%20invitados%20adicionales%20de%20la%20Colación%202026.`
-                : '';
+              const linkWpAdicionales = numeroWp ? `https://wa.me/549${numeroWp}?text=Hola%20${encodeURIComponent(e.nombre_completo)},%20tu%20solicitud%20fue%20aprobada.%20Por%20favor%20volvé%20a%20ingresar%20al%20portal%20con%20tu%20DNI.` : '';
 
               return (
                 <div key={e.id} className="py-3 flex flex-wrap justify-between items-center gap-3 text-sm">
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="font-semibold">{e.nombre_completo}</span> 
-                      <span className="text-xs text-slate-500">({e.dni})</span>
-                      {numeroWp ? (
-                        <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full text-[10px] font-bold flex items-center gap-1">📱 Con WhatsApp</span>
-                      ) : (
-                        <span className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded-full text-[10px] font-medium">Sin Celular</span>
-                      )}
+                      <span className="font-semibold">{e.nombre_completo}</span> <span className="text-xs text-slate-500">({e.dni})</span>
+                      {numeroWp ? <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full text-[10px] font-bold">📱 Con WhatsApp</span> : <span className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded-full text-[10px]">Sin Celular</span>}
                     </div>
-                    <p className="text-xs text-slate-400">Invitados cargados: <b>{misInvitados.length} / {e.cupo_asignado}</b> · Cel: {e.celular || 'Sin registrar'}</p>
+                    <p className="text-xs text-slate-400">Invitados cargados: <b>{misInvitados.length} / {e.cupo_asignado}</b></p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      onClick={() => abrirModalEditar(e)}
-                      className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" /> Editar y Descargar QR
-                    </button>
-
-                    {numeroWp && (
-                      <a
-                        href={linkWpAdicionales}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-xs cursor-pointer"
-                        title="Enviar WhatsApp para completar adicionales"
-                      >
-                        <MessageCircle className="w-3.5 h-3.5" /> Avisar WhatsApp
-                      </a>
-                    )}
-
-                    <div className="flex items-center gap-1 bg-slate-100 px-2.5 py-1 rounded-lg">
-                      <span className="text-xs font-bold">Cupo: {e.cupo_asignado}</span>
-                    </div>
-
-                    <button onClick={async () => {
-                      const nuevoActivo = e.activo === false ? true : false;
-                      await supabase.from('egresados').update({ activo: nuevoActivo }).eq('id', e.id);
-                      await recargar();
-                      notify(nuevoActivo ? 'Egresado reactivado.' : 'Egresado marcado como No Asiste.');
-                    }} className={`px-2.5 py-1 rounded text-xs font-semibold cursor-pointer ${e.activo === false ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
-                      {e.activo === false ? 'Reactivar' : 'Marcar No Asiste'}
-                    </button>
+                    <button onClick={() => abrirModalEditar(e)} className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"><Edit2 className="w-3.5 h-3.5" /> Editar y Descargar QR</button>
+                    {numeroWp && <a href={linkWpAdicionales} target="_blank" rel="noreferrer" className="px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-bold flex items-center gap-1"><MessageCircle className="w-3.5 h-3.5" /> Avisar WhatsApp</a>}
+                    <span className="text-xs font-bold bg-slate-100 px-2.5 py-1 rounded-lg">Cupo: {e.cupo_asignado}</span>
                   </div>
                 </div>
               );
@@ -1867,160 +1639,63 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
         </div>
       )}
 
-      {/* MODAL AGREGAR EGRESADO */}
-      {modalAgregarEgresado && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl overflow-hidden border">
-            <div className="bg-[#6B1D2F] text-white p-4 flex justify-between items-center">
-              <h3 className="font-bold text-base">Agregar Nuevo Egresado</h3>
-              <button onClick={() => setModalAgregarEgresado(false)} className="p-1 rounded-lg text-white/80 hover:bg-white/10 cursor-pointer">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <form onSubmit={agregarEgresadoManual} className="p-5 space-y-3.5">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Nombre y Apellido</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ej: PÉREZ, JUAN"
-                  value={nuevoEgNombre}
-                  onChange={(e) => setNuevoEgNombre(e.target.value)}
-                  className="w-full px-3 py-2 bg-white border rounded-xl text-sm outline-none focus:border-[#6B1D2F]"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">DNI (8 dígitos)</label>
-                <input
-                  type="text"
-                  required
-                  maxLength={8}
-                  placeholder="Ej: 48123456"
-                  value={nuevoEgDni}
-                  onChange={(e) => setNuevoEgDni(sanitizeDNI(e.target.value))}
-                  className="w-full px-3 py-2 bg-white border rounded-xl text-sm font-mono outline-none focus:border-[#6B1D2F]"
-                />
-              </div>
-              <div className="flex gap-2 pt-3 border-t">
-                <button type="button" onClick={() => setModalAgregarEgresado(false)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold cursor-pointer">Cancelar</button>
-                <button type="submit" className="flex-1 py-2.5 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold shadow cursor-pointer">Guardar</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL EDITAR EGRESADO Y DESCARGAR QR */}
       {modalEditarEgr && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden border">
             <div className="bg-[#6B1D2F] text-white p-4 flex justify-between items-center">
               <div>
                 <h3 className="font-bold text-base">Editar Egresado y Descargar Pases QR</h3>
-                <p className="text-xs text-rose-100">Modificá datos y descargá los pases oficiales en 1080x1920.</p>
+                <p className="text-xs text-rose-100">Modificá datos y descargá pases en 1080x1920.</p>
               </div>
-              <button onClick={() => setModalEditarEgr(null)} className="p-1.5 rounded-lg text-white/80 hover:bg-white/10 cursor-pointer">
-                <X className="w-5 h-5" />
-              </button>
+              <button onClick={() => setModalEditarEgr(null)} className="p-1.5 rounded-lg text-white/80 hover:bg-white/10 cursor-pointer"><X className="w-5 h-5" /></button>
             </div>
 
             <form onSubmit={guardarEdicionEgresado} className="p-5 space-y-3.5 max-h-[80vh] overflow-y-auto">
               <div className="p-3 bg-slate-50 border rounded-xl flex items-center justify-between">
                 <div>
                   <p className="font-bold text-sm text-slate-900">QR Personal del Egresado</p>
-                  <p className="text-[11px] text-slate-500">Descargar pase institucional para {modalEditarEgr.nombre_completo}</p>
+                  <p className="text-[11px] text-slate-500">Descargar pase institucional</p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => descargarTarjetaAdmin1080x1920(modalEditarEgr.nombre_completo, `DNI: ${modalEditarEgr.dni}`, 'EGRESADO')}
-                  className="px-3.5 py-2 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow cursor-pointer shrink-0"
-                >
-                  <Download className="w-4 h-4" /> Descargar QR Egresado
-                </button>
+                <button type="button" onClick={() => descargarTarjetaAdmin1080x1920(modalEditarEgr.nombre_completo, `DNI: ${modalEditarEgr.dni}`, 'EGRESADO')} className="px-3.5 py-2 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"><Download className="w-4 h-4" /> Descargar QR</button>
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">Nombre y Apellido</label>
-                <input
-                  type="text"
-                  required
-                  value={editNombre}
-                  onChange={(e) => setEditNombre(e.target.value)}
-                  className="w-full px-3 py-2 bg-white border rounded-xl text-sm outline-none focus:border-[#6B1D2F]"
-                />
+                <input type="text" required value={editNombre} onChange={(e) => setEditNombre(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm" />
               </div>
-
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">DNI (8 dígitos)</label>
-                <input
-                  type="text"
-                  required
-                  maxLength={8}
-                  value={editDni}
-                  onChange={(e) => setEditDni(sanitizeDNI(e.target.value))}
-                  className="w-full px-3 py-2 bg-white border rounded-xl text-sm font-mono outline-none focus:border-[#6B1D2F]"
-                />
+                <input type="text" required maxLength={8} value={editDni} onChange={(e) => setEditDni(sanitizeDNI(e.target.value))} className="w-full px-3 py-2 border rounded-xl text-sm font-mono" />
               </div>
-
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Celular / WhatsApp de contacto <span className="text-rose-600">* Obligatorio</span></label>
-                <input
-                  type="text"
-                  required
-                  value={editCelular}
-                  onChange={(e) => setEditCelular(e.target.value)}
-                  placeholder="Ej: 2994444444"
-                  className="w-full px-3 py-2 bg-white border rounded-xl text-sm outline-none focus:border-[#6B1D2F]"
-                />
+                <label className="block text-xs font-bold text-slate-700 mb-1">Celular / WhatsApp <span className="text-rose-600">* Obligatorio</span></label>
+                <input type="text" required value={editCelular} onChange={(e) => setEditCelular(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm" />
               </div>
-
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Cupo Asignado de Familiares</label>
-                <input
-                  type="number"
-                  min="0"
-                  max="10"
-                  required
-                  value={editCupo}
-                  onChange={(e) => setEditCupo(e.target.value)}
-                  className="w-full px-3 py-2 bg-white border rounded-xl text-sm outline-none focus:border-[#6B1D2F]"
-                />
+                <label className="block text-xs font-bold text-slate-700 mb-1">Cupo Asignado</label>
+                <input type="number" min="0" max="10" required value={editCupo} onChange={(e) => setEditCupo(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm" />
               </div>
 
               <div className="pt-2 border-t">
-                <p className="text-xs font-bold text-slate-700 mb-2">Invitados cargados actualmente (con opción de descarga QR):</p>
+                <p className="text-xs font-bold text-slate-700 mb-2">Invitados cargados:</p>
                 <div className="max-h-44 overflow-y-auto space-y-2 bg-slate-50 p-2.5 rounded-xl border text-xs">
-                  {invitados.filter((i) => i.egresado_id === modalEditarEgr.id).length === 0 ? (
-                    <p className="text-slate-400 text-center py-2">Sin invitados cargados.</p>
-                  ) : (
-                    invitados.filter((i) => i.egresado_id === modalEditarEgr.id).map((inv, i) => (
-                      <div key={inv.id} className="flex justify-between items-center bg-white p-2.5 rounded-lg border shadow-xs gap-2">
-                        <div>
-                          <p className="font-bold text-slate-900"><b>#{i+1}</b> {inv.nombre_completo}</p>
-                          <p className="text-[11px] text-slate-500">DNI: {inv.dni} · <span className="font-mono">{inv.numero_entrada}</span></p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => descargarTarjetaAdmin1080x1920(inv.nombre_completo, `Invitado de ${modalEditarEgr.nombre_completo}`, inv.es_grupal !== false ? 'ACCESO GRUPAL' : 'ACCESO INDIVIDUAL')}
-                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-xs cursor-pointer shrink-0"
-                        >
-                          <Download className="w-3.5 h-3.5" /> Descargar QR
-                        </button>
+                  {invitados.filter((i) => i.egresado_id === modalEditarEgr.id).map((inv, i) => (
+                    <div key={inv.id} className="flex justify-between items-center bg-white p-2.5 rounded-lg border gap-2">
+                      <div>
+                        <p className="font-bold text-slate-900"><b>#{i+1}</b> {inv.nombre_completo}</p>
+                        <p className="text-[11px] text-slate-500">DNI: {inv.dni} · <span className="font-mono">{inv.numero_entrada}</span></p>
                       </div>
-                    ))
-                  )}
+                      <button type="button" onClick={() => descargarTarjeta1080x1920(inv.nombre_completo, `Invitado de ${modalEditarEgr.nombre_completo}`, 'ACCESO GRUPAL')} className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-bold flex items-center gap-1"><Download className="w-3.5 h-3.5" /> Descargar QR</button>
+                    </div>
+                  ))}
                 </div>
               </div>
 
-              <div className="hidden" ref={adminQrRef}>
-                <QRCodeSVG value="ESRN005-ADMIN-QR-DUMMY" size={300} level="H" includeMargin={true} />
-              </div>
+              <div className="hidden" ref={adminQrRef}><QRCodeSVG value="ESRN005-ADMIN-QR-DUMMY" size={300} level="H" includeMargin={true} /></div>
 
               <div className="flex gap-2 pt-3 border-t">
-                <button type="button" onClick={() => setModalEditarEgr(null)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold cursor-pointer">Cancelar</button>
-                <button type="submit" disabled={guardandoEdicion} className="flex-1 py-2.5 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-xl text-xs font-bold shadow cursor-pointer">
-                  {guardandoEdicion ? 'Guardando...' : 'Guardar Cambios'}
-                </button>
+                <button type="button" onClick={() => setModalEditarEgr(null)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold">Cancelar</button>
+                <button type="submit" disabled={guardandoEdicion} className="flex-1 py-2.5 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold">Guardar Cambios</button>
               </div>
             </form>
           </div>
@@ -2031,444 +1706,107 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
         <div className="bg-white rounded-2xl border p-5 space-y-4">
           <div className="flex flex-wrap justify-between items-center gap-2">
             <h3 className="font-bold">Padrón de Docentes ({docentes.length})</h3>
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={() => exportarCSV('docentes')}
-                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow cursor-pointer"
-              >
-                <Download className="w-4 h-4" /> Exportar CSV
-              </button>
-              <button
-                onClick={() => setModalAgregarDocente(true)}
-                className="px-3.5 py-2 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow cursor-pointer"
-              >
-                <Plus className="w-4 h-4" /> Agregar Docente
-              </button>
-              <input ref={fileDocRef} type="file" accept=".csv,.txt" onChange={handleImportarCSVDocentes} className="hidden" />
-              <button onClick={() => fileDocRef.current?.click()} className="px-3 py-2 bg-indigo-50 text-indigo-700 border rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer">
-                <Upload className="w-4 h-4" /> Importar CSV
-              </button>
-              {docentes.length > 0 && (
-                <button onClick={vaciarPadronDocentes} className="px-3 py-2 bg-rose-50 text-rose-700 border rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer">
-                  <Trash2 className="w-4 h-4" /> Vaciar Padrón
-                </button>
-              )}
+            <div className="flex gap-2">
+              <button onClick={() => exportarCSV('docentes')} className="px-3.5 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold"><Download className="w-4 h-4" /> Exportar</button>
+              <button onClick={() => setModalAgregarDocente(true)} className="px-3.5 py-2 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold"><Plus className="w-4 h-4" /> Agregar Docente</button>
             </div>
           </div>
-
-          <div className="relative">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-            <input
-              type="text"
-              placeholder="Filtrar docentes por nombre o DNI..."
-              value={filtroDocente}
-              onChange={(e) => setFiltroDocente(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 rounded-xl border text-sm outline-none focus:border-[#6B1D2F]"
-            />
-          </div>
-
           <div className="max-h-96 overflow-y-auto divide-y">
-            {docentesFiltrados.length === 0 ? (
-              <p className="text-center text-slate-400 py-6">No se encontraron docentes.</p>
-            ) : (
-              docentesFiltrados.map((d) => (
-                <div key={d.id} className="py-2.5 flex justify-between items-center text-sm">
-                  <div>
-                    <span className="font-semibold">{d.nombre_completo}</span> 
-                    <span className="text-xs text-slate-500 ml-1">({d.dni})</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => abrirModalEditarDocente(d)}
-                      className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"
-                    >
-                      <Edit2 className="w-3 h-3" /> Editar y Descargar QR
-                    </button>
-
-                    <button onClick={async () => {
-                      const nuevoActivo = d.activo === false ? true : false;
-                      await supabase.from('docentes').update({ activo: nuevoActivo }).eq('id', d.id);
-                      await recargar();
-                      notify(nuevoActivo ? 'Docente reactivado.' : 'Docente marcado como No Asiste.');
-                    }} className={`px-2.5 py-1 rounded text-xs font-semibold cursor-pointer ${d.activo === false ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
-                      {d.activo === false ? 'Reactivar' : 'Marcar No Asiste'}
-                    </button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* MODAL AGREGAR DOCENTE */}
-      {modalAgregarDocente && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl overflow-hidden border">
-            <div className="bg-[#6B1D2F] text-white p-4 flex justify-between items-center">
-              <h3 className="font-bold text-base">Agregar Nuevo Docente</h3>
-              <button onClick={() => setModalAgregarDocente(false)} className="p-1 rounded-lg text-white/80 hover:bg-white/10 cursor-pointer">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <form onSubmit={agregarDocenteManual} className="p-5 space-y-3.5">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Nombre y Apellido</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ej: GÓMEZ, MARÍA"
-                  value={nuevoDocNombre}
-                  onChange={(e) => setNuevoDocNombre(e.target.value)}
-                  className="w-full px-3 py-2 bg-white border rounded-xl text-sm outline-none focus:border-[#6B1D2F]"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">DNI (8 dígitos)</label>
-                <input
-                  type="text"
-                  required
-                  maxLength={8}
-                  placeholder="Ej: 28123456"
-                  value={nuevoDocDni}
-                  onChange={(e) => setNuevoDocDni(sanitizeDNI(e.target.value))}
-                  className="w-full px-3 py-2 bg-white border rounded-xl text-sm font-mono outline-none focus:border-[#6B1D2F]"
-                />
-              </div>
-              <div className="flex gap-2 pt-3 border-t">
-                <button type="button" onClick={() => setModalAgregarDocente(false)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold cursor-pointer">Cancelar</button>
-                <button type="submit" className="flex-1 py-2.5 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold shadow cursor-pointer">Guardar</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL EDITAR DOCENTE Y DESCARGAR QR */}
-      {modalEditarDoc && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl overflow-hidden border">
-            <div className="bg-[#6B1D2F] text-white p-4 flex justify-between items-center">
-              <div>
-                <h3 className="font-bold text-base">Editar Docente y Descargar QR</h3>
-                <p className="text-xs text-rose-100">Actualizar datos y descargar pase oficial.</p>
-              </div>
-              <button onClick={() => setModalEditarDoc(null)} className="p-1.5 rounded-lg text-white/80 hover:bg-white/10 cursor-pointer">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={guardarEdicionDocente} className="p-5 space-y-4">
-              <div className="p-3 bg-slate-50 border rounded-xl flex items-center justify-between">
-                <div>
-                  <p className="font-bold text-sm text-slate-900">QR Oficial del Docente</p>
-                  <p className="text-[11px] text-slate-500">Descargar pase institucional en 1080x1920</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => descargarTarjetaAdmin1080x1920(modalEditarDoc.nombre_completo, `DNI: ${modalEditarDoc.dni}`, 'DOCENTE')}
-                  className="px-3.5 py-2 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow cursor-pointer shrink-0"
-                >
-                  <Download className="w-4 h-4" /> Descargar QR
-                </button>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Nombre y Apellido</label>
-                <input
-                  type="text"
-                  required
-                  value={editDocNombre}
-                  onChange={(e) => setEditDocNombre(e.target.value)}
-                  className="w-full px-3 py-2 bg-white border rounded-xl text-sm outline-none focus:border-[#6B1D2F]"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">DNI (8 dígitos)</label>
-                <input
-                  type="text"
-                  required
-                  maxLength={8}
-                  value={editDocDni}
-                  onChange={(e) => setEditDocDni(sanitizeDNI(e.target.value))}
-                  className="w-full px-3 py-2 bg-white border rounded-xl text-sm font-mono outline-none focus:border-[#6B1D2F]"
-                />
-              </div>
-
-              <div className="hidden" ref={adminQrRef}>
-                <QRCodeSVG value="ESRN005-ADMIN-QR-DUMMY" size={300} level="H" includeMargin={true} />
-              </div>
-
-              <div className="flex gap-2 pt-3 border-t">
-                <button type="button" onClick={() => setModalEditarDoc(null)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold hover:bg-slate-50 cursor-pointer">Cancelar</button>
-                <button type="submit" disabled={guardandoDocente} className="flex-1 py-2.5 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-xl text-xs font-bold shadow cursor-pointer">
-                  {guardandoDocente ? 'Guardando...' : 'Guardar Cambios'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* SECCIÓN VIP / INVITADOS ESPECIALES */}
-      {tab === 'vip' && (
-        <div className="bg-white rounded-2xl border p-5 space-y-4">
-          <div className="flex flex-wrap justify-between items-center gap-2">
-            <h3 className="font-bold">Padrón de Invitados VIP / Autoridades ({especiales.length})</h3>
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={() => exportarCSV('vip')}
-                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow cursor-pointer"
-              >
-                <Download className="w-4 h-4" /> Exportar CSV
-              </button>
-              <button
-                onClick={() => setModalAgregarVip(true)}
-                className="px-3.5 py-2 bg-amber-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow cursor-pointer"
-              >
-                <Plus className="w-4 h-4" /> Agregar Invitado VIP
-              </button>
-              <input ref={fileVipRef} type="file" accept=".csv,.txt" onChange={handleImportarCSVVips} className="hidden" />
-              <button onClick={() => fileVipRef.current?.click()} className="px-3 py-2 bg-indigo-50 text-indigo-700 border rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer">
-                <Upload className="w-4 h-4" /> Importar CSV
-              </button>
-              {especiales.length > 0 && (
-                <button onClick={vaciarPadronVip} className="px-3 py-2 bg-rose-50 text-rose-700 border rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer">
-                  <Trash2 className="w-4 h-4" /> Vaciar Padrón
-                </button>
-              )}
-            </div>
-          </div>
-
-          <div className="relative">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-            <input
-              type="text"
-              placeholder="Filtrar invitados VIP por nombre o DNI..."
-              value={filtroVip}
-              onChange={(e) => setFiltroVip(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 rounded-xl border text-sm outline-none focus:border-amber-600"
-            />
-          </div>
-
-          <div className="max-h-96 overflow-y-auto divide-y">
-            {vipsFiltrados.length === 0 ? (
-              <p className="text-center text-slate-400 py-6">No se encontraron invitados VIP.</p>
-            ) : (
-              vipsFiltrados.map((v) => (
-                <div key={v.id} className="py-2.5 flex justify-between items-center text-sm">
-                  <div>
-                    <span className="font-semibold">{v.nombre_completo}</span> 
-                    <span className="text-xs text-slate-500 ml-1">{v.dni ? `(${v.dni})` : '(Sin DNI)'}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => abrirModalEditarVip(v)}
-                      className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"
-                    >
-                      <Edit2 className="w-3 h-3" /> Editar y Descargar QR
-                    </button>
-
-                    <button onClick={async () => {
-                      const nuevoActivo = v.activo === false ? true : false;
-                      await supabase.from('invitados_especiales').update({ activo: nuevoActivo }).eq('id', v.id);
-                      await recargar();
-                      notify(nuevoActivo ? 'VIP reactivado.' : 'VIP marcado como No Asiste.');
-                    }} className={`px-2.5 py-1 rounded text-xs font-semibold cursor-pointer ${v.activo === false ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
-                      {v.activo === false ? 'Reactivar' : 'Marcar No Asiste'}
-                    </button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* MODAL AGREGAR VIP */}
-      {modalAgregarVip && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl overflow-hidden border">
-            <div className="bg-amber-600 text-white p-4 flex justify-between items-center">
-              <h3 className="font-bold text-base">Agregar Invitado VIP</h3>
-              <button onClick={() => setModalAgregarVip(false)} className="p-1 rounded-lg text-white/80 hover:bg-white/10 cursor-pointer">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <form onSubmit={agregarVipManual} className="p-5 space-y-3.5">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Nombre y Apellido / Institución</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ej: SUPERVISIÓN ESCOLAR"
-                  value={nuevoVipNombre}
-                  onChange={(e) => setNuevoVipNombre(e.target.value)}
-                  className="w-full px-3 py-2 bg-white border rounded-xl text-sm outline-none focus:border-amber-600"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">DNI (Opcional)</label>
-                <input
-                  type="text"
-                  maxLength={8}
-                  placeholder="Ej: 20123456"
-                  value={nuevoVipDni}
-                  onChange={(e) => setNuevoVipDni(sanitizeDNI(e.target.value))}
-                  className="w-full px-3 py-2 bg-white border rounded-xl text-sm font-mono outline-none focus:border-amber-600"
-                />
-              </div>
-              <div className="flex gap-2 pt-3 border-t">
-                <button type="button" onClick={() => setModalAgregarVip(false)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold cursor-pointer">Cancelar</button>
-                <button type="submit" className="flex-1 py-2.5 bg-amber-600 text-white rounded-xl text-xs font-bold shadow cursor-pointer">Guardar</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL EDITAR VIP Y DESCARGAR QR */}
-      {modalEditarVip && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl overflow-hidden border">
-            <div className="bg-amber-600 text-white p-4 flex justify-between items-center">
-              <div>
-                <h3 className="font-bold text-base">Editar Invitado VIP y Descargar QR</h3>
-                <p className="text-xs text-amber-100">Actualizar datos y descargar pase oficial.</p>
-              </div>
-              <button onClick={() => setModalEditarVip(null)} className="p-1.5 rounded-lg text-white/80 hover:bg-white/10 cursor-pointer">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={guardarEdicionVip} className="p-5 space-y-4">
-              <div className="p-3 bg-slate-50 border rounded-xl flex items-center justify-between">
-                <div>
-                  <p className="font-bold text-sm text-slate-900">QR Oficial del Invitado VIP</p>
-                  <p className="text-[11px] text-slate-500">Descargar pase institucional en 1080x1920</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => descargarTarjetaAdmin1080x1920(modalEditarVip.nombre_completo, modalEditarVip.dni ? `DNI: ${modalEditarVip.dni}` : 'Autoridad / Invitado Especial', 'INVITADO VIP')}
-                  className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow cursor-pointer shrink-0"
-                >
-                  <Download className="w-4 h-4" /> Descargar QR
-                </button>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Nombre y Apellido</label>
-                <input
-                  type="text"
-                  required
-                  value={editVipNombre}
-                  onChange={(e) => setEditVipNombre(e.target.value)}
-                  className="w-full px-3 py-2 bg-white border rounded-xl text-sm outline-none focus:border-amber-600"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">DNI (Opcional)</label>
-                <input
-                  type="text"
-                  maxLength={8}
-                  value={editVipDni}
-                  onChange={(e) => setEditVipDni(sanitizeDNI(e.target.value))}
-                  className="w-full px-3 py-2 bg-white border rounded-xl text-sm font-mono outline-none focus:border-amber-600"
-                />
-              </div>
-
-              <div className="hidden" ref={adminQrRef}>
-                <QRCodeSVG value="ESRN005-ADMIN-QR-DUMMY" size={300} level="H" includeMargin={true} />
-              </div>
-
-              <div className="flex gap-2 pt-3 border-t">
-                <button type="button" onClick={() => setModalEditarVip(null)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold hover:bg-slate-50 cursor-pointer">Cancelar</button>
-                <button type="submit" disabled={guardandoVip} className="flex-1 py-2.5 bg-amber-600 hover:bg-opacity-90 text-white rounded-xl text-xs font-bold shadow cursor-pointer">
-                  {guardandoVip ? 'Guardando...' : 'Guardar Cambios'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {tab === 'solicitudes' && (
-        <div className="bg-white rounded-2xl border p-5 space-y-3">
-          <h3 className="font-bold">Bandeja de Solicitudes</h3>
-          {solicitudes.map((s) => (
-            <div key={s.id} className="p-3 border rounded-xl flex justify-between items-center">
-              <div>
-                <p className="font-bold text-sm">{s.egresado_nombre} (+{s.cantidad_solicitada})</p>
-                <p className="text-xs text-slate-500">{s.observacion}</p>
-              </div>
-              {s.estado === 'pendiente' ? (
-                <div className="flex gap-2">
-                  <button onClick={() => resolverSolicitud(s, true)} className="px-3 py-1 bg-emerald-600 text-white rounded text-xs font-bold cursor-pointer">Aprobar</button>
-                  <button onClick={() => resolverSolicitud(s, false)} className="px-3 py-1 bg-rose-100 text-rose-700 rounded text-xs font-bold cursor-pointer">Rechazar</button>
-                </div>
-              ) : (
-                <span className="text-xs font-bold uppercase">{s.estado}</span>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {tab === 'reportes' && (
-        <div className="bg-white rounded-2xl border p-5 space-y-4">
-          <h3 className="font-bold">Reporte de Asistencia General</h3>
-          <p className="text-sm text-slate-600">Egresados presentes: {egresados.filter(e => e.asistio).length} / {egresados.length}</p>
-          <p className="text-sm text-slate-600">Invitados presentes: {invitados.filter(i => i.asistio).length} / {invitados.length}</p>
-          <p className="text-sm text-slate-600">Docentes presentes: {docentes.filter(d => d.asistio).length} / {docentes.length}</p>
-          <p className="text-sm text-slate-600">VIPs presentes: {especiales.filter(v => v.asistio).length} / {especiales.length}</p>
-        </div>
-      )}
-
-      {tab === 'usuarios' && perfilStaff?.rol === 'admin' && (
-        <div className="bg-white rounded-2xl border p-5 space-y-5">
-          <h3 className="font-bold">Gestión de Usuarios del Sistema</h3>
-          <form onSubmit={crearUsuarioSistema} className="grid grid-cols-1 sm:grid-cols-5 gap-3 bg-slate-50 p-4 rounded-xl border">
-            <input type="text" placeholder="Nombre" value={nuevoNombreUsr} onChange={(e) => setNuevoNombreUsr(e.target.value)} className="px-3 py-2 rounded-xl border text-sm bg-white" required />
-            <input type="email" placeholder="Correo electrónico" value={nuevoEmailUsr} onChange={(e) => setNuevoEmailUsr(e.target.value)} className="px-3 py-2 rounded-xl border text-sm bg-white" required />
-            <div className="relative">
-              <input type={showPassUsr ? "text" : "password"} placeholder="Contraseña" value={nuevoPassUsr} onChange={(e) => setNuevoPassUsr(e.target.value)} className="w-full px-3 py-2 rounded-xl border text-sm bg-white pr-10" required />
-              <button type="button" onClick={() => setShowPassUsr(!showPassUsr)} className="absolute right-3 top-2.5 text-slate-400 cursor-pointer">
-                {showPassUsr ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
-            <select value={nuevoRolUsr} onChange={(e) => setNuevoRolUsr(e.target.value)} className="px-3 py-2 rounded-xl border text-sm bg-white font-medium">
-              <option value="puerta">Puerta</option>
-              <option value="coordinador">Coordinador</option>
-              <option value="admin">Administrador</option>
-            </select>
-            <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs cursor-pointer">+ Crear Usuario</button>
-          </form>
-
-          <div className="divide-y text-sm">
-            {usuariosSistema.map((u) => (
-              <div key={u.id} className="py-3 flex justify-between items-center">
-                <div>
-                  <p className="font-bold">{u.nombre}</p>
-                  <p className="text-xs text-slate-500">{u.email} · Rol: <strong className="uppercase">{u.rol}</strong></p>
-                </div>
-                <button onClick={async () => {
-                  if(!window.confirm(`¿Eliminar a ${u.nombre}?`)) return;
-                  await supabase.from('usuarios_sistema').delete().eq('id', u.id);
-                  await registrarLog('ELIMINAR_USUARIO', 'Sistema', `Se eliminó al usuario ${u.nombre}`);
-                  await recargar();
-                  notify('Usuario eliminado.');
-                }} className="text-rose-600 hover:text-rose-800 p-1 cursor-pointer">
-                  <Trash2 className="w-4 h-4" />
-                </button>
+            {docentes.map((d) => (
+              <div key={d.id} className="py-2.5 flex justify-between items-center text-sm">
+                <div><span className="font-semibold">{d.nombre_completo}</span> <span className="text-xs text-slate-500">({d.dni})</span></div>
+                <button onClick={() => abrirModalEditarDocente(d)} className="px-2.5 py-1 bg-amber-50 text-amber-700 border rounded-lg text-xs font-bold"><Edit2 className="w-3 h-3" /> Editar y Descargar QR</button>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* SECCIÓN DE LOG DE AUDITORÍA (EXCLUSIVA PARA ADMIN, ABAJO DEL TODO EN ADMINISTRACIÓN) */}
+      {modalEditarDoc && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl overflow-hidden border">
+            <div className="bg-[#6B1D2F] text-white p-4 flex justify-between items-center">
+              <h3 className="font-bold text-base">Editar Docente y Descargar QR</h3>
+              <button onClick={() => setModalEditarDoc(null)} className="p-1.5 rounded-lg text-white/80"><X className="w-5 h-5" /></button>
+            </div>
+            <form onSubmit={guardarEdicionDocente} className="p-5 space-y-4">
+              <div className="p-3 bg-slate-50 border rounded-xl flex items-center justify-between">
+                <div>
+                  <p className="font-bold text-sm text-slate-900">QR Oficial del Docente</p>
+                </div>
+                <button type="button" onClick={() => descargarTarjetaAdmin1080x1920(modalEditarDoc.nombre_completo, `DNI: ${modalEditarDoc.dni}`, 'DOCENTE')} className="px-3.5 py-2 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold"><Download className="w-4 h-4" /> Descargar QR</button>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Nombre y Apellido</label>
+                <input type="text" required value={editDocNombre} onChange={(e) => setEditDocNombre(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">DNI</label>
+                <input type="text" required maxLength={8} value={editDocDni} onChange={(e) => setEditDocDni(sanitizeDNI(e.target.value))} className="w-full px-3 py-2 border rounded-xl text-sm font-mono" />
+              </div>
+              <div className="hidden" ref={adminQrRef}><QRCodeSVG value="ESRN005-ADMIN-QR-DUMMY" size={300} level="H" includeMargin={true} /></div>
+              <div className="flex gap-2 pt-3 border-t">
+                <button type="button" onClick={() => setModalEditarDoc(null)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold">Cancelar</button>
+                <button type="submit" disabled={guardandoDocente} className="flex-1 py-2.5 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold">Guardar Cambios</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {tab === 'vip' && (
+        <div className="bg-white rounded-2xl border p-5 space-y-4">
+          <div className="flex flex-wrap justify-between items-center gap-2">
+            <h3 className="font-bold">Padrón de Invitados VIP ({especiales.length})</h3>
+            <div className="flex gap-2">
+              <button onClick={() => exportarCSV('vip')} className="px-3.5 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold"><Download className="w-4 h-4" /> Exportar</button>
+              <button onClick={() => setModalAgregarVip(true)} className="px-3.5 py-2 bg-amber-600 text-white rounded-xl text-xs font-bold"><Plus className="w-4 h-4" /> Agregar VIP</button>
+            </div>
+          </div>
+          <div className="max-h-96 overflow-y-auto divide-y">
+            {especiales.map((v) => (
+              <div key={v.id} className="py-2.5 flex justify-between items-center text-sm">
+                <div><span className="font-semibold">{v.nombre_completo}</span></div>
+                <button onClick={() => abrirModalEditarVip(v)} className="px-2.5 py-1 bg-amber-50 text-amber-700 border rounded-lg text-xs font-bold"><Edit2 className="w-3 h-3" /> Editar y Descargar QR</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {modalEditarVip && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl overflow-hidden border">
+            <div className="bg-amber-600 text-white p-4 flex justify-between items-center">
+              <h3 className="font-bold text-base">Editar Invitado VIP y Descargar QR</h3>
+              <button onClick={() => setModalEditarVip(null)} className="p-1.5 rounded-lg text-white/80"><X className="w-5 h-5" /></button>
+            </div>
+            <form onSubmit={guardarEdicionVip} className="p-5 space-y-4">
+              <div className="p-3 bg-slate-50 border rounded-xl flex items-center justify-between">
+                <div>
+                  <p className="font-bold text-sm text-slate-900">QR Oficial VIP</p>
+                </div>
+                <button type="button" onClick={() => descargarTarjetaAdmin1080x1920(modalEditarVip.nombre_completo, modalEditarVip.dni ? `DNI: ${modalEditarVip.dni}` : 'Autoridad', 'INVITADO VIP')} className="px-3.5 py-2 bg-amber-600 text-white rounded-xl text-xs font-bold"><Download className="w-4 h-4" /> Descargar QR</button>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Nombre / Institución</label>
+                <input type="text" required value={editVipNombre} onChange={(e) => setEditVipNombre(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">DNI (Opcional)</label>
+                <input type="text" maxLength={8} value={editVipDni} onChange={(e) => setEditVipDni(sanitizeDNI(e.target.value))} className="w-full px-3 py-2 border rounded-xl text-sm font-mono" />
+              </div>
+              <div className="hidden" ref={adminQrRef}><QRCodeSVG value="ESRN005-ADMIN-QR-DUMMY" size={300} level="H" includeMargin={true} /></div>
+              <div className="flex gap-2 pt-3 border-t">
+                <button type="button" onClick={() => setModalEditarVip(null)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold">Cancelar</button>
+                <button type="submit" disabled={guardandoVip} className="flex-1 py-2.5 bg-amber-600 text-white rounded-xl text-xs font-bold">Guardar Cambios</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* SECCIÓN DE LOG DE AUDITORÍA (EXCLUSIVA PARA ADMIN, ABAJO DEL TODO) */}
       {perfilStaff?.rol === 'admin' && (
         <div className="bg-white rounded-2xl border p-5 space-y-4 mt-10 border-t-4 border-indigo-600">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
@@ -2479,13 +1817,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
               <p className="text-xs text-slate-500">Historial completo de acciones realizadas por los operadores del sistema.</p>
             </div>
             <div className="w-full sm:w-72">
-              <input
-                type="text"
-                placeholder="Buscar en logs (usuario, módulo, acción)..."
-                value={filtroLogBusqueda}
-                onChange={(e) => setFiltroLogBusqueda(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border text-xs outline-none focus:border-indigo-600"
-              />
+              <input type="text" placeholder="Buscar en logs..." value={filtroLogBusqueda} onChange={(e) => setFiltroLogBusqueda(e.target.value)} className="w-full px-3 py-2 rounded-xl border text-xs outline-none focus:border-indigo-600" />
             </div>
           </div>
 
@@ -2501,9 +1833,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                     <span className="font-semibold text-slate-700">{log.accion}:</span>
                     <span className="text-slate-600 ml-1">{log.detalle}</span>
                   </div>
-                  <span className="text-[11px] text-slate-400 font-mono">
-                    {new Date(log.created_at).toLocaleString()}
-                  </span>
+                  <span className="text-[11px] text-slate-400 font-mono">{new Date(log.created_at).toLocaleString()}</span>
                 </div>
               ))
             )}
@@ -2511,32 +1841,22 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
         </div>
       )}
 
-      {/* Panel de Control y Mantenimiento abajo del todo */}
       <div className="bg-gradient-to-r from-slate-900 to-[#6B1D2F] text-white p-5 rounded-2xl shadow-xl flex flex-wrap items-center justify-between gap-4 mt-6 border-t-4 border-amber-500">
         <div>
           <h4 className="font-extrabold text-sm uppercase tracking-wider text-rose-200">Panel de Control y Mantenimiento</h4>
           <p className="text-xs text-slate-200 mt-0.5">Acciones críticas de reinicio de asistencias y borrado de datos</p>
         </div>
         <div className="flex flex-wrap items-center gap-2.5">
-          <button onClick={reiniciarAsistenciasGeneral} className="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow transition cursor-pointer">
-            <RotateCcw className="w-4 h-4" /> 🔄 Reiniciar Asistencias (Puerta)
-          </button>
-          <button onClick={borrarInvitadosEgresados} className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow transition cursor-pointer">
-            <Trash2 className="w-4 h-4" /> 🗑️ Borrar Invitados Egresados
-          </button>
+          <button onClick={reiniciarAsistenciasGeneral} className="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow cursor-pointer"><RotateCcw className="w-4 h-4" /> 🔄 Reiniciar Asistencias</button>
+          <button onClick={borrarInvitadosEgresados} className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow cursor-pointer"><Trash2 className="w-4 h-4" /> 🗑️ Borrar Invitados</button>
         </div>
       </div>
     </div>
   );
 }
 
-// ============================================================================
-// REPORTE RESUMEN PARA PAPEL (Incluye Egresados, Invitados, Docentes y VIP)
-// ============================================================================
 function ReporteResumenPapel({ egresados, invitados, docentes, especiales }) {
-  const egresadosOrdenados = [...egresados].sort((a, b) => 
-    (a.nombre_completo || '').localeCompare(b.nombre_completo || '')
-  );
+  const egresadosOrdenados = [...egresados].sort((a, b) => (a.nombre_completo || '').localeCompare(b.nombre_completo || ''));
 
   return (
     <div className="max-w-4xl mx-auto bg-white p-8 rounded-2xl shadow-sm border space-y-8 print:shadow-none print:border-none print:p-0 print:m-0">
@@ -2545,9 +1865,7 @@ function ReporteResumenPapel({ egresados, invitados, docentes, especiales }) {
           <h2 className="text-xl font-bold text-[#6B1D2F]">ESRN N° 005 — Cipolletti</h2>
           <p className="text-xs text-slate-500">Acto de Colación 2026 · Resumen General para Control en Papel</p>
         </div>
-        <button onClick={() => window.print()} className="px-4 py-2 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow cursor-pointer print:hidden">
-          <Printer className="w-4 h-4" /> Imprimir Documento
-        </button>
+        <button onClick={() => window.print()} className="px-4 py-2 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold flex items-center gap-2 cursor-pointer print:hidden"><Printer className="w-4 h-4" /> Imprimir Documento</button>
       </div>
 
       <div className="space-y-3">
@@ -2569,25 +1887,17 @@ function ReporteResumenPapel({ egresados, invitados, docentes, especiales }) {
                 return (
                   <React.Fragment key={egr.id}>
                     <tr className="bg-slate-50 font-bold">
-                      <td className="p-2 border align-top" colSpan={5}>
-                        🎓 {egr.nombre_completo} (DNI: {egr.dni}) · Cel: {egr.celular || 'S/N'}
-                      </td>
+                      <td className="p-2 border align-top" colSpan={5}>🎓 {egr.nombre_completo} (DNI: {egr.dni}) · Cel: {egr.celular || 'S/N'}</td>
                     </tr>
                     {misInv.length === 0 ? (
-                      <tr>
-                        <td className="p-2 border text-slate-400 italic" colSpan={5}>Sin invitados cargados</td>
-                      </tr>
+                      <tr><td className="p-2 border text-slate-400 italic" colSpan={5}>Sin invitados cargados</td></tr>
                     ) : (
                       misInv.map((inv, idx) => (
                         <tr key={inv.id} className="hover:bg-slate-50/50">
                           <td className="p-2 border text-slate-400 pl-6">↳ Cupo #{idx + 1}</td>
                           <td className="p-2 border font-medium">{inv.nombre_completo}</td>
                           <td className="p-2 border font-mono">{inv.dni}</td>
-                          <td className="p-2 border text-center">
-                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800">
-                              {inv.es_grupal !== false ? 'Grupal' : 'Individual'}
-                            </span>
-                          </td>
+                          <td className="p-2 border text-center"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800">{inv.es_grupal !== false ? 'Grupal' : 'Individual'}</span></td>
                           <td className="p-2 border text-center w-28">______</td>
                         </tr>
                       ))
@@ -2602,50 +1912,26 @@ function ReporteResumenPapel({ egresados, invitados, docentes, especiales }) {
 
       <div className="space-y-3 pt-6">
         <h3 className="font-bold text-sm text-[#6B1D2F] uppercase tracking-wide">2. Padrón de Docentes</h3>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse text-xs">
-            <thead>
-              <tr className="bg-slate-100 border-b border-slate-300">
-                <th className="p-2 border">Nombre y Apellido</th>
-                <th className="p-2 border">DNI</th>
-                <th className="p-2 border text-center">Firma Ingreso</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {docentes.map((d) => (
-                <tr key={d.id}>
-                  <td className="p-2 border font-medium">📚 {d.nombre_completo}</td>
-                  <td className="p-2 border font-mono">{d.dni}</td>
-                  <td className="p-2 border text-center w-28">______</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <table className="w-full text-left border-collapse text-xs">
+          <thead><tr className="bg-slate-100 border-b"><th className="p-2 border">Nombre y Apellido</th><th className="p-2 border">DNI</th><th className="p-2 border text-center">Firma</th></tr></thead>
+          <tbody>
+            {docentes.map((d) => (
+              <tr key={d.id}><td className="p-2 border font-medium">📚 {d.nombre_completo}</td><td className="p-2 border font-mono">{d.dni}</td><td className="p-2 border text-center">______</td></tr>
+            ))}
+          </tbody>
+        </table>
       </div>
 
       <div className="space-y-3 pt-6">
         <h3 className="font-bold text-sm text-[#6B1D2F] uppercase tracking-wide">3. Padrón de Invitados VIP / Autoridades</h3>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse text-xs">
-            <thead>
-              <tr className="bg-slate-100 border-b border-slate-300">
-                <th className="p-2 border">Nombre / Institución</th>
-                <th className="p-2 border">DNI</th>
-                <th className="p-2 border text-center">Firma Ingreso</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {especiales.map((v) => (
-                <tr key={v.id}>
-                  <td className="p-2 border font-medium">⭐ {v.nombre_completo}</td>
-                  <td className="p-2 border font-mono">{v.dni || 'S/D'}</td>
-                  <td className="p-2 border text-center w-28">______</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <table className="w-full text-left border-collapse text-xs">
+          <thead><tr className="bg-slate-100 border-b"><th className="p-2 border">Nombre / Institución</th><th className="p-2 border">DNI</th><th className="p-2 border text-center">Firma</th></tr></thead>
+          <tbody>
+            {especiales.map((v) => (
+              <tr key={v.id}><td className="p-2 border font-medium">⭐ {v.nombre_completo}</td><td className="p-2 border font-mono">{v.dni || 'S/D'}</td><td className="p-2 border text-center">______</td></tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );
