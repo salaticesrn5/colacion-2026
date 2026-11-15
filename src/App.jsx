@@ -1541,6 +1541,81 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     }
   };
 
+  const eliminarEgresado = async (egr) => {
+    if (!egr) return;
+    if (!window.confirm(`¿Eliminar a ${egr.nombre_completo} (DNI ${egr.dni}) y todos sus invitados cargados? Esta acción no se puede deshacer.`)) return;
+    try {
+      const { error: e1 } = await supabase.from('invitados').delete().eq('egresado_id', egr.id);
+      if (e1) throw e1;
+      const { error: e2 } = await supabase.from('egresados').delete().eq('id', egr.id);
+      if (e2) throw e2;
+      await registrarLog('ELIMINAR', 'Egresados', `Se eliminó al egresado ${egr.nombre_completo} (DNI ${egr.dni})`);
+      setModalEditarEgr(null);
+      await recargar();
+      notify('Egresado eliminado.');
+    } catch (err) {
+      notify('Error al eliminar egresado: ' + err.message, 'error');
+    }
+  };
+
+  const eliminarDocente = async (doc) => {
+    if (!doc) return;
+    if (!window.confirm(`¿Eliminar a ${doc.nombre_completo} (DNI ${doc.dni})? Esta acción no se puede deshacer.`)) return;
+    try {
+      const { error } = await supabase.from('docentes').delete().eq('id', doc.id);
+      if (error) throw error;
+      await registrarLog('ELIMINAR', 'Docentes', `Se eliminó al docente ${doc.nombre_completo} (DNI ${doc.dni})`);
+      setModalEditarDoc(null);
+      await recargar();
+      notify('Docente eliminado.');
+    } catch (err) {
+      notify('Error al eliminar docente: ' + err.message, 'error');
+    }
+  };
+
+  const eliminarVip = async (vip) => {
+    if (!vip) return;
+    if (!window.confirm(`¿Eliminar a ${vip.nombre_completo}? Esta acción no se puede deshacer.`)) return;
+    try {
+      const { error } = await supabase.from('invitados_especiales').delete().eq('id', vip.id);
+      if (error) throw error;
+      await registrarLog('ELIMINAR', 'VIP', `Se eliminó al invitado VIP ${vip.nombre_completo}`);
+      setModalEditarVip(null);
+      await recargar();
+      notify('Invitado VIP eliminado.');
+    } catch (err) {
+      notify('Error al eliminar VIP: ' + err.message, 'error');
+    }
+  };
+
+  const vaciarPadronDocentes = async () => {
+    const resp = window.prompt("Para confirmar el vaciado total del padrón de docentes, escribí VACIAR en mayúsculas:");
+    if (resp !== 'VACIAR') return;
+    try {
+      const { error } = await supabase.from('docentes').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      if (error) throw error;
+      await registrarLog('VACIAR', 'Docentes', 'Se vació todo el padrón de docentes.');
+      await recargar();
+      notify('Padrón de docentes vaciado correctamente.');
+    } catch (err) {
+      notify('Error al vaciar docentes: ' + err.message, 'error');
+    }
+  };
+
+  const vaciarPadronVip = async () => {
+    const resp = window.prompt("Para confirmar el vaciado total del padrón VIP, escribí VACIAR en mayúsculas:");
+    if (resp !== 'VACIAR') return;
+    try {
+      const { error } = await supabase.from('invitados_especiales').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      if (error) throw error;
+      await registrarLog('VACIAR', 'VIP', 'Se vació todo el padrón VIP.');
+      await recargar();
+      notify('Padrón VIP vaciado correctamente.');
+    } catch (err) {
+      notify('Error al vaciar VIP: ' + err.message, 'error');
+    }
+  };
+
   const totalFilas = config.filas || 15;
   const butacasPorFila = config.butacas_por_fila || 35;
 
@@ -1753,6 +1828,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
               </div>
 
               <div className="hidden" ref={adminQrRef}><QRCodeSVG value="ESRN005-ADMIN-QR-DUMMY" size={300} level="H" includeMargin={true} /></div>
+              <button type="button" onClick={() => eliminarEgresado(modalEditarEgr)} className="w-full py-2 bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"><Trash2 className="w-4 h-4" /> Eliminar egresado y sus invitados</button>
 
               <div className="flex gap-2 pt-3 border-t">
                 <button type="button" onClick={() => setModalEditarEgr(null)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold">Cancelar</button>
@@ -1770,6 +1846,9 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
             <div className="flex gap-2">
               <button onClick={() => exportarCSV('docentes')} className="px-3.5 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold"><Download className="w-4 h-4" /> Exportar</button>
               <button onClick={() => setModalAgregarDocente(true)} className="px-3.5 py-2 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold"><Plus className="w-4 h-4" /> Agregar Docente</button>
+              <input ref={fileDocRef} type="file" accept=".csv,.txt" onChange={handleImportarCSVDocentes} className="hidden" />
+              <button onClick={() => fileDocRef.current?.click()} className="px-3 py-2 bg-indigo-50 text-indigo-700 border rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"><Upload className="w-4 h-4" /> Importar CSV</button>
+              {docentes.length > 0 && <button onClick={vaciarPadronDocentes} className="px-3 py-2 bg-rose-50 text-rose-700 border rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"><Trash2 className="w-4 h-4" /> Vaciar Padrón</button>}
             </div>
           </div>
           <div className="max-h-96 overflow-y-auto divide-y">
@@ -1848,6 +1927,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                 <input type="text" required maxLength={8} value={editDocDni} onChange={(e) => setEditDocDni(sanitizeDNI(e.target.value))} className="w-full px-3 py-2 border rounded-xl text-sm font-mono" />
               </div>
               <div className="hidden" ref={adminQrRef}><QRCodeSVG value="ESRN005-ADMIN-QR-DUMMY" size={300} level="H" includeMargin={true} /></div>
+              <button type="button" onClick={() => eliminarDocente(modalEditarDoc)} className="w-full py-2 bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"><Trash2 className="w-4 h-4" /> Eliminar docente</button>
               <div className="flex gap-2 pt-3 border-t">
                 <button type="button" onClick={() => setModalEditarDoc(null)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold">Cancelar</button>
                 <button type="submit" disabled={guardandoDocente} className="flex-1 py-2.5 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold">Guardar Cambios</button>
@@ -1864,6 +1944,9 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
             <div className="flex gap-2">
               <button onClick={() => exportarCSV('vip')} className="px-3.5 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold"><Download className="w-4 h-4" /> Exportar</button>
               <button onClick={() => setModalAgregarVip(true)} className="px-3.5 py-2 bg-amber-600 text-white rounded-xl text-xs font-bold"><Plus className="w-4 h-4" /> Agregar VIP</button>
+              <input ref={fileVipRef} type="file" accept=".csv,.txt" onChange={handleImportarCSVVips} className="hidden" />
+              <button onClick={() => fileVipRef.current?.click()} className="px-3 py-2 bg-indigo-50 text-indigo-700 border rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"><Upload className="w-4 h-4" /> Importar CSV</button>
+              {especiales.length > 0 && <button onClick={vaciarPadronVip} className="px-3 py-2 bg-rose-50 text-rose-700 border rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"><Trash2 className="w-4 h-4" /> Vaciar Padrón</button>}
             </div>
           </div>
           <div className="max-h-96 overflow-y-auto divide-y">
@@ -1941,6 +2024,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                 <input type="text" maxLength={8} value={editVipDni} onChange={(e) => setEditVipDni(sanitizeDNI(e.target.value))} className="w-full px-3 py-2 border rounded-xl text-sm font-mono" />
               </div>
               <div className="hidden" ref={adminQrRef}><QRCodeSVG value="ESRN005-ADMIN-QR-DUMMY" size={300} level="H" includeMargin={true} /></div>
+              <button type="button" onClick={() => eliminarVip(modalEditarVip)} className="w-full py-2 bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"><Trash2 className="w-4 h-4" /> Eliminar invitado VIP</button>
               <div className="flex gap-2 pt-3 border-t">
                 <button type="button" onClick={() => setModalEditarVip(null)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold">Cancelar</button>
                 <button type="submit" disabled={guardandoVip} className="flex-1 py-2.5 bg-amber-600 text-white rounded-xl text-xs font-bold">Guardar Cambios</button>
