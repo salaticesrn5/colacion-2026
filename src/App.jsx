@@ -1625,9 +1625,16 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
   const vipsPresentesCount = especiales.filter(v => v.asistio).length;
   const totalAsistentesPresentes = egresadosPresentesCount + invitadosPresentesCount + docentesPresentesCount + vipsPresentesCount;
 
-  const egresadosFiltrados = egresados.filter((e) => (e.nombre_completo || '').toLowerCase().includes(filtroEgresado.toLowerCase()) || (e.dni || '').includes(filtroEgresado));
-  const docentesFiltrados = docentes.filter((d) => (d.nombre_completo || '').toLowerCase().includes(filtroDocente.toLowerCase()) || (d.dni || '').includes(filtroDocente));
-  const vipsFiltrados = especiales.filter((v) => (v.nombre_completo || '').toLowerCase().includes(filtroVip.toLowerCase()) || (v.dni || '').includes(filtroVip));
+  const normTxt = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+  const coincideBusqueda = (item, q) => {
+    const texto = normTxt(q);
+    if (!texto) return true;
+    const soloDigitos = String(q).replace(/\D/g, '');
+    return normTxt(item.nombre_completo).includes(texto) || (soloDigitos.length > 0 && String(item.dni || '').includes(soloDigitos));
+  };
+  const egresadosFiltrados = egresados.filter((e) => coincideBusqueda(e, filtroEgresado));
+  const docentesFiltrados = docentes.filter((d) => coincideBusqueda(d, filtroDocente));
+  const vipsFiltrados = especiales.filter((v) => coincideBusqueda(v, filtroVip));
   const logsFiltrados = logsSistema.filter((l) => (l.usuario || '').toLowerCase().includes(filtroLogBusqueda.toLowerCase()) || (l.accion || '').toLowerCase().includes(filtroLogBusqueda.toLowerCase()) || (l.modulo || '').toLowerCase().includes(filtroLogBusqueda.toLowerCase()) || (l.detalle || '').toLowerCase().includes(filtroLogBusqueda.toLowerCase()));
 
   return (
@@ -1703,10 +1710,11 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
 
           <div className="relative">
             <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-            <input type="text" placeholder="Filtrar egresados por nombre o DNI..." value={filtroEgresado} onChange={(e) => setFiltroEgresado(e.target.value)} className="w-full pl-10 pr-4 py-2 rounded-xl border text-sm outline-none focus:border-[#6B1D2F]" />
+            <input type="text" placeholder="Buscar egresado por nombre o DNI..." value={filtroEgresado} onChange={(e) => setFiltroEgresado(e.target.value)} className="w-full pl-10 pr-4 py-2 rounded-xl border text-sm outline-none focus:border-[#6B1D2F]" />
           </div>
 
           <div className="max-h-96 overflow-y-auto divide-y">
+            {egresadosFiltrados.length === 0 && <p className="text-center text-slate-400 text-sm py-6">No se encontraron egresados.</p>}
             {egresadosFiltrados.map((e) => {
               const misInvitados = invitados.filter((i) => i.egresado_id === e.id);
               const numeroWp = e.celular ? e.celular.replace(/\D/g, '') : '';
@@ -1851,8 +1859,14 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
               {docentes.length > 0 && <button onClick={vaciarPadronDocentes} className="px-3 py-2 bg-rose-50 text-rose-700 border rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"><Trash2 className="w-4 h-4" /> Vaciar Padrón</button>}
             </div>
           </div>
+          <div className="relative">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+            <input type="text" placeholder="Buscar docente por nombre o DNI..." value={filtroDocente} onChange={(e) => setFiltroDocente(e.target.value)} className="w-full pl-10 pr-4 py-2 rounded-xl border text-sm outline-none focus:border-[#6B1D2F]" />
+          </div>
+
           <div className="max-h-96 overflow-y-auto divide-y">
-            {docentes.map((d) => (
+            {docentesFiltrados.length === 0 && <p className="text-center text-slate-400 text-sm py-6">No se encontraron docentes.</p>}
+            {docentesFiltrados.map((d) => (
               <div key={d.id} className="py-2.5 flex justify-between items-center text-sm">
                 <div><span className="font-semibold">{d.nombre_completo}</span> <span className="text-xs text-slate-500">({d.dni})</span></div>
                 <button onClick={() => abrirModalEditarDocente(d)} className="px-2.5 py-1 bg-amber-50 text-amber-700 border rounded-lg text-xs font-bold"><Edit2 className="w-3 h-3" /> Editar y Descargar QR</button>
@@ -1949,8 +1963,14 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
               {especiales.length > 0 && <button onClick={vaciarPadronVip} className="px-3 py-2 bg-rose-50 text-rose-700 border rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"><Trash2 className="w-4 h-4" /> Vaciar Padrón</button>}
             </div>
           </div>
+          <div className="relative">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+            <input type="text" placeholder="Buscar invitado VIP por nombre o DNI..." value={filtroVip} onChange={(e) => setFiltroVip(e.target.value)} className="w-full pl-10 pr-4 py-2 rounded-xl border text-sm outline-none focus:border-[#6B1D2F]" />
+          </div>
+
           <div className="max-h-96 overflow-y-auto divide-y">
-            {especiales.map((v) => (
+            {vipsFiltrados.length === 0 && <p className="text-center text-slate-400 text-sm py-6">No se encontraron invitados VIP.</p>}
+            {vipsFiltrados.map((v) => (
               <div key={v.id} className="py-2.5 flex justify-between items-center text-sm">
                 <div><span className="font-semibold">{v.nombre_completo}</span></div>
                 <button onClick={() => abrirModalEditarVip(v)} className="px-2.5 py-1 bg-amber-50 text-amber-700 border rounded-lg text-xs font-bold"><Edit2 className="w-3 h-3" /> Editar y Descargar QR</button>
