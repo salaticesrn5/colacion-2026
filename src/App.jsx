@@ -1346,12 +1346,13 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
   const agregarEgresadoManual = async (e) => {
     e.preventDefault();
     try {
-      await supabase.from('egresados').insert({
+      const { error: errIns } = await supabase.from('egresados').insert({
         dni: sanitizeDNI(nuevoEgDni),
         nombre_completo: nuevoEgNombre.trim().toUpperCase(),
         cupo_asignado: config.cupo_base || CUPO_BASE_DEFECTO,
         activo: true
       });
+      if (errIns) throw errIns;
       await registrarLog('AGREGAR', 'Egresados', `Se agregó al egresado ${nuevoEgNombre.trim().toUpperCase()}`);
       setNuevoEgNombre('');
       setNuevoEgDni('');
@@ -1366,11 +1367,12 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
   const agregarDocenteManual = async (e) => {
     e.preventDefault();
     try {
-      await supabase.from('docentes').insert({
+      const { error: errIns } = await supabase.from('docentes').insert({
         dni: sanitizeDNI(nuevoDocDni),
         nombre_completo: nuevoDocNombre.trim().toUpperCase(),
         activo: true
       });
+      if (errIns) throw errIns;
       await registrarLog('AGREGAR', 'Docentes', `Se agregó al docente ${nuevoDocNombre.trim().toUpperCase()}`);
       setNuevoDocNombre('');
       setNuevoDocDni('');
@@ -1385,11 +1387,12 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
   const agregarVipManual = async (e) => {
     e.preventDefault();
     try {
-      await supabase.from('invitados_especiales').insert({
+      const { error: errIns } = await supabase.from('invitados_especiales').insert({
         dni: nuevoVipDni ? sanitizeDNI(nuevoVipDni) : null,
         nombre_completo: nuevoVipNombre.trim().toUpperCase(),
         activo: true
       });
+      if (errIns) throw errIns;
       await registrarLog('AGREGAR', 'VIP', `Se agregó al VIP ${nuevoVipNombre.trim().toUpperCase()}`);
       setNuevoVipNombre('');
       setNuevoVipDni('');
@@ -1636,6 +1639,48 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
         </div>
       )}
 
+      {modalAgregarEgresado && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl overflow-hidden border">
+            <div className="bg-[#6B1D2F] text-white p-4 flex justify-between items-center">
+              <h3 className="font-bold text-base">Agregar Nuevo Egresado</h3>
+              <button onClick={() => setModalAgregarEgresado(false)} className="p-1 rounded-lg text-white/80 hover:bg-white/10 cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={agregarEgresadoManual} className="p-5 space-y-3.5">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Nombre y Apellido</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ej: PÉREZ, JUAN"
+                  value={nuevoEgNombre}
+                  onChange={(e) => setNuevoEgNombre(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border rounded-xl text-sm outline-none focus:border-[#6B1D2F]"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">DNI (8 dígitos)</label>
+                <input
+                  type="text"
+                  required
+                  maxLength={8}
+                  placeholder="Ej: 48123456"
+                  value={nuevoEgDni}
+                  onChange={(e) => setNuevoEgDni(sanitizeDNI(e.target.value))}
+                  className="w-full px-3 py-2 bg-white border rounded-xl text-sm font-mono outline-none focus:border-[#6B1D2F]"
+                />
+              </div>
+              <div className="flex gap-2 pt-3 border-t">
+                <button type="button" onClick={() => setModalAgregarEgresado(false)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold cursor-pointer">Cancelar</button>
+                <button type="submit" className="flex-1 py-2.5 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold shadow cursor-pointer">Guardar</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {modalEditarEgr && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden border">
@@ -1719,6 +1764,48 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
         </div>
       )}
 
+      {modalAgregarDocente && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl overflow-hidden border">
+            <div className="bg-[#6B1D2F] text-white p-4 flex justify-between items-center">
+              <h3 className="font-bold text-base">Agregar Nuevo Docente</h3>
+              <button onClick={() => setModalAgregarDocente(false)} className="p-1 rounded-lg text-white/80 hover:bg-white/10 cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={agregarDocenteManual} className="p-5 space-y-3.5">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Nombre y Apellido</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ej: GÓMEZ, MARÍA"
+                  value={nuevoDocNombre}
+                  onChange={(e) => setNuevoDocNombre(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border rounded-xl text-sm outline-none focus:border-[#6B1D2F]"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">DNI (8 dígitos)</label>
+                <input
+                  type="text"
+                  required
+                  maxLength={8}
+                  placeholder="Ej: 28123456"
+                  value={nuevoDocDni}
+                  onChange={(e) => setNuevoDocDni(sanitizeDNI(e.target.value))}
+                  className="w-full px-3 py-2 bg-white border rounded-xl text-sm font-mono outline-none focus:border-[#6B1D2F]"
+                />
+              </div>
+              <div className="flex gap-2 pt-3 border-t">
+                <button type="button" onClick={() => setModalAgregarDocente(false)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold cursor-pointer">Cancelar</button>
+                <button type="submit" className="flex-1 py-2.5 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold shadow cursor-pointer">Guardar</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {modalEditarDoc && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl overflow-hidden border">
@@ -1767,6 +1854,47 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                 <button onClick={() => abrirModalEditarVip(v)} className="px-2.5 py-1 bg-amber-50 text-amber-700 border rounded-lg text-xs font-bold"><Edit2 className="w-3 h-3" /> Editar y Descargar QR</button>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {modalAgregarVip && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl overflow-hidden border">
+            <div className="bg-amber-600 text-white p-4 flex justify-between items-center">
+              <h3 className="font-bold text-base">Agregar Invitado VIP</h3>
+              <button onClick={() => setModalAgregarVip(false)} className="p-1 rounded-lg text-white/80 hover:bg-white/10 cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={agregarVipManual} className="p-5 space-y-3.5">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Nombre y Apellido / Institución</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ej: SUPERVISIÓN ESCOLAR"
+                  value={nuevoVipNombre}
+                  onChange={(e) => setNuevoVipNombre(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border rounded-xl text-sm outline-none focus:border-amber-600"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">DNI (Opcional)</label>
+                <input
+                  type="text"
+                  maxLength={8}
+                  placeholder="Ej: 20123456"
+                  value={nuevoVipDni}
+                  onChange={(e) => setNuevoVipDni(sanitizeDNI(e.target.value))}
+                  className="w-full px-3 py-2 bg-white border rounded-xl text-sm font-mono outline-none focus:border-amber-600"
+                />
+              </div>
+              <div className="flex gap-2 pt-3 border-t">
+                <button type="button" onClick={() => setModalAgregarVip(false)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold cursor-pointer">Cancelar</button>
+                <button type="submit" className="flex-1 py-2.5 bg-amber-600 text-white rounded-xl text-xs font-bold shadow cursor-pointer">Guardar</button>
+              </div>
+            </form>
           </div>
         </div>
       )}
