@@ -80,12 +80,17 @@ export default function App() {
 
   const registrarLog = async (accion, modulo, detalle) => {
     try {
-      await supabase.from('logs_sistema').insert({
+      const { error } = await supabase.from('logs_sistema').insert({
         usuario: perfilStaff?.nombre || session?.user?.email || 'Sistema',
         accion,
         modulo,
         detalle
       });
+      if (error) {
+        console.error('Error registrando log:', error);
+        notify('No se pudo guardar el registro de actividad: ' + error.message, 'error');
+        return;
+      }
       cargarDatosGlobales();
     } catch (e) {
       console.error('Error registrando log:', e);
@@ -94,14 +99,28 @@ export default function App() {
 
   const cargarPerfilStaff = async (user) => {
     try {
-      const { data } = await supabase.from('usuarios_sistema').select('*').eq('email', user.email).maybeSingle();
-      if (data) {
-        setPerfilStaff(data);
+      const { data, error } = await supabase
+        .from('usuarios_sistema')
+        .select('*')
+        .eq('email', (user.email || '').toLowerCase())
+        .maybeSingle();
+      if (error) throw error;
+      if (data && data.activo !== false) {
+        // el rol se normaliza a minúsculas para que 'ADMIN' y 'admin' valgan igual
+        setPerfilStaff({ ...data, rol: String(data.rol || '').trim().toLowerCase() });
       } else {
-        setPerfilStaff({ nombre: user.email.split('@')[0], email: user.email, rol: 'admin', activo: true });
+        // sin fila en usuarios_sistema, o desactivado: no hay acceso
+        setPerfilStaff(null);
+        notify(data ? 'Tu usuario está desactivado. Consultá con el administrador.' : 'Tu usuario no tiene permisos en este sistema.', 'error');
+        await supabase.auth.signOut();
+        setVista('portal');
       }
     } catch (err) {
       console.error(err);
+      setPerfilStaff(null);
+      notify('No se pudo verificar tu perfil. Probá ingresar de nuevo.', 'error');
+      await supabase.auth.signOut();
+      setVista('portal');
     } finally {
       setLoadingAuth(false);
     }
