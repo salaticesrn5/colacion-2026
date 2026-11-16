@@ -45,6 +45,7 @@ export default function App() {
 
   const [config, setConfig] = useState({ id: null, estado_etapa: 'abierta', cupo_base: CUPO_BASE_DEFECTO, filas: 15, butacas_por_fila: 35 });
   const whatsappActivo = config.whatsapp_activo !== false;
+  const vipPortalActivo = config.portal_vip_activo !== false;
   const [egresados, setEgresados] = useState([]);
   const [invitados, setInvitados] = useState([]);
   const [docentes, setDocentes] = useState([]);
@@ -320,6 +321,7 @@ export default function App() {
           <ModuloPuerta egresados={egresados} invitados={invitados} docentes={docentes} especiales={especiales} recargar={cargarDatosGlobales} notify={notify} perfilStaff={perfilStaff} />
         ) : vista === 'admin' && session && puedeAdministrar ? (
           <PanelAdministracion
+            vipPortalActivo={vipPortalActivo}
             whatsappActivo={whatsappActivo}
             perfilStaff={perfilStaff} config={config} egresados={egresados} invitados={invitados}
             docentes={docentes} especiales={especiales} solicitudes={solicitudes} usuariosSistema={usuariosSistema} logsSistema={logsSistema}
@@ -331,7 +333,7 @@ export default function App() {
         ) : vista === 'reporte_papel' && session && puedeAdministrar ? (
           <ReporteResumenPapel egresados={egresados} invitados={invitados} docentes={docentes} especiales={especiales} />
         ) : (
-          <PortalPrincipalDNI whatsappActivo={whatsappActivo} config={config} egresados={egresados} invitados={invitados} docentes={docentes} especiales={especiales} solicitudes={solicitudes} recargar={cargarDatosGlobales} notify={notify} />
+          <PortalPrincipalDNI vipPortalActivo={vipPortalActivo} whatsappActivo={whatsappActivo} config={config} egresados={egresados} invitados={invitados} docentes={docentes} especiales={especiales} solicitudes={solicitudes} recargar={cargarDatosGlobales} notify={notify} />
         )}
       </main>
 
@@ -404,9 +406,13 @@ function LoginStaff({ onSuccess, notify }) {
   );
 }
 
-function PortalPrincipalDNI({ whatsappActivo, config, egresados, invitados, docentes, especiales, solicitudes, recargar, notify }) {
+function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, egresados, invitados, docentes, especiales, solicitudes, recargar, notify }) {
   const [dni, setDni] = useState('');
   const [tipoUsuario, setTipoUsuario] = useState('egresado');
+  useEffect(() => {
+    // si se desactiva el acceso VIP mientras alguien lo tiene seleccionado, vuelve a Egresado
+    if (!vipPortalActivo && tipoUsuario === 'vip') { setTipoUsuario('egresado'); setDatosPersona(null); setError(''); }
+  }, [vipPortalActivo, tipoUsuario]);
   const [datosPersona, setDatosPersona] = useState(null);
   const [error, setError] = useState('');
   const [celular, setCelular] = useState('');
@@ -462,6 +468,11 @@ function PortalPrincipalDNI({ whatsappActivo, config, egresados, invitados, doce
     const limpio = sanitizeDNI(dni);
     if (limpio.length < 7) {
       setError('Ingresá un DNI válido de 7 u 8 dígitos.');
+      return;
+    }
+
+    if (tipoUsuario === 'vip' && !vipPortalActivo) {
+      setError('El acceso de invitados VIP por este portal no está habilitado.');
       return;
     }
 
@@ -687,7 +698,9 @@ function PortalPrincipalDNI({ whatsappActivo, config, egresados, invitados, doce
         <div className="flex gap-1 mb-6 bg-gray-100 p-1 rounded-lg">
           <button type="button" onClick={() => { setTipoUsuario('egresado'); setDatosPersona(null); setError(''); }} className={`flex-1 py-2 rounded-md font-medium text-xs transition ${tipoUsuario === 'egresado' ? 'bg-[#6B1D2F] text-white shadow' : 'text-gray-600'}`}>🎓 Egresado</button>
           <button type="button" onClick={() => { setTipoUsuario('docente'); setDatosPersona(null); setError(''); }} className={`flex-1 py-2 rounded-md font-medium text-xs transition ${tipoUsuario === 'docente' ? 'bg-[#6B1D2F] text-white shadow' : 'text-gray-600'}`}>📚 Docente</button>
-          <button type="button" onClick={() => { setTipoUsuario('vip'); setDatosPersona(null); setError(''); }} className={`flex-1 py-2 rounded-md font-medium text-xs transition ${tipoUsuario === 'vip' ? 'bg-amber-600 text-white shadow' : 'text-gray-600'}`}>⭐ VIP</button>
+          {vipPortalActivo && (
+            <button type="button" onClick={() => { setTipoUsuario('vip'); setDatosPersona(null); setError(''); }} className={`flex-1 py-2 rounded-md font-medium text-xs transition ${tipoUsuario === 'vip' ? 'bg-amber-600 text-white shadow' : 'text-gray-600'}`}>⭐ VIP</button>
+          )}
         </div>
 
         {!datosPersona ? (
@@ -1311,7 +1324,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
   );
 }
 
-function PanelAdministracion({ whatsappActivo, perfilStaff, config, egresados, invitados, docentes, especiales, solicitudes, usuariosSistema, logsSistema, totalEgresados, totalDocentes, totalDocentesConButaca, totalDocentesSinButaca, totalEspeciales, totalCuposFamiliares, totalOcupado, vacantesLibres, recargar, notify, reiniciarAsistenciasGeneral, borrarInvitadosEgresados, registrarLog }) {
+function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, config, egresados, invitados, docentes, especiales, solicitudes, usuariosSistema, logsSistema, totalEgresados, totalDocentes, totalDocentesConButaca, totalDocentesSinButaca, totalEspeciales, totalCuposFamiliares, totalOcupado, vacantesLibres, recargar, notify, reiniciarAsistenciasGeneral, borrarInvitadosEgresados, registrarLog }) {
   const [tab, setTab] = useState('egresados');
   const [filtroEgresado, setFiltroEgresado] = useState('');
   const [filtroDocente, setFiltroDocente] = useState('');
@@ -1617,6 +1630,29 @@ function PanelAdministracion({ whatsappActivo, perfilStaff, config, egresados, i
                 <p className="text-[11px] text-slate-400">Aplicar reemplaza el cupo de cada egresado activo (incluidas butacas extra ya aprobadas) y también actualiza el cupo base para los egresados nuevos. Los invitados ya cargados no se borran.</p>
               </div>
             );
+  };
+
+  const cambiarPortalVip = async () => {
+    const nuevo = !vipPortalActivo;
+    const aviso = nuevo
+      ? '¿Activar el acceso de invitados VIP en el portal de DNI?'
+      : '¿Desactivar el acceso de invitados VIP en el portal de DNI?\n\nSe oculta la opción "VIP" del portal. Los VIP siguen cargados en el sistema y pueden ingresar por Puerta con su QR.';
+    if (!window.confirm(aviso)) return;
+    try {
+      let resultado;
+      if (config.id) {
+        resultado = await supabase.from('configuracion').update({ portal_vip_activo: nuevo }).eq('id', config.id);
+      } else {
+        resultado = await supabase.from('configuracion').insert({ estado_etapa: config.estado_etapa || 'abierta', cupo_base: cupoBaseDe(config), portal_vip_activo: nuevo });
+      }
+      if (resultado.error) throw resultado.error;
+      await registrarLog('CONFIGURACION', 'Portal VIP', nuevo ? 'Se activó el acceso VIP en el portal.' : 'Se desactivó el acceso VIP en el portal.');
+      await recargar();
+      notify(nuevo ? 'Acceso VIP del portal activado.' : 'Acceso VIP del portal desactivado.');
+    } catch (err) {
+      const faltaColumna = /portal_vip_activo/i.test(err.message || '') || err.code === 'PGRST204' || err.code === '42703';
+      notify(faltaColumna ? 'Falta crear la columna "portal_vip_activo" en Supabase. Ejecutá el SQL que te pasaron y volvé a intentar.' : 'Error: ' + err.message, 'error');
+    }
   };
 
   const cambiarWhatsapp = async () => {
@@ -2234,6 +2270,12 @@ function PanelAdministracion({ whatsappActivo, perfilStaff, config, egresados, i
             <p className="text-xs font-bold uppercase text-slate-500">WhatsApp</p>
             <button onClick={cambiarWhatsapp} className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${whatsappActivo ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}`}>
               {whatsappActivo ? '● Activado' : '○ Desactivado'}
+            </button>
+          </div>
+          <div className="flex items-center gap-3">
+            <p className="text-xs font-bold uppercase text-slate-500">Portal VIP</p>
+            <button onClick={cambiarPortalVip} className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${vipPortalActivo ? 'bg-amber-600 hover:bg-amber-700 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}`}>
+              {vipPortalActivo ? '● Activado' : '○ Desactivado'}
             </button>
           </div>
         </div>
