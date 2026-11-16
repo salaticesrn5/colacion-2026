@@ -1272,6 +1272,8 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
   const [filasEdit, setFilasEdit] = useState(config.filas || 15);
   const [butacasFilaEdit, setButacasFilaEdit] = useState(config.butacas_por_fila || 35);
   const [guardandoConfig, setGuardandoConfig] = useState(false);
+  const [cupoMasivo, setCupoMasivo] = useState('');
+  const [aplicandoCupo, setAplicandoCupo] = useState(false);
 
   const [modalEditarEgr, setModalEditarEgr] = useState(null);
   const [modalEditarDoc, setModalEditarDoc] = useState(null);
@@ -1456,6 +1458,40 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
       notify('Usuario eliminado.');
     } catch (err) {
       notify('Error al eliminar el usuario: ' + err.message, 'error');
+    }
+  };
+
+  const aplicarCupoMasivo = async () => {
+    const n = Number(cupoMasivo);
+    if (cupoMasivo === '' || !Number.isInteger(n) || n < 0 || n > 10) {
+      notify('Ingresá un número entero de 0 a 10.', 'error');
+      return;
+    }
+    const afectados = egresados.filter((e) => e.activo !== false);
+    if (afectados.length === 0) { notify('No hay egresados activos.', 'error'); return; }
+    const conMas = afectados.filter((e) => invitados.filter((i) => i.egresado_id === e.id).length > n);
+    let msg = `¿Asignar ${n} invitado(s) a cada uno de los ${afectados.length} egresados activos?\n\nEsto REEMPLAZA el cupo actual de cada egresado, incluidas las butacas extra que ya se hayan aprobado.`;
+    if (conMas.length > 0) msg += `\n\nAtención: ${conMas.length} egresado(s) ya tienen cargados más invitados que ese cupo (los invitados cargados no se borran, pero quedarían por encima del cupo).`;
+    if (!window.confirm(msg)) return;
+    setAplicandoCupo(true);
+    try {
+      const ids = afectados.map((e) => e.id);
+      for (let k = 0; k < ids.length; k += 40) {
+        const { error } = await supabase.from('egresados').update({ cupo_asignado: n }).in('id', ids.slice(k, k + 40));
+        if (error) throw error;
+      }
+      if (config.id) {
+        const { error } = await supabase.from('configuracion').update({ cupo_base: n }).eq('id', config.id);
+        if (error) throw error;
+        setCupoBaseEdit(String(n));
+      }
+      await registrarLog('CUPO_MASIVO', 'Aforo', `Se asignó cupo de ${n} invitado(s) a ${ids.length} egresados activos.`);
+      await recargar();
+      notify(`Cupo de ${n} invitado(s) aplicado a ${ids.length} egresados.`);
+    } catch (err) {
+      notify('Error al aplicar el cupo: ' + err.message + ' (puede haber quedado aplicado a una parte; revisá y repetí).', 'error');
+    } finally {
+      setAplicandoCupo(false);
     }
   };
 
@@ -2597,6 +2633,51 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
               </button>
             </div>
           </form>
+
+          {perfilStaff?.rol === 'admin' && (() => {
+            const E = totalEgresados, D = totalDocentes, V = totalEspeciales;
+            const fijos = E + D + V;
+            const n = cupoMasivo === '' ? null : Number(cupoMasivo);
+            const ocupacion = n === null ? null : fijos + n * E;
+            const vac = ocupacion === null ? null : CAPACIDAD_MAXIMA - ocupacion;
+            const maxCupo = E > 0 ? Math.max(0, Math.floor((CAPACIDAD_MAXIMA - fijos) / E)) : 0;
+            const sobran = E > 0 ? CAPACIDAD_MAXIMA - fijos - maxCupo * E : 0;
+            return (
+              <div className="space-y-3 pt-4 border-t">
+                <h4 className="font-bold text-sm text-slate-800 uppercase tracking-wide">Simulador y cupo de invitados por egresado</h4>
+                <p className="text-xs text-slate-500">
+                  Hoy: {E} egresados + {D} docentes + {V} VIP = <b>{fijos}</b> lugares fijos de {CAPACIDAD_MAXIMA}. Quedan <b>{Math.max(0, CAPACIDAD_MAXIMA - fijos)}</b> butacas para invitados.
+                  {E > 0 && <> Con <b>{maxCupo}</b> invitado(s) por egresado entran todos y sobran <b>{sobran}</b> butaca(s) para solicitudes extra.</>}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {[0, 1, 2, 3, 4].map((k) => {
+                    const oc = fijos + k * E;
+                    const v = CAPACIDAD_MAXIMA - oc;
+                    return (
+                      <button key={k} type="button" onClick={() => setCupoMasivo(String(k))} className={`px-3 py-2 rounded-xl border text-xs font-bold cursor-pointer text-left ${String(k) === cupoMasivo ? 'ring-2 ring-indigo-500' : ''} ${v < 0 ? 'bg-rose-50 border-rose-200 text-rose-700' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
+                        {k} por egresado<br /><span className="font-semibold">{oc} ocupadas · {v < 0 ? `faltan ${-v}` : `sobran ${v}`}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="flex flex-wrap items-end gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Invitados por egresado (0 a 10)</label>
+                    <input type="number" min="0" max="10" value={cupoMasivo} onChange={(e) => setCupoMasivo(e.target.value)} className="w-40 px-3 py-2 border rounded-xl text-sm bg-white" placeholder="Ej: 2" />
+                  </div>
+                  <button type="button" disabled={aplicandoCupo || cupoMasivo === ''} onClick={aplicarCupoMasivo} className="px-4 py-2.5 bg-indigo-700 hover:bg-indigo-800 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow cursor-pointer">
+                    {aplicandoCupo ? 'Aplicando...' : 'Aplicar a todos los egresados activos'}
+                  </button>
+                </div>
+                {ocupacion !== null && (
+                  <p className={`text-xs font-bold ${vac < 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
+                    Con {n} por egresado: {ocupacion} de {CAPACIDAD_MAXIMA} butacas ({vac < 0 ? `faltan ${-vac}` : `sobran ${vac}`}).
+                  </p>
+                )}
+                <p className="text-[11px] text-slate-400">Aplicar reemplaza el cupo de cada egresado activo (incluidas butacas extra ya aprobadas) y también actualiza el cupo base para los egresados nuevos. Los invitados ya cargados no se borran.</p>
+              </div>
+            );
+          })()}
 
           {/* Mapa Visual Interactivo de la Sala */}
           <div className="space-y-3 pt-4 border-t">
