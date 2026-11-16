@@ -23,6 +23,8 @@ const createTempAuthClient = () =>
 const sanitizeDNI = (val) => String(val || '').replace(/\D/g, '').slice(0, 8);
 const CAPACIDAD_MAXIMA = 525;
 const CUPO_BASE_DEFECTO = 4;
+const MSG_FALTA_COL_BUTACA = 'Falta crear la columna "ocupa_butaca" en la tabla docentes (Supabase). Ejecutá el SQL que te pasaron y volvé a intentar.';
+const esErrorColumnaButaca = (err) => /ocupa_butaca/i.test(err?.message || '') || err?.code === 'PGRST204' || err?.code === '42703';
 const aNumeroONulo = (v) => (v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
 const cupoBaseDe = (cfg) => { const b = aNumeroONulo(cfg?.cupo_base); return b === null ? CUPO_BASE_DEFECTO : b; };
 const cupoDe = (egr, cfg) => { const a = aNumeroONulo(egr?.cupo_asignado); return a === null ? cupoBaseDe(cfg) : a; };
@@ -207,10 +209,13 @@ export default function App() {
   // Quien figura como "No asiste" (activo = false) libera su plaza y la de sus invitados
   const egresadosActivos = egresados.filter((e) => e.activo !== false);
   const totalEgresados = egresadosActivos.length;
-  const totalDocentes = docentes.filter((d) => d.activo !== false).length;
+  const docentesActivos = docentes.filter((d) => d.activo !== false);
+  const totalDocentes = docentesActivos.length; // todos los que asisten
+  const totalDocentesConButaca = docentesActivos.filter((d) => d.ocupa_butaca !== false).length; // los que usan butaca
+  const totalDocentesSinButaca = totalDocentes - totalDocentesConButaca;
   const totalEspeciales = especiales.filter((v) => v.activo !== false).length;
   const totalCuposFamiliares = egresadosActivos.reduce((acc, e) => acc + (Number(e.cupo_asignado) || 0), 0);
-  const totalOcupado = totalEgresados + totalDocentes + totalEspeciales + totalCuposFamiliares;
+  const totalOcupado = totalEgresados + totalDocentesConButaca + totalEspeciales + totalCuposFamiliares;
   const vacantesLibres = CAPACIDAD_MAXIMA - totalOcupado;
 
   return (
@@ -318,7 +323,7 @@ export default function App() {
             whatsappActivo={whatsappActivo}
             perfilStaff={perfilStaff} config={config} egresados={egresados} invitados={invitados}
             docentes={docentes} especiales={especiales} solicitudes={solicitudes} usuariosSistema={usuariosSistema} logsSistema={logsSistema}
-            totalEgresados={totalEgresados} totalDocentes={totalDocentes} totalEspeciales={totalEspeciales}
+            totalEgresados={totalEgresados} totalDocentes={totalDocentes} totalDocentesConButaca={totalDocentesConButaca} totalDocentesSinButaca={totalDocentesSinButaca} totalEspeciales={totalEspeciales}
             totalCuposFamiliares={totalCuposFamiliares} totalOcupado={totalOcupado} vacantesLibres={vacantesLibres} recargar={cargarDatosGlobales} notify={notify}
             reiniciarAsistenciasGeneral={reiniciarAsistenciasGeneral}
             borrarInvitadosEgresados={borrarInvitadosEgresados} registrarLog={registrarLog}
@@ -864,7 +869,7 @@ const CONFIG_INGRESO = {
   },
   docente: {
     tabla: 'docentes', okTitulo: '✓ INGRESO PERMITIDO (DOCENTE)', dupTipo: 'warning', dupTitulo: '⚠️ DOCENTE YA INGRESÓ',
-    detalle: (f) => `DNI: ${f.dni}`, dupToast: (f) => `⚠️ ¡DOCENTE YA INGRESÓ! ${f.nombre_completo}`,
+    detalle: (f) => `DNI: ${f.dni}${f.ocupa_butaca === false ? ' · NO ocupa butaca' : ''}`, dupToast: (f) => `⚠️ ¡DOCENTE YA INGRESÓ! ${f.nombre_completo}`,
   },
   vip: {
     tabla: 'invitados_especiales', okTitulo: '✓ INGRESO PERMITIDO (VIP)', dupTipo: 'warning', dupTitulo: '⚠️ VIP YA INGRESÓ',
@@ -1306,7 +1311,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
   );
 }
 
-function PanelAdministracion({ whatsappActivo, perfilStaff, config, egresados, invitados, docentes, especiales, solicitudes, usuariosSistema, logsSistema, totalEgresados, totalDocentes, totalEspeciales, totalCuposFamiliares, totalOcupado, vacantesLibres, recargar, notify, reiniciarAsistenciasGeneral, borrarInvitadosEgresados, registrarLog }) {
+function PanelAdministracion({ whatsappActivo, perfilStaff, config, egresados, invitados, docentes, especiales, solicitudes, usuariosSistema, logsSistema, totalEgresados, totalDocentes, totalDocentesConButaca, totalDocentesSinButaca, totalEspeciales, totalCuposFamiliares, totalOcupado, vacantesLibres, recargar, notify, reiniciarAsistenciasGeneral, borrarInvitadosEgresados, registrarLog }) {
   const [tab, setTab] = useState('egresados');
   const [filtroEgresado, setFiltroEgresado] = useState('');
   const [filtroDocente, setFiltroDocente] = useState('');
@@ -1331,6 +1336,8 @@ function PanelAdministracion({ whatsappActivo, perfilStaff, config, egresados, i
   const [nuevoEgDni, setNuevoEgDni] = useState('');
   const [nuevoDocNombre, setNuevoDocNombre] = useState('');
   const [nuevoDocDni, setNuevoDocDni] = useState('');
+  const [nuevoDocButaca, setNuevoDocButaca] = useState(true);
+  const [editDocButaca, setEditDocButaca] = useState(true);
   const [nuevoVipNombre, setNuevoVipNombre] = useState('');
   const [nuevoVipDni, setNuevoVipDni] = useState('');
 
@@ -1568,7 +1575,7 @@ function PanelAdministracion({ whatsappActivo, perfilStaff, config, egresados, i
   };
 
   const renderSimuladorCupo = () => {
-            const E = totalEgresados, D = totalDocentes, V = totalEspeciales;
+            const E = totalEgresados, D = totalDocentesConButaca, V = totalEspeciales;
             const fijos = E + D + V;
             const n = cupoMasivo === '' ? null : Number(cupoMasivo);
             const ocupacion = n === null ? null : fijos + n * E;
@@ -1579,7 +1586,7 @@ function PanelAdministracion({ whatsappActivo, perfilStaff, config, egresados, i
               <div className="space-y-3">
                 <h4 className="font-bold text-sm text-slate-800 uppercase tracking-wide">Simulador y cupo de invitados por egresado</h4>
                 <p className="text-xs text-slate-500">
-                  Hoy: {E} egresados + {D} docentes + {V} VIP = <b>{fijos}</b> lugares fijos de {CAPACIDAD_MAXIMA}. Quedan <b>{Math.max(0, CAPACIDAD_MAXIMA - fijos)}</b> butacas para invitados.
+                  Hoy: {E} egresados + {D} docentes con butaca + {V} VIP = <b>{fijos}</b> lugares fijos de {CAPACIDAD_MAXIMA}. Quedan <b>{Math.max(0, CAPACIDAD_MAXIMA - fijos)}</b> butacas para invitados.
                   {E > 0 && <> Con <b>{maxCupo}</b> invitado(s) por egresado entran todos y sobran <b>{sobran}</b> butaca(s) para solicitudes extra.</>}
                 </p>
                 <div className="flex flex-wrap gap-2">
@@ -1840,17 +1847,19 @@ function PanelAdministracion({ whatsappActivo, perfilStaff, config, egresados, i
       const { error: errIns } = await supabase.from('docentes').insert({
         dni: sanitizeDNI(nuevoDocDni),
         nombre_completo: nuevoDocNombre.trim().toUpperCase(),
-        activo: true
+        activo: true,
+        ...(nuevoDocButaca ? {} : { ocupa_butaca: false })
       });
       if (errIns) throw errIns;
-      await registrarLog('AGREGAR', 'Docentes', `Se agregó al docente ${nuevoDocNombre.trim().toUpperCase()}`);
+      await registrarLog('AGREGAR', 'Docentes', `Se agregó al docente ${nuevoDocNombre.trim().toUpperCase()}${nuevoDocButaca ? '' : ' (sin butaca)'}`);
       setNuevoDocNombre('');
       setNuevoDocDni('');
+      setNuevoDocButaca(true);
       setModalAgregarDocente(false);
       await recargar();
       notify('Docente agregado con éxito.');
     } catch (err) {
-      notify('Error al agregar docente: ' + err.message, 'error');
+      notify(esErrorColumnaButaca(err) ? MSG_FALTA_COL_BUTACA : 'Error al agregar docente: ' + err.message, 'error');
     }
   };
 
@@ -1908,6 +1917,7 @@ function PanelAdministracion({ whatsappActivo, perfilStaff, config, egresados, i
     setModalEditarDoc(d);
     setEditDocNombre(d.nombre_completo || '');
     setEditDocDni(d.dni || '');
+    setEditDocButaca(d.ocupa_butaca !== false);
   };
 
   const guardarEdicionDocente = async (e) => {
@@ -1915,16 +1925,19 @@ function PanelAdministracion({ whatsappActivo, perfilStaff, config, egresados, i
     if (!modalEditarDoc) return;
     setGuardandoDocente(true);
     try {
-      await supabase.from('docentes').update({
+      const cambios = {
         nombre_completo: editDocNombre.trim().toUpperCase(),
         dni: sanitizeDNI(editDocDni)
-      }).eq('id', modalEditarDoc.id);
+      };
+      if (editDocButaca !== (modalEditarDoc.ocupa_butaca !== false)) cambios.ocupa_butaca = editDocButaca;
+      const { error: errEd } = await supabase.from('docentes').update(cambios).eq('id', modalEditarDoc.id);
+      if (errEd) throw errEd;
       await registrarLog('EDITAR', 'Docentes', `Se editó el docente ${editDocNombre.trim().toUpperCase()}`);
       setModalEditarDoc(null);
       await recargar();
       notify('Docente actualizado correctamente.');
     } catch (err) {
-      notify('Error al actualizar docente: ' + err.message, 'error');
+      notify(esErrorColumnaButaca(err) ? MSG_FALTA_COL_BUTACA : 'Error al actualizar docente: ' + err.message, 'error');
     } finally {
       setGuardandoDocente(false);
     }
@@ -2013,6 +2026,36 @@ function PanelAdministracion({ whatsappActivo, perfilStaff, config, egresados, i
     }
   };
 
+  const alternarButacaDocente = async (d) => {
+    const nuevo = d.ocupa_butaca === false; // si no ocupaba butaca, pasa a ocuparla
+    try {
+      const { error } = await supabase.from('docentes').update({ ocupa_butaca: nuevo }).eq('id', d.id);
+      if (error) throw error;
+      await registrarLog('EDITAR', 'Docentes', `${nuevo ? 'Ocupa butaca' : 'No ocupa butaca'}: ${d.nombre_completo}`);
+      await recargar();
+    } catch (err) {
+      notify(esErrorColumnaButaca(err) ? MSG_FALTA_COL_BUTACA : 'Error: ' + err.message, 'error');
+    }
+  };
+
+  const asignarButacaMasivo = async (valor) => {
+    const objetivo = docentes.filter((d) => d.activo !== false);
+    if (objetivo.length === 0) return;
+    if (!window.confirm(`¿Marcar a los ${objetivo.length} docentes activos como "${valor ? 'CON' : 'SIN'} butaca"?\n\nDespués podés ajustar uno por uno con la etiqueta de cada fila.`)) return;
+    try {
+      const ids = objetivo.map((d) => d.id);
+      for (let k = 0; k < ids.length; k += 40) {
+        const { error } = await supabase.from('docentes').update({ ocupa_butaca: valor }).in('id', ids.slice(k, k + 40));
+        if (error) throw error;
+      }
+      await registrarLog('EDITAR', 'Docentes', `Se marcó a ${ids.length} docentes como ${valor ? 'CON' : 'SIN'} butaca.`);
+      await recargar();
+      notify(`Listo: ${ids.length} docentes marcados como ${valor ? 'con' : 'sin'} butaca.`);
+    } catch (err) {
+      notify(esErrorColumnaButaca(err) ? MSG_FALTA_COL_BUTACA : 'Error: ' + err.message, 'error');
+    }
+  };
+
   const eliminarEgresado = async (egr) => {
     if (!egr) return;
     if (!window.confirm(`¿Eliminar a ${egr.nombre_completo} (DNI ${egr.dni}) y todos sus invitados cargados? Esta acción no se puede deshacer.`)) return;
@@ -2096,6 +2139,8 @@ function PanelAdministracion({ whatsappActivo, perfilStaff, config, egresados, i
   const docentesPresentesCount = docentes.filter(d => d.asistio).length;
   const vipsPresentesCount = especiales.filter(v => v.asistio).length;
   const totalAsistentesPresentes = egresadosPresentesCount + invitadosPresentesCount + docentesPresentesCount + vipsPresentesCount;
+  const docentesSinButacaPresentes = docentes.filter((d) => d.asistio && d.ocupa_butaca === false).length;
+  const butacasOcupadasPresentes = totalAsistentesPresentes - docentesSinButacaPresentes;
 
   const exportarReporteAsistencia = async () => {
     try {
@@ -2110,15 +2155,17 @@ function PanelAdministracion({ whatsappActivo, perfilStaff, config, egresados, i
         return { DNI: e.dni, 'Nombre completo': e.nombre_completo, Estado: e.activo === false ? 'NO ASISTE' : 'Asiste', Presente: si(e.asistio), 'Cupo asignado': e.cupo_asignado ?? '', 'Invitados cargados': susInv.length, 'Invitados presentes': susInv.filter((i) => i.asistio).length };
       });
       const hojaFamiliares = invitados.map((i) => ({ 'N° entrada': i.numero_entrada || '', DNI: i.dni || '', 'Nombre completo': i.nombre_completo, 'Invitado de': porId[i.egresado_id]?.nombre_completo || '', Presente: si(i.asistio), 'Hora de ingreso': i.asistio ? hora(i.hora_ingreso) : '' }));
-      const hojaDocentes = docentes.map((d) => ({ DNI: d.dni, 'Nombre completo': d.nombre_completo, Estado: d.activo === false ? 'NO ASISTE' : 'Asiste', Presente: si(d.asistio) }));
+      const hojaDocentes = docentes.map((d) => ({ DNI: d.dni, 'Nombre completo': d.nombre_completo, Estado: d.activo === false ? 'NO ASISTE' : 'Asiste', 'Ocupa butaca': d.ocupa_butaca === false ? 'NO' : 'SI', Presente: si(d.asistio) }));
       const hojaVip = especiales.map((v) => ({ DNI: v.dni || '', 'Nombre e institución': v.nombre_completo, Estado: v.activo === false ? 'NO ASISTE' : 'Asiste', Presente: si(v.asistio) }));
 
       const resumen = [
         { Concepto: 'Egresados presentes', Cantidad: egresadosPresentesCount, 'De un total de': totalEgresados },
         { Concepto: 'Familiares presentes', Cantidad: invitadosPresentesCount, 'De un total de': invitados.length },
         { Concepto: 'Docentes presentes', Cantidad: docentesPresentesCount, 'De un total de': totalDocentes },
+        { Concepto: '   de ellos, docentes sin butaca', Cantidad: docentesSinButacaPresentes, 'De un total de': totalDocentesSinButaca },
         { Concepto: 'VIP / autoridades presentes', Cantidad: vipsPresentesCount, 'De un total de': totalEspeciales },
-        { Concepto: 'TOTAL en la sala', Cantidad: totalAsistentesPresentes, 'De un total de': CAPACIDAD_MAXIMA },
+        { Concepto: 'TOTAL de personas presentes', Cantidad: totalAsistentesPresentes, 'De un total de': '' },
+        { Concepto: 'BUTACAS ocupadas', Cantidad: butacasOcupadasPresentes, 'De un total de': CAPACIDAD_MAXIMA },
         { Concepto: 'Reporte generado el', Cantidad: new Date().toLocaleString('es-AR'), 'De un total de': '' },
       ];
 
@@ -2155,7 +2202,7 @@ function PanelAdministracion({ whatsappActivo, perfilStaff, config, egresados, i
     <div className="space-y-6">
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Egresados</p><p className="text-2xl font-extrabold">{totalEgresados}</p></div>
-        <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Docentes</p><p className="text-2xl font-extrabold">{totalDocentes}</p></div>
+        <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Docentes</p><p className="text-2xl font-extrabold">{totalDocentes}</p><p className="text-[10px] text-slate-500 mt-0.5">{totalDocentesConButaca} con butaca · {totalDocentesSinButaca} sin</p></div>
         <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Especiales / VIP</p><p className="text-2xl font-extrabold">{totalEspeciales}</p></div>
         <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Cupos Familiares</p><p className="text-2xl font-extrabold">{totalCuposFamiliares}</p></div>
         <div className={`col-span-2 sm:col-span-1 p-4 rounded-2xl border ${vacantesLibres < 0 ? 'bg-rose-50 text-rose-700' : vacantesLibres <= 25 ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'}`}>
@@ -2405,6 +2452,17 @@ function PanelAdministracion({ whatsappActivo, perfilStaff, config, egresados, i
               {perfilStaff?.rol === 'admin' && docentes.length > 0 && <button onClick={vaciarPadronDocentes} className="px-3 py-2 bg-rose-50 text-rose-700 border rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"><Trash2 className="w-4 h-4" /> Vaciar Padrón</button>}
             </div>
           </div>
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg font-bold">🪑 Con butaca: {totalDocentesConButaca}</span>
+            <span className="px-2.5 py-1 bg-sky-50 text-sky-700 border border-sky-200 rounded-lg font-bold">Sin butaca: {totalDocentesSinButaca}</span>
+            <span className="text-slate-400">Todos escanean su QR al ingresar.</span>
+            {perfilStaff?.rol === 'admin' && (
+              <>
+                <button onClick={() => asignarButacaMasivo(true)} className="px-2.5 py-1 bg-white border rounded-lg font-bold text-slate-600 hover:bg-slate-50 cursor-pointer">Todos con butaca</button>
+                <button onClick={() => asignarButacaMasivo(false)} className="px-2.5 py-1 bg-white border rounded-lg font-bold text-slate-600 hover:bg-slate-50 cursor-pointer">Todos sin butaca</button>
+              </>
+            )}
+          </div>
           <div className="relative">
             <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
             <input type="text" placeholder="Buscar docente por nombre o DNI..." value={filtroDocente} onChange={(e) => setFiltroDocente(e.target.value)} className="w-full pl-10 pr-4 py-2 rounded-xl border text-sm outline-none focus:border-[#6B1D2F]" />
@@ -2415,7 +2473,10 @@ function PanelAdministracion({ whatsappActivo, perfilStaff, config, egresados, i
             {docentesFiltrados.map((d) => (
               <div key={d.id} className="py-2.5 flex justify-between items-center text-sm">
                 <div><span className="font-semibold">{d.nombre_completo}</span> <span className="text-xs text-slate-500">({d.dni})</span> {d.activo === false && <span className="px-2 py-0.5 bg-rose-100 text-rose-700 rounded-full text-[10px] font-bold">NO ASISTE</span>}</div>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => alternarButacaDocente(d)} title="Tocá para cambiar" className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border cursor-pointer ${d.ocupa_butaca === false ? 'bg-sky-50 text-sky-700 border-sky-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>{d.ocupa_butaca === false ? 'Sin butaca' : 'Con butaca'}</button>
                 <button onClick={() => abrirModalEditarDocente(d)} className="px-2.5 py-1 bg-amber-50 text-amber-700 border rounded-lg text-xs font-bold"><Edit2 className="w-3 h-3" /> Editar y Descargar QR</button>
+                </div>
               </div>
             ))}
           </div>
@@ -2455,6 +2516,10 @@ function PanelAdministracion({ whatsappActivo, perfilStaff, config, egresados, i
                   className="w-full px-3 py-2 bg-white border rounded-xl text-sm font-mono outline-none focus:border-[#6B1D2F]"
                 />
               </div>
+              <label className="flex items-center justify-between gap-3 p-3 rounded-xl border bg-slate-50 cursor-pointer">
+                <span className="text-xs"><b className="text-slate-800">Ocupa butaca</b><br /><span className="text-slate-500">Si se apaga, el docente asiste y escanea su QR pero no cuenta en las 525 butacas.</span></span>
+                <input type="checkbox" checked={nuevoDocButaca} onChange={(e) => setNuevoDocButaca(e.target.checked)} className="w-5 h-5 accent-emerald-600 shrink-0" />
+              </label>
               <div className="flex gap-2 pt-3 border-t">
                 <button type="button" onClick={() => setModalAgregarDocente(false)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold cursor-pointer">Cancelar</button>
                 <button type="submit" className="flex-1 py-2.5 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold shadow cursor-pointer">Guardar</button>
@@ -2487,6 +2552,10 @@ function PanelAdministracion({ whatsappActivo, perfilStaff, config, egresados, i
                 <input type="text" required maxLength={8} value={editDocDni} onChange={(e) => setEditDocDni(sanitizeDNI(e.target.value))} className="w-full px-3 py-2 border rounded-xl text-sm font-mono" />
               </div>
               <div className="hidden" ref={adminQrRef}><QRCodeSVG value="ESRN005-ADMIN-QR-DUMMY" size={300} level="H" includeMargin={true} /></div>
+              <label className="flex items-center justify-between gap-3 p-3 rounded-xl border bg-slate-50 cursor-pointer">
+                <span className="text-xs"><b className="text-slate-800">Ocupa butaca</b><br /><span className="text-slate-500">Si se apaga, el docente asiste y escanea su QR pero no cuenta en las 525 butacas.</span></span>
+                <input type="checkbox" checked={editDocButaca} onChange={(e) => setEditDocButaca(e.target.checked)} className="w-5 h-5 accent-emerald-600 shrink-0" />
+              </label>
               <button type="button" onClick={() => alternarNoAsiste('docentes', modalEditarDoc, 'Docentes')} className={`w-full py-2 rounded-xl text-xs font-bold border cursor-pointer ${modalEditarDoc.activo === false ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100' : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'}`}>{modalEditarDoc.activo === false ? 'Reactivar (vuelve a ocupar plaza)' : 'Marcar No Asiste (libera la plaza)'}</button>
               <button type="button" onClick={() => eliminarDocente(modalEditarDoc)} className="w-full py-2 bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"><Trash2 className="w-4 h-4" /> Eliminar docente</button>
               <div className="flex gap-2 pt-3 border-t">
@@ -2721,26 +2790,27 @@ function PanelAdministracion({ whatsappActivo, perfilStaff, config, egresados, i
             </div>
           </div>
 
-          {totalAsistentesPresentes >= CAPACIDAD_MAXIMA * 0.9 && (
-            <div className={`p-3 rounded-xl text-sm font-bold border ${totalAsistentesPresentes >= CAPACIDAD_MAXIMA ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-amber-50 text-amber-800 border-amber-200'}`}>
-              {totalAsistentesPresentes >= CAPACIDAD_MAXIMA
-                ? `⛔ Sala completa: ${totalAsistentesPresentes} presentes de ${CAPACIDAD_MAXIMA} butacas.`
-                : `⚠️ Aforo casi completo: ${totalAsistentesPresentes} presentes de ${CAPACIDAD_MAXIMA} (quedan ${CAPACIDAD_MAXIMA - totalAsistentesPresentes}).`}
+          {butacasOcupadasPresentes >= CAPACIDAD_MAXIMA * 0.9 && (
+            <div className={`p-3 rounded-xl text-sm font-bold border ${butacasOcupadasPresentes >= CAPACIDAD_MAXIMA ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-amber-50 text-amber-800 border-amber-200'}`}>
+              {butacasOcupadasPresentes >= CAPACIDAD_MAXIMA
+                ? `⛔ Sala completa: ${butacasOcupadasPresentes} presentes de ${CAPACIDAD_MAXIMA} butacas.`
+                : `⚠️ Aforo casi completo: ${butacasOcupadasPresentes} presentes de ${CAPACIDAD_MAXIMA} (quedan ${CAPACIDAD_MAXIMA - butacasOcupadasPresentes}).`}
             </div>
           )}
 
           <div className="p-5 bg-slate-900 text-white rounded-2xl flex flex-wrap items-center justify-between gap-4">
             <div>
-              <p className="text-xs font-bold uppercase tracking-wider text-rose-300">Total de Asistentes en la Sala</p>
-              <p className="text-4xl font-black mt-0.5">{totalAsistentesPresentes} <span className="text-lg font-normal opacity-70">/ {CAPACIDAD_MAXIMA} Máx</span></p>
+              <p className="text-xs font-bold uppercase tracking-wider text-rose-300">Butacas ocupadas en la sala</p>
+              <p className="text-4xl font-black mt-0.5">{butacasOcupadasPresentes} <span className="text-lg font-normal opacity-70">/ {CAPACIDAD_MAXIMA} Máx</span></p>
+              <p className="text-[11px] text-slate-300 mt-1">Personas presentes en el acto: <b>{totalAsistentesPresentes}</b>{docentesSinButacaPresentes > 0 ? ` (incluye ${docentesSinButacaPresentes} docente(s) sin butaca)` : ''}</p>
             </div>
             <div className="w-full sm:w-72 bg-slate-800 p-3 rounded-xl border border-slate-700 space-y-1.5">
               <div className="flex justify-between text-xs font-semibold">
                 <span>Ocupación del Salón</span>
-                <span>{Math.round((totalAsistentesPresentes / CAPACIDAD_MAXIMA) * 100)}%</span>
+                <span>{Math.round((butacasOcupadasPresentes / CAPACIDAD_MAXIMA) * 100)}%</span>
               </div>
               <div className="w-full bg-slate-700 h-2.5 rounded-full overflow-hidden">
-                <div className={`h-full transition-all ${totalAsistentesPresentes >= CAPACIDAD_MAXIMA ? 'bg-rose-500' : totalAsistentesPresentes >= CAPACIDAD_MAXIMA * 0.9 ? 'bg-amber-400' : 'bg-emerald-500'}`} style={{ width: `${Math.min(100, Math.round((totalAsistentesPresentes / CAPACIDAD_MAXIMA) * 100))}%` }} />
+                <div className={`h-full transition-all ${butacasOcupadasPresentes >= CAPACIDAD_MAXIMA ? 'bg-rose-500' : butacasOcupadasPresentes >= CAPACIDAD_MAXIMA * 0.9 ? 'bg-amber-400' : 'bg-emerald-500'}`} style={{ width: `${Math.min(100, Math.round((butacasOcupadasPresentes / CAPACIDAD_MAXIMA) * 100))}%` }} />
               </div>
             </div>
           </div>
