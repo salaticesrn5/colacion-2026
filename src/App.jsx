@@ -144,7 +144,7 @@ export default function App() {
         supabase.from('invitados_especiales').select('*').order('nombre_completo', { ascending: true }),
         supabase.from('solicitudes_butacas').select('*').order('created_at', { ascending: false }),
         supabase.from('usuarios_sistema').select('*').order('created_at', { ascending: true }),
-        supabase.from('logs_sistema').select('*').order('created_at', { ascending: false }).limit(50),
+        supabase.from('logs_sistema').select('*').order('created_at', { ascending: false }).limit(200),
       ]);
 
       if (resCfg.data) {
@@ -1287,6 +1287,13 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
   const [guardandoVip, setGuardandoVip] = useState(false);
 
   const [filtroLogBusqueda, setFiltroLogBusqueda] = useState('');
+  const [modalLogs, setModalLogs] = useState(false);
+  useEffect(() => {
+    if (!modalLogs) return;
+    const cerrarConEsc = (e) => { if (e.key === 'Escape') setModalLogs(false); };
+    window.addEventListener('keydown', cerrarConEsc);
+    return () => window.removeEventListener('keydown', cerrarConEsc);
+  }, [modalLogs]);
 
   const recargarRef = useRef(recargar);
   useEffect(() => { recargarRef.current = recargar; });
@@ -2642,45 +2649,60 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
         </div>
       )}
 
-      {/* SECCIÓN DE LOG DE AUDITORÍA (EXCLUSIVA PARA ADMIN, ABAJO DEL TODO EN ADMINISTRACIÓN) */}
+      {/* REGISTRO DE ACTIVIDAD (SOLO ADMIN): botón discreto que abre un modal */}
       {perfilStaff?.rol === 'admin' && (
-        <div className="bg-white rounded-2xl border p-5 space-y-4 mt-10 border-t-4 border-indigo-600">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
-            <div>
-              <h3 className="font-bold text-base text-indigo-900 flex items-center gap-2">
-                <History className="w-5 h-5 text-indigo-600" /> Registro de Actividad y Auditoría (Logs)
-              </h3>
-              <p className="text-xs text-slate-500">Historial completo de acciones realizadas por los operadores del sistema.</p>
+        <div className="flex justify-end mt-8">
+          <button
+            onClick={() => { setModalLogs(true); recargar(); }}
+            className="px-3 py-1.5 text-[11px] font-semibold text-slate-400 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg flex items-center gap-1.5 cursor-pointer"
+          >
+            <History className="w-3.5 h-3.5" /> Registro de actividad
+          </button>
+        </div>
+      )}
+
+      {perfilStaff?.rol === 'admin' && modalLogs && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-4" onClick={() => setModalLogs(false)}>
+          <div className="bg-white rounded-2xl w-full max-w-3xl max-h-[85vh] flex flex-col shadow-2xl border-t-4 border-indigo-600" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between gap-3 p-5 border-b">
+              <div>
+                <h3 className="font-bold text-base text-indigo-900 flex items-center gap-2">
+                  <History className="w-5 h-5 text-indigo-600" /> Registro de Actividad y Auditoría
+                </h3>
+                <p className="text-xs text-slate-500">Acciones realizadas por los operadores del sistema (se muestran las más recientes).</p>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <button onClick={() => recargar()} title="Actualizar" className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 cursor-pointer"><RefreshCw className="w-4 h-4" /></button>
+                <button onClick={() => setModalLogs(false)} title="Cerrar" className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 cursor-pointer"><X className="w-4 h-4" /></button>
+              </div>
             </div>
-            <div className="w-full sm:w-72">
+            <div className="px-5 pt-4">
               <input
                 type="text"
-                placeholder="Buscar en logs..."
+                placeholder="Buscar por usuario, acción, módulo o detalle..."
                 value={filtroLogBusqueda}
                 onChange={(e) => setFiltroLogBusqueda(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border text-xs outline-none focus:border-indigo-600"
+                className="w-full px-3 py-2 rounded-xl border text-sm outline-none focus:border-indigo-600"
+                autoFocus
               />
             </div>
-          </div>
-
-          <div className="max-h-72 overflow-y-auto divide-y text-xs">
-            {logsFiltrados.length === 0 ? (
-              <p className="text-center text-slate-400 py-6">No se encontraron registros de auditoría.</p>
-            ) : (
-              logsFiltrados.map((log) => (
-                <div key={log.id} className="py-2.5 flex flex-wrap justify-between items-center gap-2 hover:bg-slate-50 px-2 rounded">
-                  <div>
-                    <span className="font-bold text-slate-900">{log.usuario}</span>
-                    <span className="mx-2 px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded font-bold uppercase text-[10px]">{log.modulo}</span>
-                    <span className="font-semibold text-slate-700">{log.accion}:</span>
-                    <span className="text-slate-600 ml-1">{log.detalle}</span>
+            <div className="p-5 overflow-y-auto flex-1 divide-y text-xs">
+              {logsFiltrados.length === 0 ? (
+                <p className="text-center text-slate-400 py-6">No se encontraron registros de auditoría.</p>
+              ) : (
+                logsFiltrados.map((log) => (
+                  <div key={log.id} className="py-2.5 flex flex-wrap justify-between items-center gap-2 hover:bg-slate-50 px-2 rounded">
+                    <div>
+                      <span className="font-bold text-slate-900">{log.usuario}</span>
+                      <span className="mx-2 px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded font-bold uppercase text-[10px]">{log.modulo}</span>
+                      <span className="font-semibold text-slate-700">{log.accion}:</span>
+                      <span className="text-slate-600 ml-1">{log.detalle}</span>
+                    </div>
+                    <span className="text-[11px] text-slate-400 font-mono">{new Date(log.created_at).toLocaleString()}</span>
                   </div>
-                  <span className="text-[11px] text-slate-400 font-mono">
-                    {new Date(log.created_at).toLocaleString()}
-                  </span>
-                </div>
-              ))
-            )}
+                ))
+              )}
+            </div>
           </div>
         </div>
       )}
