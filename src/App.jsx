@@ -68,15 +68,15 @@ export default function App() {
 
     cargarDatosGlobales();
 
-    const intervalId = setInterval(() => {
-      cargarDatosGlobales();
-    }, 5000);
-
     return () => {
       listener.subscription.unsubscribe();
-      clearInterval(intervalId);
     };
   }, []);
+
+  // Al cambiar de pantalla (portal / puerta) se trae una carga fresca, sin refresco automático permanente
+  useEffect(() => {
+    if (vista === 'puerta' || vista === 'portal') cargarDatosGlobales();
+  }, [vista]);
 
   const registrarLog = async (accion, modulo, detalle) => {
     try {
@@ -1084,6 +1084,17 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
   const [guardandoVip, setGuardandoVip] = useState(false);
 
   const [filtroLogBusqueda, setFiltroLogBusqueda] = useState('');
+
+  const recargarRef = useRef(recargar);
+  useEffect(() => { recargarRef.current = recargar; });
+  useEffect(() => {
+    recargarRef.current(); // datos frescos al abrir cualquier pestaña
+    if (tab !== 'reportes') return; // refresco automático solo en Acreditación en Vivo
+    const id = setInterval(() => {
+      if (!document.hidden) recargarRef.current();
+    }, 5000);
+    return () => clearInterval(id);
+  }, [tab]);
 
   const fileEgrRef = useRef(null);
   const fileDocRef = useRef(null);
