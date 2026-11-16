@@ -823,76 +823,170 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
   const [egresadoSeleccionado, setEgresadoSeleccionado] = useState(null);
   const [escaneandoCamara, setEscaneandoCamara] = useState(false);
   const [resultadoIngreso, setResultadoIngreso] = useState(null);
+  const [codigoManual, setCodigoManual] = useState('');
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
   const scanIntervalRef = useRef(null);
 
+  // Datos siempre al día: el escaneo de cámara corre dentro de un intervalo y, sin esto, usaría datos viejos
+  const datosRef = useRef({ egresados, invitados, docentes, especiales });
+  const notifyRef = useRef(notify);
+  const recargarRef = useRef(recargar);
+  useEffect(() => {
+    datosRef.current = { egresados, invitados, docentes, especiales };
+    notifyRef.current = notify;
+    recargarRef.current = recargar;
+  });
+  const ultimoEscaneoRef = useRef({ code: '', t: 0 });
+  const procesandoRef = useRef(false);
+
+  // Registra el ingreso en la base de forma atómica: solo si todavía no figuraba como presente.
+  // Devuelve true si se registró ahora, false si ya estaba registrado (duplicado).
+  const marcarIngreso = async (tabla, id, extra = {}) => {
+    const { data, error } = await supabase
+      .from(tabla)
+      .update({ asistio: true, ...extra })
+      .eq('id', id)
+      .or('asistio.is.null,asistio.eq.false')
+      .select('id');
+    if (error) throw error;
+    return Array.isArray(data) && data.length > 0;
+  };
+
+  const alternarAsistencia = async (tabla, item) => {
+    try {
+      const { error } = await supabase.from(tabla).update({ asistio: !item.asistio }).eq('id', item.id);
+      if (error) throw error;
+      await recargar();
+    } catch (err) {
+      notify('No se pudo guardar: ' + err.message, 'error');
+    }
+  };
+
   const validarCodigoEntrada = async (codigoRaw) => {
     const raw = String(codigoRaw || '').trim();
     if (!raw) return;
 
-    let code = raw.toUpperCase();
+    // Evita procesar el mismo código varias veces seguidas mientras el QR sigue frente a la cámara
+    if (procesandoRef.current) return;
+    const ahora = Date.now();
+    if (ultimoEscaneoRef.current.code === raw && ahora - ultimoEscaneoRef.current.t < 4000) return;
+    ultimoEscaneoRef.current = { code: raw, t: ahora };
+    procesandoRef.current = true;
 
-    if (code.includes('ESRN005-')) {
-      const partes = code.split('-');
-      for (let p of partes) {
-        if (/^\d{7,8}$/.test(p)) {
-          code = p;
-          break;
+    const avisar = (msg, tipo) => notifyRef.current(msg, tipo);
+
+    try {
+      const { egresados: egrs, invitados: invs, docentes: docs, especiales: vips } = datosRef.current;
+      const esQrEgresado = raw.toUpperCase().includes('ESRN005-EGRESADO');
+      let code = raw.toUpperCase();
+
+      if (code.includes('ESRN005-')) {
+        const partes = code.split('-');
+        for (let p of partes) {
+          if (/^\d{7,8}$/.test(p)) {
+            code = p;
+            break;
+          }
         }
       }
-    }
 
-    let inv = invitados.find((i) => String(i.numero_entrada || '').toUpperCase() === code || String(i.dni || '') === code);
-    if (inv) {
-      if (inv.asistio) {
-        setResultadoIngreso({ tipo: 'error', titulo: '¡ALERTA DUPLICADO!', nombre: inv.nombre_completo, detalle: `Entrada ${inv.numero_entrada} ya ingresó anteriormente.` });
-        notify(`⚠️ ¡ALERTA DUPLICADO! La entrada ${inv.numero_entrada} ya ingresó.`, 'error');
+      const buscarEgresado = () => egrs.find((e) => e.dni && String(e.dni) === code);
+
+      // 1) QR de egresado: se busca primero entre los egresados
+      let egr = esQrEgresado ? buscarEgresado() : null;
+      if (egr) {
+        const ok = await marcarIngreso('egresados', egr.id);
+        await recargarRef.current();
+        if (ok) {
+          setResultadoIngreso({ tipo: 'success', titulo: '✓ INGRESO PERMITIDO (EGRESADO)', nombre: egr.nombre_completo, detalle: `DNI: ${egr.dni}` });
+          avisar(`✓ INGRESO PERMITIDO: ${egr.nombre_completo}`);
+        } else {
+          setResultadoIngreso({ tipo: 'warning', titulo: '⚠️ EGRESADO YA INGRESÓ', nombre: egr.nombre_completo, detalle: `DNI: ${egr.dni}` });
+          avisar(`⚠️ ¡EGRESADO YA INGRESÓ! ${egr.nombre_completo}`, 'warning');
+        }
         return;
       }
-      await supabase.from('invitados').update({ asistio: true, hora_ingreso: new Date().toISOString() }).eq('id', inv.id);
-      await recargar();
-      setResultadoIngreso({ tipo: 'success', titulo: '✓ INGRESO PERMITIDO (FAMILIAR)', nombre: inv.nombre_completo, detalle: `DNI: ${inv.dni}` });
-      notify(`✓ INGRESO PERMITIDO: ${inv.nombre_completo}`);
-      return;
-    }
 
-    let doc = docentes.find((d) => String(d.dni || '') === code || code.includes(String(d.dni || '')));
-    if (doc) {
-      if (doc.asistio) {
-        setResultadoIngreso({ tipo: 'warning', titulo: '⚠️ DOCENTE YA INGRESÓ', nombre: doc.nombre_completo, detalle: `DNI: ${doc.dni}` });
-        notify(`⚠️ ¡DOCENTE YA INGRESÓ! ${doc.nombre_completo}`, 'warning');
+      // 2) Familiar invitado (por número de entrada o DNI)
+      const inv = invs.find((i) => String(i.numero_entrada || '').toUpperCase() === code || (i.dni && String(i.dni) === code));
+      if (inv) {
+        const ok = await marcarIngreso('invitados', inv.id, { hora_ingreso: new Date().toISOString() });
+        await recargarRef.current();
+        if (ok) {
+          setResultadoIngreso({ tipo: 'success', titulo: '✓ INGRESO PERMITIDO (FAMILIAR)', nombre: inv.nombre_completo, detalle: `DNI: ${inv.dni}` });
+          avisar(`✓ INGRESO PERMITIDO: ${inv.nombre_completo}`);
+        } else {
+          setResultadoIngreso({ tipo: 'error', titulo: '¡ALERTA DUPLICADO!', nombre: inv.nombre_completo, detalle: `Entrada ${inv.numero_entrada} ya ingresó anteriormente.` });
+          avisar(`⚠️ ¡ALERTA DUPLICADO! La entrada ${inv.numero_entrada} ya ingresó.`, 'error');
+        }
         return;
       }
-      await supabase.from('docentes').update({ asistio: true }).eq('id', doc.id);
-      await recargar();
-      setResultadoIngreso({ tipo: 'success', titulo: '✓ INGRESO PERMITIDO (DOCENTE)', nombre: doc.nombre_completo, detalle: `DNI: ${doc.dni}` });
-      notify(`✓ INGRESO PERMITIDO: ${doc.nombre_completo}`);
-      return;
-    }
 
-    let vip = especiales.find((v) => String(v.dni || '') === code || code.includes(String(v.dni || '')) || String(v.nombre_completo || '').toUpperCase().includes(code));
-    if (vip) {
-      if (vip.asistio) {
-        setResultadoIngreso({ tipo: 'warning', titulo: '⚠️ VIP YA INGRESÓ', nombre: vip.nombre_completo, detalle: 'Autoridad / Invitado Especial' });
-        notify(`⚠️ ¡VIP YA INGRESÓ! ${vip.nombre_completo}`, 'warning');
+      // 3) Docente
+      const doc = docs.find((d) => d.dni && (String(d.dni) === code || code.includes(String(d.dni))));
+      if (doc) {
+        const ok = await marcarIngreso('docentes', doc.id);
+        await recargarRef.current();
+        if (ok) {
+          setResultadoIngreso({ tipo: 'success', titulo: '✓ INGRESO PERMITIDO (DOCENTE)', nombre: doc.nombre_completo, detalle: `DNI: ${doc.dni}` });
+          avisar(`✓ INGRESO PERMITIDO: ${doc.nombre_completo}`);
+        } else {
+          setResultadoIngreso({ tipo: 'warning', titulo: '⚠️ DOCENTE YA INGRESÓ', nombre: doc.nombre_completo, detalle: `DNI: ${doc.dni}` });
+          avisar(`⚠️ ¡DOCENTE YA INGRESÓ! ${doc.nombre_completo}`, 'warning');
+        }
         return;
       }
-      await supabase.from('invitados_especiales').update({ asistio: true }).eq('id', vip.id);
-      await recargar();
-      setResultadoIngreso({ tipo: 'success', titulo: '✓ INGRESO PERMITIDO (VIP)', nombre: vip.nombre_completo, detalle: 'Autoridad / Invitado Especial' });
-      notify(`✓ INGRESO PERMITIDO: ${vip.nombre_completo}`);
-      return;
-    }
 
-    setResultadoIngreso({ tipo: 'error', titulo: '❌ CÓDIGO NO ENCONTRADO', nombre: raw, detalle: 'Verifique el padrón o busque manualmente.' });
-    notify(`❌ Código o DNI no encontrado: ${raw}`, 'error');
+      // 4) Invitado especial / VIP
+      const vip = vips.find((v) => (v.dni && (String(v.dni) === code || code.includes(String(v.dni)))) || (code.length >= 5 && String(v.nombre_completo || '').toUpperCase().includes(code)));
+      if (vip) {
+        const ok = await marcarIngreso('invitados_especiales', vip.id);
+        await recargarRef.current();
+        if (ok) {
+          setResultadoIngreso({ tipo: 'success', titulo: '✓ INGRESO PERMITIDO (VIP)', nombre: vip.nombre_completo, detalle: 'Autoridad / Invitado Especial' });
+          avisar(`✓ INGRESO PERMITIDO: ${vip.nombre_completo}`);
+        } else {
+          setResultadoIngreso({ tipo: 'warning', titulo: '⚠️ VIP YA INGRESÓ', nombre: vip.nombre_completo, detalle: 'Autoridad / Invitado Especial' });
+          avisar(`⚠️ ¡VIP YA INGRESÓ! ${vip.nombre_completo}`, 'warning');
+        }
+        return;
+      }
+
+      // 5) Egresado por DNI (por si el código no trae el prefijo de egresado)
+      egr = buscarEgresado();
+      if (egr) {
+        const ok = await marcarIngreso('egresados', egr.id);
+        await recargarRef.current();
+        if (ok) {
+          setResultadoIngreso({ tipo: 'success', titulo: '✓ INGRESO PERMITIDO (EGRESADO)', nombre: egr.nombre_completo, detalle: `DNI: ${egr.dni}` });
+          avisar(`✓ INGRESO PERMITIDO: ${egr.nombre_completo}`);
+        } else {
+          setResultadoIngreso({ tipo: 'warning', titulo: '⚠️ EGRESADO YA INGRESÓ', nombre: egr.nombre_completo, detalle: `DNI: ${egr.dni}` });
+          avisar(`⚠️ ¡EGRESADO YA INGRESÓ! ${egr.nombre_completo}`, 'warning');
+        }
+        return;
+      }
+
+      setResultadoIngreso({ tipo: 'error', titulo: '❌ CÓDIGO NO ENCONTRADO', nombre: raw, detalle: 'Verifique el padrón o busque manualmente.' });
+      avisar(`❌ Código o DNI no encontrado: ${raw}`, 'error');
+    } catch (err) {
+      console.error(err);
+      setResultadoIngreso({ tipo: 'error', titulo: '❌ ERROR AL REGISTRAR', nombre: raw, detalle: 'NO se registró el ingreso (' + (err.message || 'error de conexión') + '). Reintente o use la búsqueda manual.' });
+      avisar('❌ No se pudo registrar el ingreso: ' + (err.message || 'error de conexión'), 'error');
+    } finally {
+      procesandoRef.current = false;
+    }
   };
 
   const iniciarCamara = async () => {
-    setEscaneandoCamara(true);
     setResultadoIngreso(null);
+    if (!window.BarcodeDetector) {
+      notify('Este navegador no puede leer QR con la cámara. Usá Chrome en un celular Android, o el campo "Lector / código manual" de más abajo.', 'error');
+      return;
+    }
+    setEscaneandoCamara(true);
     try {
       const constraints = { video: { facingMode: { ideal: 'environment' } } };
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -937,6 +1031,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
 
   const termino = busqueda.trim().toLowerCase();
   const egresadosCoincidentes = termino ? egresados.filter((e) => (e.nombre_completo || '').toLowerCase().includes(termino) || e.dni.includes(termino)) : [];
+  const egrSel = egresadoSeleccionado ? (egresados.find((e) => e.id === egresadoSeleccionado.id) || egresadoSeleccionado) : null;
   const docentesCoincidentes = termino ? docentes.filter((d) => (d.nombre_completo || '').toLowerCase().includes(termino) || d.dni.includes(termino)) : [];
 
   return (
@@ -985,6 +1080,25 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
         )}
       </div>
 
+      <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-3 shadow-sm">
+        <h3 className="font-bold text-xs text-slate-500 uppercase tracking-wider">Lector de códigos / código manual</h3>
+        <p className="text-xs text-slate-500">Sirve para un lector USB de códigos (apuntá, escanea y envía solo) o para escribir a mano el DNI o el número de entrada y apretar Enter.</p>
+        <input
+          type="text"
+          value={codigoManual}
+          onChange={(e) => setCodigoManual(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              const c = codigoManual.trim();
+              if (c) { validarCodigoEntrada(c); setCodigoManual(''); }
+            }
+          }}
+          placeholder="Escaneá o escribí el código y apretá Enter..."
+          className="w-full px-4 py-3 rounded-xl border-2 border-slate-200 focus:border-emerald-500 outline-none text-sm font-mono"
+        />
+      </div>
+
       <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-4 shadow-sm">
         <h3 className="font-bold text-xs text-slate-500 uppercase tracking-wider">Búsqueda manual (Por si un invitado llega por separado)</h3>
         <div className="relative">
@@ -995,9 +1109,14 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
         {egresadoSeleccionado ? (
           <div className="space-y-3">
             <button onClick={() => setEgresadoSeleccionado(null)} className="text-xs font-bold text-indigo-600 hover:underline">← Volver al listado</button>
-            <div className="p-4 rounded-xl bg-slate-50 border">
-              <p className="font-bold text-slate-900">{egresadoSeleccionado.nombre_completo}</p>
-              <p className="text-xs text-slate-500">DNI Egresado: {egresadoSeleccionado.dni}</p>
+            <div className="p-4 rounded-xl bg-slate-50 border flex items-center justify-between gap-3">
+              <div>
+                <p className="font-bold text-slate-900">{egrSel.nombre_completo}</p>
+                <p className="text-xs text-slate-500">DNI Egresado: {egrSel.dni}</p>
+              </div>
+              <button onClick={() => alternarAsistencia('egresados', egrSel)} className={`px-3.5 py-1.5 rounded-xl text-xs font-bold shadow-xs cursor-pointer ${egrSel.asistio ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-800'}`}>
+                {egrSel.asistio ? '✓ Egresado presente' : 'Marcar ingreso del egresado'}
+              </button>
             </div>
             <div className="space-y-2">
               <p className="text-xs font-bold uppercase text-slate-500">Familiares Habilitados:</p>
@@ -1007,7 +1126,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
                     <p className="font-bold text-sm">{inv.nombre_completo}</p>
                     <p className="text-xs text-slate-500">DNI: {inv.dni} · <strong>{inv.numero_entrada}</strong></p>
                   </div>
-                  <button onClick={async () => { await supabase.from('invitados').update({ asistio: !inv.asistio }).eq('id', inv.id); await recargar(); }} className={`px-3.5 py-1.5 rounded-xl text-xs font-bold shadow-xs ${inv.asistio ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-800'}`}>
+                  <button onClick={() => alternarAsistencia('invitados', inv)} className={`px-3.5 py-1.5 rounded-xl text-xs font-bold shadow-xs ${inv.asistio ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-800'}`}>
                     {inv.asistio ? '✓ Asistió' : 'Marcar Ingreso'}
                   </button>
                 </div>
@@ -1032,7 +1151,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
                   <p className="font-bold text-sm">{doc.nombre_completo}</p>
                   <p className="text-xs text-slate-500">DNI: {doc.dni}</p>
                 </div>
-                <button onClick={async () => { await supabase.from('docentes').update({ asistio: !doc.asistio }).eq('id', doc.id); await recargar(); }} className={`px-3.5 py-1.5 rounded-xl text-xs font-bold shadow-xs ${doc.asistio ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-800'}`}>
+                <button onClick={() => alternarAsistencia('docentes', doc)} className={`px-3.5 py-1.5 rounded-xl text-xs font-bold shadow-xs ${doc.asistio ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-800'}`}>
                   {doc.asistio ? '✓ Asistió' : 'Marcar Ingreso'}
                 </button>
               </div>
