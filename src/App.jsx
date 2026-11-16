@@ -23,6 +23,9 @@ const createTempAuthClient = () =>
 const sanitizeDNI = (val) => String(val || '').replace(/\D/g, '').slice(0, 8);
 const CAPACIDAD_MAXIMA = 525;
 const CUPO_BASE_DEFECTO = 4;
+const aNumeroONulo = (v) => (v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
+const cupoBaseDe = (cfg) => { const b = aNumeroONulo(cfg?.cupo_base); return b === null ? CUPO_BASE_DEFECTO : b; };
+const cupoDe = (egr, cfg) => { const a = aNumeroONulo(egr?.cupo_asignado); return a === null ? cupoBaseDe(cfg) : a; };
 
 const parseCSV = (text) => {
   const cleanText = text.replace(/^\uFEFF/, '').trim();
@@ -39,6 +42,7 @@ export default function App() {
   const [loadingAuth, setLoadingAuth] = useState(true);
 
   const [config, setConfig] = useState({ id: null, estado_etapa: 'abierta', cupo_base: CUPO_BASE_DEFECTO, filas: 15, butacas_por_fila: 35 });
+  const whatsappActivo = config.whatsapp_activo !== false;
   const [egresados, setEgresados] = useState([]);
   const [invitados, setInvitados] = useState([]);
   const [docentes, setDocentes] = useState([]);
@@ -308,9 +312,10 @@ export default function App() {
         ) : vista === 'login' && !session ? (
           <LoginStaff onSuccess={() => { cargarDatosGlobales(); setVista('admin'); }} notify={notify} />
         ) : vista === 'puerta' && session ? (
-          <ModuloPuerta egresados={egresados} invitados={invitados} docentes={docentes} especiales={especiales} recargar={cargarDatosGlobales} notify={notify} />
+          <ModuloPuerta egresados={egresados} invitados={invitados} docentes={docentes} especiales={especiales} recargar={cargarDatosGlobales} notify={notify} perfilStaff={perfilStaff} />
         ) : vista === 'admin' && session && puedeAdministrar ? (
           <PanelAdministracion
+            whatsappActivo={whatsappActivo}
             perfilStaff={perfilStaff} config={config} egresados={egresados} invitados={invitados}
             docentes={docentes} especiales={especiales} solicitudes={solicitudes} usuariosSistema={usuariosSistema} logsSistema={logsSistema}
             totalEgresados={totalEgresados} totalDocentes={totalDocentes} totalEspeciales={totalEspeciales}
@@ -321,10 +326,11 @@ export default function App() {
         ) : vista === 'reporte_papel' && session && puedeAdministrar ? (
           <ReporteResumenPapel egresados={egresados} invitados={invitados} docentes={docentes} especiales={especiales} />
         ) : (
-          <PortalPrincipalDNI config={config} egresados={egresados} invitados={invitados} docentes={docentes} especiales={especiales} solicitudes={solicitudes} recargar={cargarDatosGlobales} notify={notify} />
+          <PortalPrincipalDNI whatsappActivo={whatsappActivo} config={config} egresados={egresados} invitados={invitados} docentes={docentes} especiales={especiales} solicitudes={solicitudes} recargar={cargarDatosGlobales} notify={notify} />
         )}
       </main>
 
+      {whatsappActivo && (
       <a
         href="https://wa.me/5492996326617?text=Hola,%20necesito%20ayuda%20con%20el%20sistema%20de%20acceso%20de%20la%20Colación%20ESRN%20N°%20005."
         target="_blank"
@@ -334,6 +340,7 @@ export default function App() {
       >
         <Phone className="w-6 h-6" />
       </a>
+      )}
     </div>
   );
 }
@@ -392,7 +399,7 @@ function LoginStaff({ onSuccess, notify }) {
   );
 }
 
-function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales, solicitudes, recargar, notify }) {
+function PortalPrincipalDNI({ whatsappActivo, config, egresados, invitados, docentes, especiales, solicitudes, recargar, notify }) {
   const [dni, setDni] = useState('');
   const [tipoUsuario, setTipoUsuario] = useState('egresado');
   const [datosPersona, setDatosPersona] = useState(null);
@@ -418,7 +425,7 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
 
   const prepararFilasInvitados = (egr) => {
     const misInv = invitados.filter((i) => i.egresado_id === egr.id);
-    const cupo = Number(egr.cupo_asignado) || config.cupo_base || CUPO_BASE_DEFECTO;
+    const cupo = cupoDe(egr, config);
     const arr = [];
     for (let idx = 0; idx < cupo; idx++) {
       if (misInv[idx]) {
@@ -573,7 +580,7 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
   };
 
   const guardarInvitados = async () => {
-    if (!celular || celular.trim().length < 6) {
+    if (whatsappActivo && (!celular || celular.trim().length < 6)) {
       notify('El número de celular/WhatsApp es obligatorio para continuar.', 'error');
       return;
     }
@@ -712,7 +719,7 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
             {tipoUsuario === 'egresado' && (
               <>
                 <div className="border-2 border-emerald-500 bg-emerald-50 p-4 rounded-xl space-y-2">
-                  <label className="block text-xs font-bold text-emerald-900 uppercase">📱 Tu Celular / WhatsApp <span className="text-rose-600">* Obligatorio</span></label>
+                  <label className="block text-xs font-bold text-emerald-900 uppercase">📱 Tu Celular{whatsappActivo ? ' / WhatsApp' : ''} {whatsappActivo ? <span className="text-rose-600">* Obligatorio</span> : <span className="text-slate-500">(opcional)</span>}</label>
                   <input 
                     type="text" 
                     maxLength={15}
@@ -901,7 +908,7 @@ const buscarCodigoEnBase = async (code, esQrEgresado) => {
   return null;
 };
 
-function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, notify }) {
+function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, notify, perfilStaff }) {
   const [busqueda, setBusqueda] = useState('');
   const [egresadoSeleccionado, setEgresadoSeleccionado] = useState(null);
   const [escaneandoCamara, setEscaneandoCamara] = useState(false);
@@ -913,6 +920,31 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
   const scanIntervalRef = useRef(null);
+
+  // Registro de actividad de la Puerta (para auditoría). No frena el ingreso si falla.
+  const perfilRef = useRef(perfilStaff);
+  useEffect(() => { perfilRef.current = perfilStaff; });
+  const dispositivo = (() => {
+    const ua = (typeof navigator !== 'undefined' && navigator.userAgent) || '';
+    if (/iPhone|iPad/i.test(ua)) return 'iPhone/iPad';
+    if (/Android/i.test(ua)) return 'Android';
+    if (/Windows/i.test(ua)) return 'Windows';
+    if (/Mac/i.test(ua)) return 'Mac';
+    return 'Otro';
+  })();
+  const ETIQUETA_TIPO = { egresado: 'egresado', invitado: 'familiar', docente: 'docente', vip: 'VIP' };
+  const logPuerta = (accion, detalle) => {
+    try {
+      supabase.from('logs_sistema').insert({
+        usuario: perfilRef.current?.nombre || perfilRef.current?.email || 'Puerta',
+        accion,
+        modulo: 'Puerta',
+        detalle: `${detalle} [${dispositivo}]`,
+      }).then(({ error }) => { if (error) console.error('No se pudo registrar el log de Puerta:', error); });
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   // Datos siempre al día: el escaneo de cámara corre dentro de un intervalo y, sin esto, usaría datos viejos
   const datosRef = useRef({ egresados, invitados, docentes, especiales });
@@ -944,11 +976,18 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
       if (!item.asistio) {
         const extra = tabla === 'invitados' ? { hora_ingreso: new Date().toISOString() } : {};
         const ok = await marcarIngreso(tabla, item.id, extra);
-        if (!ok) notify('Ya figuraba como presente (lo registró otro dispositivo).', 'warning');
+        const tipoManual = { egresados: 'egresado', invitados: 'familiar', docentes: 'docente', invitados_especiales: 'VIP' }[tabla] || tabla;
+        if (!ok) {
+          notify('Ya figuraba como presente (lo registró otro dispositivo).', 'warning');
+          logPuerta('DUPLICADO', `Manual: ${tipoManual} ${item.nombre_completo} ya figuraba presente`);
+        } else {
+          logPuerta('INGRESO_MANUAL', `${tipoManual} ${item.nombre_completo} (DNI ${item.dni || 'S/D'})`);
+        }
       } else {
         if (!window.confirm(`¿Quitar el ingreso de ${item.nombre_completo}?`)) return;
         const { error } = await supabase.from(tabla).update({ asistio: false }).eq('id', item.id);
         if (error) throw error;
+        logPuerta('QUITAR_INGRESO', `${item.nombre_completo} (DNI ${item.dni || 'S/D'})`);
       }
       await recargar();
     } catch (err) {
@@ -985,6 +1024,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
       if (!hallado) {
         setResultadoIngreso({ tipo: 'error', titulo: '❌ CÓDIGO NO ENCONTRADO', nombre: raw, detalle: 'Verifique el padrón o busque manualmente.' });
         avisar(`❌ Código o DNI no encontrado: ${raw}`, 'error');
+        logPuerta('NO_ENCONTRADO', `Código leído: ${raw.slice(0, 60)}`);
         return;
       }
 
@@ -994,6 +1034,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
       if (hallado.tipo !== 'invitado' && f.activo === false) {
         setResultadoIngreso({ tipo: 'warning', titulo: '⛔ FIGURA COMO "NO ASISTE"', nombre: f.nombre_completo, detalle: 'Dio de baja su asistencia. Consultar con coordinación antes de dejarlo pasar.' });
         avisar(`⛔ ${f.nombre_completo} figura como "No asiste". Consultar con coordinación.`, 'warning');
+        logPuerta('BLOQUEADO_NO_ASISTE', `${ETIQUETA_TIPO[hallado.tipo]} ${f.nombre_completo} (DNI ${f.dni || 'S/D'})`);
         return;
       }
       const ok = await marcarIngreso(c.tabla, f.id, c.extra ? c.extra() : {});
@@ -1002,7 +1043,9 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
       if (ok) {
         setResultadoIngreso({ tipo: 'success', titulo: c.okTitulo, nombre: f.nombre_completo, detalle: c.detalle(f) });
         avisar(`✓ INGRESO PERMITIDO: ${f.nombre_completo}`);
+        logPuerta('INGRESO', `${ETIQUETA_TIPO[hallado.tipo]} ${f.nombre_completo} (DNI ${f.dni || 'S/D'})`);
       } else {
+        logPuerta('DUPLICADO', `${ETIQUETA_TIPO[hallado.tipo]} ${f.nombre_completo} (DNI ${f.dni || 'S/D'}) ya había ingresado`);
         setResultadoIngreso({ tipo: c.dupTipo, titulo: c.dupTitulo, nombre: f.nombre_completo, detalle: c.dupDetalle ? c.dupDetalle(f) : c.detalle(f) });
         avisar(c.dupToast(f), c.dupTipo === 'error' ? 'error' : 'warning');
       }
@@ -1010,6 +1053,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
       console.error(err);
       setResultadoIngreso({ tipo: 'error', titulo: '❌ ERROR AL REGISTRAR', nombre: raw, detalle: 'NO se registró el ingreso (' + (err.message || 'error de conexión') + '). Reintente o use la búsqueda manual.' });
       avisar('❌ No se pudo registrar el ingreso: ' + (err.message || 'error de conexión'), 'error');
+      logPuerta('ERROR', `No se registró el ingreso de "${raw.slice(0, 40)}": ${err.message || 'error de conexión'}`);
     } finally {
       procesandoRef.current = false;
     }
@@ -1262,17 +1306,18 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
   );
 }
 
-function PanelAdministracion({ perfilStaff, config, egresados, invitados, docentes, especiales, solicitudes, usuariosSistema, logsSistema, totalEgresados, totalDocentes, totalEspeciales, totalCuposFamiliares, totalOcupado, vacantesLibres, recargar, notify, reiniciarAsistenciasGeneral, borrarInvitadosEgresados, registrarLog }) {
+function PanelAdministracion({ whatsappActivo, perfilStaff, config, egresados, invitados, docentes, especiales, solicitudes, usuariosSistema, logsSistema, totalEgresados, totalDocentes, totalEspeciales, totalCuposFamiliares, totalOcupado, vacantesLibres, recargar, notify, reiniciarAsistenciasGeneral, borrarInvitadosEgresados, registrarLog }) {
   const [tab, setTab] = useState('egresados');
   const [filtroEgresado, setFiltroEgresado] = useState('');
   const [filtroDocente, setFiltroDocente] = useState('');
   const [filtroVip, setFiltroVip] = useState('');
   
-  const [cupoBaseEdit, setCupoBaseEdit] = useState(config.cupo_base || CUPO_BASE_DEFECTO);
+  const [cupoBaseEdit, setCupoBaseEdit] = useState(cupoBaseDe(config));
   const [filasEdit, setFilasEdit] = useState(config.filas || 15);
   const [butacasFilaEdit, setButacasFilaEdit] = useState(config.butacas_por_fila || 35);
   const [guardandoConfig, setGuardandoConfig] = useState(false);
   const [cupoMasivo, setCupoMasivo] = useState('');
+  const [modalCupo, setModalCupo] = useState(false);
   const [aplicandoCupo, setAplicandoCupo] = useState(false);
 
   const [modalEditarEgr, setModalEditarEgr] = useState(null);
@@ -1488,10 +1533,105 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
       await registrarLog('CUPO_MASIVO', 'Aforo', `Se asignó cupo de ${n} invitado(s) a ${ids.length} egresados activos.`);
       await recargar();
       notify(`Cupo de ${n} invitado(s) aplicado a ${ids.length} egresados.`);
+      setModalCupo(false);
     } catch (err) {
       notify('Error al aplicar el cupo: ' + err.message + ' (puede haber quedado aplicado a una parte; revisá y repetí).', 'error');
     } finally {
       setAplicandoCupo(false);
+    }
+  };
+
+  const exportarLogsCSV = async () => {
+    try {
+      const { data, error } = await supabase.from('logs_sistema').select('*').order('created_at', { ascending: true }).limit(10000);
+      if (error) throw error;
+      const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+      const filas = [['fecha_hora_local', 'fecha_hora_iso', 'usuario', 'modulo', 'accion', 'detalle'].join(',')];
+      (data || []).forEach((l) => {
+        filas.push([esc(new Date(l.created_at).toLocaleString('es-AR')), esc(l.created_at), esc(l.usuario), esc(l.modulo), esc(l.accion), esc(l.detalle)].join(','));
+      });
+      const blob = new Blob(['\uFEFF' + filas.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+      const f = new Date();
+      const nombre = `registro-actividad-esrn5-${f.getFullYear()}-${String(f.getMonth() + 1).padStart(2, '0')}-${String(f.getDate()).padStart(2, '0')}.csv`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = nombre;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      notify(`Se exportaron ${(data || []).length} registros (${nombre}).`);
+    } catch (err) {
+      notify('No se pudo exportar el registro: ' + err.message, 'error');
+    }
+  };
+
+  const renderSimuladorCupo = () => {
+            const E = totalEgresados, D = totalDocentes, V = totalEspeciales;
+            const fijos = E + D + V;
+            const n = cupoMasivo === '' ? null : Number(cupoMasivo);
+            const ocupacion = n === null ? null : fijos + n * E;
+            const vac = ocupacion === null ? null : CAPACIDAD_MAXIMA - ocupacion;
+            const maxCupo = E > 0 ? Math.max(0, Math.floor((CAPACIDAD_MAXIMA - fijos) / E)) : 0;
+            const sobran = E > 0 ? CAPACIDAD_MAXIMA - fijos - maxCupo * E : 0;
+            return (
+              <div className="space-y-3">
+                <h4 className="font-bold text-sm text-slate-800 uppercase tracking-wide">Simulador y cupo de invitados por egresado</h4>
+                <p className="text-xs text-slate-500">
+                  Hoy: {E} egresados + {D} docentes + {V} VIP = <b>{fijos}</b> lugares fijos de {CAPACIDAD_MAXIMA}. Quedan <b>{Math.max(0, CAPACIDAD_MAXIMA - fijos)}</b> butacas para invitados.
+                  {E > 0 && <> Con <b>{maxCupo}</b> invitado(s) por egresado entran todos y sobran <b>{sobran}</b> butaca(s) para solicitudes extra.</>}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {[0, 1, 2, 3, 4].map((k) => {
+                    const oc = fijos + k * E;
+                    const v = CAPACIDAD_MAXIMA - oc;
+                    return (
+                      <button key={k} type="button" onClick={() => setCupoMasivo(String(k))} className={`px-3 py-2 rounded-xl border text-xs font-bold cursor-pointer text-left ${String(k) === cupoMasivo ? 'ring-2 ring-indigo-500' : ''} ${v < 0 ? 'bg-rose-50 border-rose-200 text-rose-700' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
+                        {k} por egresado<br /><span className="font-semibold">{oc} ocupadas · {v < 0 ? `faltan ${-v}` : `sobran ${v}`}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="flex flex-wrap items-end gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Invitados por egresado (0 a 10)</label>
+                    <input type="number" min="0" max="10" value={cupoMasivo} onChange={(e) => setCupoMasivo(e.target.value)} className="w-40 px-3 py-2 border rounded-xl text-sm bg-white" placeholder="Ej: 2" />
+                  </div>
+                  <button type="button" disabled={aplicandoCupo || cupoMasivo === ''} onClick={aplicarCupoMasivo} className="px-4 py-2.5 bg-indigo-700 hover:bg-indigo-800 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow cursor-pointer">
+                    {aplicandoCupo ? 'Aplicando...' : 'Aplicar a todos los egresados activos'}
+                  </button>
+                </div>
+                {ocupacion !== null && (
+                  <p className={`text-xs font-bold ${vac < 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
+                    Con {n} por egresado: {ocupacion} de {CAPACIDAD_MAXIMA} butacas ({vac < 0 ? `faltan ${-vac}` : `sobran ${vac}`}).
+                  </p>
+                )}
+                <p className="text-[11px] text-slate-400">Aplicar reemplaza el cupo de cada egresado activo (incluidas butacas extra ya aprobadas) y también actualiza el cupo base para los egresados nuevos. Los invitados ya cargados no se borran.</p>
+              </div>
+            );
+  };
+
+  const cambiarWhatsapp = async () => {
+    const nuevo = !whatsappActivo;
+    const aviso = nuevo
+      ? '¿Activar las funciones de WhatsApp? (botón flotante de ayuda, avisos por WhatsApp y celular obligatorio en el portal)'
+      : '¿Desactivar TODAS las funciones de WhatsApp?\n\n• Se oculta el botón flotante de ayuda.\n• Se ocultan los botones de aviso por WhatsApp en el panel.\n• El celular deja de ser obligatorio en el portal.';
+    if (!window.confirm(aviso)) return;
+    try {
+      let resultado;
+      if (config.id) {
+        resultado = await supabase.from('configuracion').update({ whatsapp_activo: nuevo }).eq('id', config.id);
+      } else {
+        resultado = await supabase.from('configuracion').insert({ estado_etapa: config.estado_etapa || 'abierta', cupo_base: cupoBaseDe(config), whatsapp_activo: nuevo });
+      }
+      if (resultado.error) throw resultado.error;
+      await registrarLog('CONFIGURACION', 'WhatsApp', nuevo ? 'Se activaron las funciones de WhatsApp.' : 'Se desactivaron todas las funciones de WhatsApp.');
+      await recargar();
+      notify(nuevo ? 'Funciones de WhatsApp activadas.' : 'Funciones de WhatsApp desactivadas.');
+    } catch (err) {
+      const faltaColumna = /whatsapp_activo/i.test(err.message || '') || err.code === 'PGRST204' || err.code === '42703';
+      notify(faltaColumna ? 'Falta crear la columna "whatsapp_activo" en Supabase. Ejecutá el SQL que te pasaron y volvé a intentar.' : 'Error: ' + err.message, 'error');
     }
   };
 
@@ -1538,7 +1678,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
       const registros = rows.map((r) => ({
         dni: sanitizeDNI(r[0]),
         nombre_completo: (r[1] || '').toUpperCase(),
-        cupo_asignado: config.cupo_base || CUPO_BASE_DEFECTO,
+        cupo_asignado: cupoBaseDe(config),
         cerrado: false,
       })).filter(x => x.dni.length >= 7 && x.nombre_completo);
 
@@ -1679,7 +1819,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
       const { error: errIns } = await supabase.from('egresados').insert({
         dni: sanitizeDNI(nuevoEgDni),
         nombre_completo: nuevoEgNombre.trim().toUpperCase(),
-        cupo_asignado: config.cupo_base || CUPO_BASE_DEFECTO,
+        cupo_asignado: cupoBaseDe(config),
         activo: true
       });
       if (errIns) throw errIns;
@@ -1739,7 +1879,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     setEditNombre(e.nombre_completo || '');
     setEditDni(e.dni || '');
     setEditCelular(e.celular || '');
-    setEditCupo(e.cupo_asignado || 4);
+    setEditCupo(cupoDe(e, config));
   };
 
   const guardarEdicionEgresado = async (e) => {
@@ -1823,7 +1963,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
       if (aprobar) {
         const egr = egresados.find((e) => e.id === sol.egresado_id);
         if (egr) {
-          const cupoActual = Number(egr.cupo_asignado) || 4;
+          const cupoActual = cupoDe(egr, config);
           const nuevoCupo = cupoActual + Number(sol.cantidad_solicitada);
           const { error: errCupo } = await supabase.from('egresados').update({ cupo_asignado: nuevoCupo }).eq('id', egr.id);
           if (errCupo) throw errCupo;
@@ -2036,6 +2176,35 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
         </div>
       </div>
 
+      {perfilStaff?.rol === 'admin' && (
+        <div className="bg-white p-4 rounded-2xl border flex flex-wrap items-center justify-between gap-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <p className="text-xs font-bold uppercase text-slate-500">Invitados por egresado (cupo base)</p>
+            <span className="px-3 py-1 bg-slate-100 rounded-lg text-sm font-extrabold">{cupoBaseDe(config)}</span>
+            <button onClick={() => setModalCupo(true)} className="px-3.5 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer">Cambiar cantidad de invitados</button>
+          </div>
+          <div className="flex items-center gap-3">
+            <p className="text-xs font-bold uppercase text-slate-500">WhatsApp</p>
+            <button onClick={cambiarWhatsapp} className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${whatsappActivo ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}`}>
+              {whatsappActivo ? '● Activado' : '○ Desactivado'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {perfilStaff?.rol === 'admin' && modalCupo && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-4" onClick={() => setModalCupo(false)}>
+          <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 shadow-2xl border-t-4 border-indigo-600" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between gap-3 mb-3">
+              <h3 className="font-bold text-base text-indigo-900">Cantidad de invitados por egresado</h3>
+              <button onClick={() => setModalCupo(false)} title="Cerrar" className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 cursor-pointer"><X className="w-4 h-4" /></button>
+            </div>
+            {renderSimuladorCupo()}
+            <p className="text-[11px] text-slate-400 mt-3">Para cambiar el cupo de un solo egresado, abrí "Editar y Descargar QR" de esa persona y modificá "Cupo Asignado".</p>
+          </div>
+        </div>
+      )}
+
       {modalCierreParcialAbierto && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden border p-6 space-y-4">
@@ -2049,7 +2218,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
             <ul className="list-disc pl-5 text-xs text-slate-600 space-y-1.5">
               <li>Los egresados ya <b>no podrán modificar ni editar</b> el padrón de sus invitados base ya cargados.</li>
               <li>Se habilitará de manera exclusiva la gestión y aprobación de <b>butacas extra/plus</b> desde la bandeja de solicitudes.</li>
-              <li>Podrás notificar por WhatsApp a los alumnos beneficiados para que vuelvan a ingresar al portal y completen sus cupos adicionales.</li>
+              {whatsappActivo && <li>Podrás notificar por WhatsApp a los alumnos beneficiados para que vuelvan a ingresar al portal y completen sus cupos adicionales.</li>}
             </ul>
             <div className="flex gap-3 pt-3 border-t">
               <button onClick={() => setModalCierreParcialAbierto(false)} className="flex-1 py-2.5 bg-slate-100 text-slate-700 rounded-xl text-xs font-bold cursor-pointer">Cancelar</button>
@@ -2101,13 +2270,13 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="font-semibold">{e.nombre_completo}</span> <span className="text-xs text-slate-500">({e.dni})</span> {e.activo === false && <span className="px-2 py-0.5 bg-rose-100 text-rose-700 rounded-full text-[10px] font-bold">NO ASISTE</span>}
-                      {numeroWp ? <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full text-[10px] font-bold">📱 Con WhatsApp</span> : <span className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded-full text-[10px]">Sin Celular</span>}
+                      {!whatsappActivo ? null : numeroWp ? <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full text-[10px] font-bold">📱 Con WhatsApp</span> : <span className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded-full text-[10px]">Sin Celular</span>}
                     </div>
                     <p className="text-xs text-slate-400">Invitados cargados: <b>{misInvitados.length} / {e.cupo_asignado}</b></p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <button onClick={() => abrirModalEditar(e)} className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"><Edit2 className="w-3.5 h-3.5" /> Editar y Descargar QR</button>
-                    {numeroWp && <a href={linkWpAdicionales} target="_blank" rel="noreferrer" className="px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-bold flex items-center gap-1"><MessageCircle className="w-3.5 h-3.5" /> Avisar WhatsApp</a>}
+                    {whatsappActivo && numeroWp && <a href={linkWpAdicionales} target="_blank" rel="noreferrer" className="px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-bold flex items-center gap-1"><MessageCircle className="w-3.5 h-3.5" /> Avisar WhatsApp</a>}
                     <span className="text-xs font-bold bg-slate-100 px-2.5 py-1 rounded-lg">Cupo: {e.cupo_asignado}</span>
                   </div>
                 </div>
@@ -2188,8 +2357,8 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                 <input type="text" required maxLength={8} value={editDni} onChange={(e) => setEditDni(sanitizeDNI(e.target.value))} className="w-full px-3 py-2 border rounded-xl text-sm font-mono" />
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Celular / WhatsApp <span className="text-rose-600">* Obligatorio</span></label>
-                <input type="text" required value={editCelular} onChange={(e) => setEditCelular(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm" />
+                <label className="block text-xs font-bold text-slate-700 mb-1">Celular{whatsappActivo ? ' / WhatsApp' : ''} {whatsappActivo ? <span className="text-rose-600">* Obligatorio</span> : <span className="text-slate-500">(opcional)</span>}</label>
+                <input type="text" required={whatsappActivo} value={editCelular} onChange={(e) => setEditCelular(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm" />
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">Cupo Asignado</label>
@@ -2486,7 +2655,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                           <span className={`px-3 py-1 rounded-lg text-xs font-bold uppercase ${s.estado === 'aprobada' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
                             {s.estado}
                           </span>
-                          {numeroWp && (
+                          {whatsappActivo && numeroWp && (
                             <a
                               href={s.estado === 'aprobada' ? linkWpAprobada : linkWpRechazada}
                               target="_blank"
@@ -2591,7 +2760,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
               <label className="block text-xs font-bold text-slate-700 mb-1">Cupo Base por Egresado</label>
               <input
                 type="number"
-                min="1"
+                min="0"
                 max="10"
                 value={cupoBaseEdit}
                 onChange={(e) => setCupoBaseEdit(e.target.value)}
@@ -2634,50 +2803,12 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
             </div>
           </form>
 
-          {perfilStaff?.rol === 'admin' && (() => {
-            const E = totalEgresados, D = totalDocentes, V = totalEspeciales;
-            const fijos = E + D + V;
-            const n = cupoMasivo === '' ? null : Number(cupoMasivo);
-            const ocupacion = n === null ? null : fijos + n * E;
-            const vac = ocupacion === null ? null : CAPACIDAD_MAXIMA - ocupacion;
-            const maxCupo = E > 0 ? Math.max(0, Math.floor((CAPACIDAD_MAXIMA - fijos) / E)) : 0;
-            const sobran = E > 0 ? CAPACIDAD_MAXIMA - fijos - maxCupo * E : 0;
-            return (
-              <div className="space-y-3 pt-4 border-t">
-                <h4 className="font-bold text-sm text-slate-800 uppercase tracking-wide">Simulador y cupo de invitados por egresado</h4>
-                <p className="text-xs text-slate-500">
-                  Hoy: {E} egresados + {D} docentes + {V} VIP = <b>{fijos}</b> lugares fijos de {CAPACIDAD_MAXIMA}. Quedan <b>{Math.max(0, CAPACIDAD_MAXIMA - fijos)}</b> butacas para invitados.
-                  {E > 0 && <> Con <b>{maxCupo}</b> invitado(s) por egresado entran todos y sobran <b>{sobran}</b> butaca(s) para solicitudes extra.</>}
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {[0, 1, 2, 3, 4].map((k) => {
-                    const oc = fijos + k * E;
-                    const v = CAPACIDAD_MAXIMA - oc;
-                    return (
-                      <button key={k} type="button" onClick={() => setCupoMasivo(String(k))} className={`px-3 py-2 rounded-xl border text-xs font-bold cursor-pointer text-left ${String(k) === cupoMasivo ? 'ring-2 ring-indigo-500' : ''} ${v < 0 ? 'bg-rose-50 border-rose-200 text-rose-700' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
-                        {k} por egresado<br /><span className="font-semibold">{oc} ocupadas · {v < 0 ? `faltan ${-v}` : `sobran ${v}`}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-                <div className="flex flex-wrap items-end gap-3">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Invitados por egresado (0 a 10)</label>
-                    <input type="number" min="0" max="10" value={cupoMasivo} onChange={(e) => setCupoMasivo(e.target.value)} className="w-40 px-3 py-2 border rounded-xl text-sm bg-white" placeholder="Ej: 2" />
-                  </div>
-                  <button type="button" disabled={aplicandoCupo || cupoMasivo === ''} onClick={aplicarCupoMasivo} className="px-4 py-2.5 bg-indigo-700 hover:bg-indigo-800 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow cursor-pointer">
-                    {aplicandoCupo ? 'Aplicando...' : 'Aplicar a todos los egresados activos'}
-                  </button>
-                </div>
-                {ocupacion !== null && (
-                  <p className={`text-xs font-bold ${vac < 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
-                    Con {n} por egresado: {ocupacion} de {CAPACIDAD_MAXIMA} butacas ({vac < 0 ? `faltan ${-vac}` : `sobran ${vac}`}).
-                  </p>
-                )}
-                <p className="text-[11px] text-slate-400">Aplicar reemplaza el cupo de cada egresado activo (incluidas butacas extra ya aprobadas) y también actualiza el cupo base para los egresados nuevos. Los invitados ya cargados no se borran.</p>
-              </div>
-            );
-          })()}
+          {perfilStaff?.rol === 'admin' && (
+            <div className="pt-4 border-t flex flex-wrap items-center justify-between gap-3">
+              <p className="text-xs text-slate-500">Para cambiar la cantidad de invitados de <b>todos</b> los egresados usá el simulador de cupo.</p>
+              <button type="button" onClick={() => setModalCupo(true)} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold cursor-pointer">Abrir simulador de cupo</button>
+            </div>
+          )}
 
           {/* Mapa Visual Interactivo de la Sala */}
           <div className="space-y-3 pt-4 border-t">
@@ -2789,6 +2920,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                 <p className="text-xs text-slate-500">Acciones realizadas por los operadores del sistema (se muestran las más recientes).</p>
               </div>
               <div className="flex items-center gap-1 shrink-0">
+                <button onClick={exportarLogsCSV} title="Exportar todo el registro (CSV)" className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"><Download className="w-3.5 h-3.5" /> Exportar CSV</button>
                 <button onClick={() => recargar()} title="Actualizar" className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 cursor-pointer"><RefreshCw className="w-4 h-4" /></button>
                 <button onClick={() => setModalLogs(false)} title="Cerrar" className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 cursor-pointer"><X className="w-4 h-4" /></button>
               </div>
