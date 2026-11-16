@@ -608,14 +608,16 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
     e.preventDefault();
     setEnviandoSol(true);
     try {
-      await supabase.from('solicitudes_butacas').insert({
+      const { error: errSol } = await supabase.from('solicitudes_butacas').insert({
         egresado_id: datosPersona.id,
         egresado_nombre: datosPersona.nombre_completo,
         egresado_dni: datosPersona.dni,
+        egresado_celular: datosPersona.celular || null,
         cantidad_solicitada: Number(cantExtra),
         observacion: obsExtra.trim(),
         estado: 'pendiente',
       });
+      if (errSol) throw errSol;
       setObsExtra('');
       await recargar();
       notify('Solicitud de butacas extra enviada.');
@@ -1508,16 +1510,19 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
   const resolverSolicitud = async (sol, aprobar) => {
     try {
       const nuevoEstado = aprobar ? 'aprobada' : 'rechazada';
-      await supabase.from('solicitudes_butacas').update({ estado: nuevoEstado }).eq('id', sol.id);
 
       if (aprobar) {
         const egr = egresados.find((e) => e.id === sol.egresado_id);
         if (egr) {
           const cupoActual = Number(egr.cupo_asignado) || 4;
           const nuevoCupo = cupoActual + Number(sol.cantidad_solicitada);
-          await supabase.from('egresados').update({ cupo_asignado: nuevoCupo }).eq('id', egr.id);
+          const { error: errCupo } = await supabase.from('egresados').update({ cupo_asignado: nuevoCupo }).eq('id', egr.id);
+          if (errCupo) throw errCupo;
         }
       }
+
+      const { error: errEstado } = await supabase.from('solicitudes_butacas').update({ estado: nuevoEstado }).eq('id', sol.id);
+      if (errEstado) throw errEstado;
 
       await registrarLog('SOLICITUD', 'Butacas', `Se ${nuevoEstado} la solicitud de butacas para ${sol.egresado_nombre}`);
       await recargar();
