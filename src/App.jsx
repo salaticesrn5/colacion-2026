@@ -73,6 +73,14 @@ export default function App() {
     };
   }, []);
 
+  const puedeAdministrar = perfilStaff?.rol === 'admin' || perfilStaff?.rol === 'coordinador';
+  // Los usuarios con rol "puerta" solo pueden usar el módulo de Puerta
+  useEffect(() => {
+    if (session && perfilStaff && !puedeAdministrar && (vista === 'admin' || vista === 'reporte_papel' || vista === 'login')) {
+      setVista('puerta');
+    }
+  }, [session, perfilStaff, vista]);
+
   // Al cambiar de pantalla (portal / puerta) se trae una carga fresca, sin refresco automático permanente
   useEffect(() => {
     if (vista === 'puerta' || vista === 'portal') cargarDatosGlobales();
@@ -290,7 +298,7 @@ export default function App() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 py-6">
-        {loadingAuth ? (
+        {(loadingAuth || (session && !perfilStaff)) ? (
           <div className="flex justify-center items-center py-24 text-slate-500 gap-2">
             <RefreshCw className="w-5 h-5 animate-spin" />
             <span>Cargando sistema...</span>
@@ -299,7 +307,7 @@ export default function App() {
           <LoginStaff onSuccess={() => { cargarDatosGlobales(); setVista('admin'); }} notify={notify} />
         ) : vista === 'puerta' && session ? (
           <ModuloPuerta egresados={egresados} invitados={invitados} docentes={docentes} especiales={especiales} recargar={cargarDatosGlobales} notify={notify} />
-        ) : vista === 'admin' && session ? (
+        ) : vista === 'admin' && session && puedeAdministrar ? (
           <PanelAdministracion
             perfilStaff={perfilStaff} config={config} egresados={egresados} invitados={invitados}
             docentes={docentes} especiales={especiales} solicitudes={solicitudes} usuariosSistema={usuariosSistema} logsSistema={logsSistema}
@@ -308,7 +316,7 @@ export default function App() {
             reiniciarAsistenciasGeneral={reiniciarAsistenciasGeneral}
             borrarInvitadosEgresados={borrarInvitadosEgresados} registrarLog={registrarLog}
           />
-        ) : vista === 'reporte_papel' && session ? (
+        ) : vista === 'reporte_papel' && session && puedeAdministrar ? (
           <ReporteResumenPapel egresados={egresados} invitados={invitados} docentes={docentes} especiales={especiales} />
         ) : (
           <PortalPrincipalDNI config={config} egresados={egresados} invitados={invitados} docentes={docentes} especiales={especiales} solicitudes={solicitudes} recargar={cargarDatosGlobales} notify={notify} />
@@ -818,12 +826,69 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
   );
 }
 
+const CONFIG_INGRESO = {
+  egresado: {
+    tabla: 'egresados', okTitulo: '✓ INGRESO PERMITIDO (EGRESADO)', dupTipo: 'warning', dupTitulo: '⚠️ EGRESADO YA INGRESÓ',
+    detalle: (f) => `DNI: ${f.dni}`, dupToast: (f) => `⚠️ ¡EGRESADO YA INGRESÓ! ${f.nombre_completo}`,
+  },
+  invitado: {
+    tabla: 'invitados', extra: () => ({ hora_ingreso: new Date().toISOString() }), okTitulo: '✓ INGRESO PERMITIDO (FAMILIAR)', dupTipo: 'error', dupTitulo: '¡ALERTA DUPLICADO!',
+    detalle: (f) => `DNI: ${f.dni}`, dupDetalle: (f) => `Entrada ${f.numero_entrada} ya ingresó anteriormente.`, dupToast: (f) => `⚠️ ¡ALERTA DUPLICADO! La entrada ${f.numero_entrada} ya ingresó.`,
+  },
+  docente: {
+    tabla: 'docentes', okTitulo: '✓ INGRESO PERMITIDO (DOCENTE)', dupTipo: 'warning', dupTitulo: '⚠️ DOCENTE YA INGRESÓ',
+    detalle: (f) => `DNI: ${f.dni}`, dupToast: (f) => `⚠️ ¡DOCENTE YA INGRESÓ! ${f.nombre_completo}`,
+  },
+  vip: {
+    tabla: 'invitados_especiales', okTitulo: '✓ INGRESO PERMITIDO (VIP)', dupTipo: 'warning', dupTitulo: '⚠️ VIP YA INGRESÓ',
+    detalle: () => 'Autoridad / Invitado Especial', dupToast: (f) => `⚠️ ¡VIP YA INGRESÓ! ${f.nombre_completo}`,
+  },
+};
+
+// Busca en los datos que ya tiene cargados el dispositivo
+const localizarCodigo = (code, esQrEgresado, datos) => {
+  const { egresados: egrs, invitados: invs, docentes: docs, especiales: vips } = datos;
+  const egr = () => egrs.find((e) => e.dni && String(e.dni) === code);
+  if (esQrEgresado) { const e = egr(); if (e) return { tipo: 'egresado', fila: e }; }
+  const inv = invs.find((i) => String(i.numero_entrada || '').toUpperCase() === code || (i.dni && String(i.dni) === code));
+  if (inv) return { tipo: 'invitado', fila: inv };
+  const doc = docs.find((d) => d.dni && (String(d.dni) === code || code.includes(String(d.dni))));
+  if (doc) return { tipo: 'docente', fila: doc };
+  const vip = vips.find((v) => (v.dni && (String(v.dni) === code || code.includes(String(v.dni)))) || (code.length >= 5 && String(v.nombre_completo || '').toUpperCase().includes(code)));
+  if (vip) return { tipo: 'vip', fila: vip };
+  const e2 = egr();
+  if (e2) return { tipo: 'egresado', fila: e2 };
+  return null;
+};
+
+// Si el código no está en la lista del dispositivo (por ejemplo, alguien cargado después de abrir la pantalla), se busca directo en la base
+const buscarCodigoEnBase = async (code, esQrEgresado) => {
+  if (!/^[A-Z0-9-]{4,40}$/.test(code)) return null;
+  const uno = async (tabla, col) => {
+    const { data, error } = await supabase.from(tabla).select('*').eq(col, code).limit(1);
+    if (error) throw error;
+    return data && data[0] ? data[0] : null;
+  };
+  if (esQrEgresado) { const e = await uno('egresados', 'dni'); if (e) return { tipo: 'egresado', fila: e }; }
+  const inv = (await uno('invitados', 'numero_entrada')) || (await uno('invitados', 'dni'));
+  if (inv) return { tipo: 'invitado', fila: inv };
+  const doc = await uno('docentes', 'dni');
+  if (doc) return { tipo: 'docente', fila: doc };
+  const vip = await uno('invitados_especiales', 'dni');
+  if (vip) return { tipo: 'vip', fila: vip };
+  const egr = await uno('egresados', 'dni');
+  if (egr) return { tipo: 'egresado', fila: egr };
+  return null;
+};
+
 function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, notify }) {
   const [busqueda, setBusqueda] = useState('');
   const [egresadoSeleccionado, setEgresadoSeleccionado] = useState(null);
   const [escaneandoCamara, setEscaneandoCamara] = useState(false);
   const [resultadoIngreso, setResultadoIngreso] = useState(null);
   const [codigoManual, setCodigoManual] = useState('');
+  const [modoFallback, setModoFallback] = useState(false);
+  const html5Ref = useRef(null);
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
@@ -878,99 +943,36 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
     const avisar = (msg, tipo) => notifyRef.current(msg, tipo);
 
     try {
-      const { egresados: egrs, invitados: invs, docentes: docs, especiales: vips } = datosRef.current;
       const esQrEgresado = raw.toUpperCase().includes('ESRN005-EGRESADO');
       let code = raw.toUpperCase();
-
       if (code.includes('ESRN005-')) {
         const partes = code.split('-');
         for (let p of partes) {
-          if (/^\d{7,8}$/.test(p)) {
-            code = p;
-            break;
-          }
+          if (/^\d{7,8}$/.test(p)) { code = p; break; }
         }
       }
 
-      const buscarEgresado = () => egrs.find((e) => e.dni && String(e.dni) === code);
+      let hallado = localizarCodigo(code, esQrEgresado, datosRef.current);
+      if (!hallado) hallado = await buscarCodigoEnBase(code, esQrEgresado);
 
-      // 1) QR de egresado: se busca primero entre los egresados
-      let egr = esQrEgresado ? buscarEgresado() : null;
-      if (egr) {
-        const ok = await marcarIngreso('egresados', egr.id);
-        await recargarRef.current();
-        if (ok) {
-          setResultadoIngreso({ tipo: 'success', titulo: '✓ INGRESO PERMITIDO (EGRESADO)', nombre: egr.nombre_completo, detalle: `DNI: ${egr.dni}` });
-          avisar(`✓ INGRESO PERMITIDO: ${egr.nombre_completo}`);
-        } else {
-          setResultadoIngreso({ tipo: 'warning', titulo: '⚠️ EGRESADO YA INGRESÓ', nombre: egr.nombre_completo, detalle: `DNI: ${egr.dni}` });
-          avisar(`⚠️ ¡EGRESADO YA INGRESÓ! ${egr.nombre_completo}`, 'warning');
-        }
+      if (!hallado) {
+        setResultadoIngreso({ tipo: 'error', titulo: '❌ CÓDIGO NO ENCONTRADO', nombre: raw, detalle: 'Verifique el padrón o busque manualmente.' });
+        avisar(`❌ Código o DNI no encontrado: ${raw}`, 'error');
         return;
       }
 
-      // 2) Familiar invitado (por número de entrada o DNI)
-      const inv = invs.find((i) => String(i.numero_entrada || '').toUpperCase() === code || (i.dni && String(i.dni) === code));
-      if (inv) {
-        const ok = await marcarIngreso('invitados', inv.id, { hora_ingreso: new Date().toISOString() });
-        await recargarRef.current();
-        if (ok) {
-          setResultadoIngreso({ tipo: 'success', titulo: '✓ INGRESO PERMITIDO (FAMILIAR)', nombre: inv.nombre_completo, detalle: `DNI: ${inv.dni}` });
-          avisar(`✓ INGRESO PERMITIDO: ${inv.nombre_completo}`);
-        } else {
-          setResultadoIngreso({ tipo: 'error', titulo: '¡ALERTA DUPLICADO!', nombre: inv.nombre_completo, detalle: `Entrada ${inv.numero_entrada} ya ingresó anteriormente.` });
-          avisar(`⚠️ ¡ALERTA DUPLICADO! La entrada ${inv.numero_entrada} ya ingresó.`, 'error');
-        }
-        return;
-      }
+      const c = CONFIG_INGRESO[hallado.tipo];
+      const f = hallado.fila;
+      const ok = await marcarIngreso(c.tabla, f.id, c.extra ? c.extra() : {});
+      recargarRef.current(); // refresca la lista en segundo plano, sin demorar el siguiente escaneo
 
-      // 3) Docente
-      const doc = docs.find((d) => d.dni && (String(d.dni) === code || code.includes(String(d.dni))));
-      if (doc) {
-        const ok = await marcarIngreso('docentes', doc.id);
-        await recargarRef.current();
-        if (ok) {
-          setResultadoIngreso({ tipo: 'success', titulo: '✓ INGRESO PERMITIDO (DOCENTE)', nombre: doc.nombre_completo, detalle: `DNI: ${doc.dni}` });
-          avisar(`✓ INGRESO PERMITIDO: ${doc.nombre_completo}`);
-        } else {
-          setResultadoIngreso({ tipo: 'warning', titulo: '⚠️ DOCENTE YA INGRESÓ', nombre: doc.nombre_completo, detalle: `DNI: ${doc.dni}` });
-          avisar(`⚠️ ¡DOCENTE YA INGRESÓ! ${doc.nombre_completo}`, 'warning');
-        }
-        return;
+      if (ok) {
+        setResultadoIngreso({ tipo: 'success', titulo: c.okTitulo, nombre: f.nombre_completo, detalle: c.detalle(f) });
+        avisar(`✓ INGRESO PERMITIDO: ${f.nombre_completo}`);
+      } else {
+        setResultadoIngreso({ tipo: c.dupTipo, titulo: c.dupTitulo, nombre: f.nombre_completo, detalle: c.dupDetalle ? c.dupDetalle(f) : c.detalle(f) });
+        avisar(c.dupToast(f), c.dupTipo === 'error' ? 'error' : 'warning');
       }
-
-      // 4) Invitado especial / VIP
-      const vip = vips.find((v) => (v.dni && (String(v.dni) === code || code.includes(String(v.dni)))) || (code.length >= 5 && String(v.nombre_completo || '').toUpperCase().includes(code)));
-      if (vip) {
-        const ok = await marcarIngreso('invitados_especiales', vip.id);
-        await recargarRef.current();
-        if (ok) {
-          setResultadoIngreso({ tipo: 'success', titulo: '✓ INGRESO PERMITIDO (VIP)', nombre: vip.nombre_completo, detalle: 'Autoridad / Invitado Especial' });
-          avisar(`✓ INGRESO PERMITIDO: ${vip.nombre_completo}`);
-        } else {
-          setResultadoIngreso({ tipo: 'warning', titulo: '⚠️ VIP YA INGRESÓ', nombre: vip.nombre_completo, detalle: 'Autoridad / Invitado Especial' });
-          avisar(`⚠️ ¡VIP YA INGRESÓ! ${vip.nombre_completo}`, 'warning');
-        }
-        return;
-      }
-
-      // 5) Egresado por DNI (por si el código no trae el prefijo de egresado)
-      egr = buscarEgresado();
-      if (egr) {
-        const ok = await marcarIngreso('egresados', egr.id);
-        await recargarRef.current();
-        if (ok) {
-          setResultadoIngreso({ tipo: 'success', titulo: '✓ INGRESO PERMITIDO (EGRESADO)', nombre: egr.nombre_completo, detalle: `DNI: ${egr.dni}` });
-          avisar(`✓ INGRESO PERMITIDO: ${egr.nombre_completo}`);
-        } else {
-          setResultadoIngreso({ tipo: 'warning', titulo: '⚠️ EGRESADO YA INGRESÓ', nombre: egr.nombre_completo, detalle: `DNI: ${egr.dni}` });
-          avisar(`⚠️ ¡EGRESADO YA INGRESÓ! ${egr.nombre_completo}`, 'warning');
-        }
-        return;
-      }
-
-      setResultadoIngreso({ tipo: 'error', titulo: '❌ CÓDIGO NO ENCONTRADO', nombre: raw, detalle: 'Verifique el padrón o busque manualmente.' });
-      avisar(`❌ Código o DNI no encontrado: ${raw}`, 'error');
     } catch (err) {
       console.error(err);
       setResultadoIngreso({ tipo: 'error', titulo: '❌ ERROR AL REGISTRAR', nombre: raw, detalle: 'NO se registró el ingreso (' + (err.message || 'error de conexión') + '). Reintente o use la búsqueda manual.' });
@@ -982,11 +984,31 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
 
   const iniciarCamara = async () => {
     setResultadoIngreso(null);
+    setEscaneandoCamara(true);
     if (!window.BarcodeDetector) {
-      notify('Este navegador no puede leer QR con la cámara. Usá Chrome en un celular Android, o el campo "Lector / código manual" de más abajo.', 'error');
+      // iPhone (Safari) y Chrome de Windows: se usa la librería html5-qrcode
+      setModoFallback(true);
+      setTimeout(async () => {
+        try {
+          const { Html5Qrcode } = await import('html5-qrcode');
+          const lector = new Html5Qrcode('lector-html5');
+          html5Ref.current = lector;
+          await lector.start(
+            { facingMode: 'environment' },
+            { fps: 8, qrbox: { width: 240, height: 240 } },
+            (texto) => { validarCodigoEntrada(texto); },
+            () => {}
+          );
+        } catch (err) {
+          console.error(err);
+          notify('No se pudo acceder a la cámara. Verifique los permisos del navegador o use el campo "Lector / código manual".', 'error');
+          html5Ref.current = null;
+          setModoFallback(false);
+          setEscaneandoCamara(false);
+        }
+      }, 150);
       return;
     }
-    setEscaneandoCamara(true);
     try {
       const constraints = { video: { facingMode: { ideal: 'environment' } } };
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -1016,6 +1038,12 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
   };
 
   const apagarCamara = () => {
+    if (html5Ref.current) {
+      const l = html5Ref.current;
+      html5Ref.current = null;
+      l.stop().then(() => l.clear()).catch(() => {});
+    }
+    setModoFallback(false);
     if (scanIntervalRef.current) {
       clearInterval(scanIntervalRef.current);
       scanIntervalRef.current = null;
@@ -1069,8 +1097,14 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
         {escaneandoCamara && (
           <div className="bg-slate-800 border-2 border-emerald-500 rounded-2xl p-4 space-y-3">
             <div className="relative w-full h-80 bg-black rounded-xl overflow-hidden border border-slate-700">
-              <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
-              <canvas ref={canvasRef} className="hidden" />
+              {modoFallback ? (
+                <div id="lector-html5" className="w-full h-full" />
+              ) : (
+                <>
+                  <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
+                  <canvas ref={canvasRef} className="hidden" />
+                </>
+              )}
               <div className="absolute inset-0 border-4 border-emerald-500/40 rounded-xl pointer-events-none flex items-center justify-center">
                 <div className="w-56 h-56 border-2 border-dashed border-emerald-400 rounded-lg animate-pulse" />
               </div>
