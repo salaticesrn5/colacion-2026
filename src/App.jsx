@@ -200,10 +200,12 @@ export default function App() {
     }
   };
 
-  const totalEgresados = egresados.length;
-  const totalDocentes = docentes.length;
-  const totalEspeciales = especiales.length;
-  const totalCuposFamiliares = egresados.reduce((acc, e) => acc + (Number(e.cupo_asignado) || 0), 0);
+  // Quien figura como "No asiste" (activo = false) libera su plaza y la de sus invitados
+  const egresadosActivos = egresados.filter((e) => e.activo !== false);
+  const totalEgresados = egresadosActivos.length;
+  const totalDocentes = docentes.filter((d) => d.activo !== false).length;
+  const totalEspeciales = especiales.filter((v) => v.activo !== false).length;
+  const totalCuposFamiliares = egresadosActivos.reduce((acc, e) => acc + (Number(e.cupo_asignado) || 0), 0);
   const totalOcupado = totalEgresados + totalDocentes + totalEspeciales + totalCuposFamiliares;
   const vacantesLibres = CAPACIDAD_MAXIMA - totalOcupado;
 
@@ -465,6 +467,11 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
       return;
     }
 
+    if (encontrado.activo === false) {
+      setError('Figurás como que no asistirás al acto. Si cambiaste de opinión, comunicate con la escuela.');
+      return;
+    }
+
     setDatosPersona(encontrado);
     if (tipoUsuario === 'egresado') {
       if (encontrado.celular) setCelular(encontrado.celular);
@@ -639,7 +646,9 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
   const marcarNoAsistire = async () => {
     if (!window.confirm('¿Estás seguro de que no asistirás? Esto liberará tu plaza.')) return;
     let tabla = tipoUsuario === 'egresado' ? 'egresados' : tipoUsuario === 'docente' ? 'docentes' : 'invitados_especiales';
-    await supabase.from(tabla).update({ activo: false }).eq('id', datosPersona.id);
+    const { error } = await supabase.from(tabla).update({ activo: false }).eq('id', datosPersona.id);
+    if (error) { notify('No se pudo registrar: ' + error.message, 'error'); return; }
+    await recargar();
     notify('Has marcado que no asistirás. ¡Gracias!');
     setDatosPersona(null);
     setDni('');
@@ -981,6 +990,12 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
 
       const c = CONFIG_INGRESO[hallado.tipo];
       const f = hallado.fila;
+
+      if (hallado.tipo !== 'invitado' && f.activo === false) {
+        setResultadoIngreso({ tipo: 'warning', titulo: '⛔ FIGURA COMO "NO ASISTE"', nombre: f.nombre_completo, detalle: 'Dio de baja su asistencia. Consultar con coordinación antes de dejarlo pasar.' });
+        avisar(`⛔ ${f.nombre_completo} figura como "No asiste". Consultar con coordinación.`, 'warning');
+        return;
+      }
       const ok = await marcarIngreso(c.tabla, f.id, c.extra ? c.extra() : {});
       recargarRef.current(); // refresca la lista en segundo plano, sin demorar el siguiente escaneo
 
@@ -1804,6 +1819,24 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
     }
   };
 
+  const alternarNoAsiste = async (tabla, item, etiqueta) => {
+    if (!item) return;
+    const nuevoActivo = item.activo === false;
+    if (!nuevoActivo && !window.confirm(`¿Marcar a ${item.nombre_completo} como "No asiste"? Se libera su plaza en el aforo y no podrá ingresar por Puerta.`)) return;
+    try {
+      const { error } = await supabase.from(tabla).update({ activo: nuevoActivo }).eq('id', item.id);
+      if (error) throw error;
+      await registrarLog(nuevoActivo ? 'REACTIVAR' : 'NO_ASISTE', etiqueta, `${nuevoActivo ? 'Se reactivó a' : 'Se marcó como No Asiste a'} ${item.nombre_completo}`);
+      if (tabla === 'egresados') setModalEditarEgr(null);
+      if (tabla === 'docentes') setModalEditarDoc(null);
+      if (tabla === 'invitados_especiales') setModalEditarVip(null);
+      await recargar();
+      notify(nuevoActivo ? 'Reactivado: vuelve a ocupar su plaza.' : 'Marcado como No Asiste: su plaza quedó libre.');
+    } catch (err) {
+      notify('Error: ' + err.message, 'error');
+    }
+  };
+
   const eliminarEgresado = async (egr) => {
     if (!egr) return;
     if (!window.confirm(`¿Eliminar a ${egr.nombre_completo} (DNI ${egr.dni}) y todos sus invitados cargados? Esta acción no se puede deshacer.`)) return;
@@ -1898,17 +1931,17 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
 
       const hojaEgresados = egresados.map((e) => {
         const susInv = invitados.filter((i) => i.egresado_id === e.id);
-        return { DNI: e.dni, 'Nombre completo': e.nombre_completo, Presente: si(e.asistio), 'Cupo asignado': e.cupo_asignado ?? '', 'Invitados cargados': susInv.length, 'Invitados presentes': susInv.filter((i) => i.asistio).length };
+        return { DNI: e.dni, 'Nombre completo': e.nombre_completo, Estado: e.activo === false ? 'NO ASISTE' : 'Asiste', Presente: si(e.asistio), 'Cupo asignado': e.cupo_asignado ?? '', 'Invitados cargados': susInv.length, 'Invitados presentes': susInv.filter((i) => i.asistio).length };
       });
       const hojaFamiliares = invitados.map((i) => ({ 'N° entrada': i.numero_entrada || '', DNI: i.dni || '', 'Nombre completo': i.nombre_completo, 'Invitado de': porId[i.egresado_id]?.nombre_completo || '', Presente: si(i.asistio), 'Hora de ingreso': i.asistio ? hora(i.hora_ingreso) : '' }));
-      const hojaDocentes = docentes.map((d) => ({ DNI: d.dni, 'Nombre completo': d.nombre_completo, Presente: si(d.asistio) }));
-      const hojaVip = especiales.map((v) => ({ DNI: v.dni || '', 'Nombre e institución': v.nombre_completo, Presente: si(v.asistio) }));
+      const hojaDocentes = docentes.map((d) => ({ DNI: d.dni, 'Nombre completo': d.nombre_completo, Estado: d.activo === false ? 'NO ASISTE' : 'Asiste', Presente: si(d.asistio) }));
+      const hojaVip = especiales.map((v) => ({ DNI: v.dni || '', 'Nombre e institución': v.nombre_completo, Estado: v.activo === false ? 'NO ASISTE' : 'Asiste', Presente: si(v.asistio) }));
 
       const resumen = [
-        { Concepto: 'Egresados presentes', Cantidad: egresadosPresentesCount, 'De un total de': egresados.length },
+        { Concepto: 'Egresados presentes', Cantidad: egresadosPresentesCount, 'De un total de': totalEgresados },
         { Concepto: 'Familiares presentes', Cantidad: invitadosPresentesCount, 'De un total de': invitados.length },
-        { Concepto: 'Docentes presentes', Cantidad: docentesPresentesCount, 'De un total de': docentes.length },
-        { Concepto: 'VIP / autoridades presentes', Cantidad: vipsPresentesCount, 'De un total de': especiales.length },
+        { Concepto: 'Docentes presentes', Cantidad: docentesPresentesCount, 'De un total de': totalDocentes },
+        { Concepto: 'VIP / autoridades presentes', Cantidad: vipsPresentesCount, 'De un total de': totalEspeciales },
         { Concepto: 'TOTAL en la sala', Cantidad: totalAsistentesPresentes, 'De un total de': CAPACIDAD_MAXIMA },
         { Concepto: 'Reporte generado el', Cantidad: new Date().toLocaleString('es-AR'), 'De un total de': '' },
       ];
@@ -2031,7 +2064,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                 <div key={e.id} className="py-3 flex flex-wrap justify-between items-center gap-3 text-sm">
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="font-semibold">{e.nombre_completo}</span> <span className="text-xs text-slate-500">({e.dni})</span>
+                      <span className="font-semibold">{e.nombre_completo}</span> <span className="text-xs text-slate-500">({e.dni})</span> {e.activo === false && <span className="px-2 py-0.5 bg-rose-100 text-rose-700 rounded-full text-[10px] font-bold">NO ASISTE</span>}
                       {numeroWp ? <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full text-[10px] font-bold">📱 Con WhatsApp</span> : <span className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded-full text-[10px]">Sin Celular</span>}
                     </div>
                     <p className="text-xs text-slate-400">Invitados cargados: <b>{misInvitados.length} / {e.cupo_asignado}</b></p>
@@ -2143,6 +2176,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
               </div>
 
               <div className="hidden" ref={adminQrRef}><QRCodeSVG value="ESRN005-ADMIN-QR-DUMMY" size={300} level="H" includeMargin={true} /></div>
+              <button type="button" onClick={() => alternarNoAsiste('egresados', modalEditarEgr, 'Egresados')} className={`w-full py-2 rounded-xl text-xs font-bold border cursor-pointer ${modalEditarEgr.activo === false ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100' : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'}`}>{modalEditarEgr.activo === false ? 'Reactivar (vuelve a ocupar plaza)' : 'Marcar No Asiste (libera la plaza)'}</button>
               <button type="button" onClick={() => eliminarEgresado(modalEditarEgr)} className="w-full py-2 bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"><Trash2 className="w-4 h-4" /> Eliminar egresado y sus invitados</button>
 
               <div className="flex gap-2 pt-3 border-t">
@@ -2175,7 +2209,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
             {docentesFiltrados.length === 0 && <p className="text-center text-slate-400 text-sm py-6">No se encontraron docentes.</p>}
             {docentesFiltrados.map((d) => (
               <div key={d.id} className="py-2.5 flex justify-between items-center text-sm">
-                <div><span className="font-semibold">{d.nombre_completo}</span> <span className="text-xs text-slate-500">({d.dni})</span></div>
+                <div><span className="font-semibold">{d.nombre_completo}</span> <span className="text-xs text-slate-500">({d.dni})</span> {d.activo === false && <span className="px-2 py-0.5 bg-rose-100 text-rose-700 rounded-full text-[10px] font-bold">NO ASISTE</span>}</div>
                 <button onClick={() => abrirModalEditarDocente(d)} className="px-2.5 py-1 bg-amber-50 text-amber-700 border rounded-lg text-xs font-bold"><Edit2 className="w-3 h-3" /> Editar y Descargar QR</button>
               </div>
             ))}
@@ -2248,6 +2282,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                 <input type="text" required maxLength={8} value={editDocDni} onChange={(e) => setEditDocDni(sanitizeDNI(e.target.value))} className="w-full px-3 py-2 border rounded-xl text-sm font-mono" />
               </div>
               <div className="hidden" ref={adminQrRef}><QRCodeSVG value="ESRN005-ADMIN-QR-DUMMY" size={300} level="H" includeMargin={true} /></div>
+              <button type="button" onClick={() => alternarNoAsiste('docentes', modalEditarDoc, 'Docentes')} className={`w-full py-2 rounded-xl text-xs font-bold border cursor-pointer ${modalEditarDoc.activo === false ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100' : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'}`}>{modalEditarDoc.activo === false ? 'Reactivar (vuelve a ocupar plaza)' : 'Marcar No Asiste (libera la plaza)'}</button>
               <button type="button" onClick={() => eliminarDocente(modalEditarDoc)} className="w-full py-2 bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"><Trash2 className="w-4 h-4" /> Eliminar docente</button>
               <div className="flex gap-2 pt-3 border-t">
                 <button type="button" onClick={() => setModalEditarDoc(null)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold">Cancelar</button>
@@ -2279,7 +2314,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
             {vipsFiltrados.length === 0 && <p className="text-center text-slate-400 text-sm py-6">No se encontraron invitados VIP.</p>}
             {vipsFiltrados.map((v) => (
               <div key={v.id} className="py-2.5 flex justify-between items-center text-sm">
-                <div><span className="font-semibold">{v.nombre_completo}</span></div>
+                <div><span className="font-semibold">{v.nombre_completo}</span> {v.activo === false && <span className="px-2 py-0.5 bg-rose-100 text-rose-700 rounded-full text-[10px] font-bold">NO ASISTE</span>}</div>
                 <button onClick={() => abrirModalEditarVip(v)} className="px-2.5 py-1 bg-amber-50 text-amber-700 border rounded-lg text-xs font-bold"><Edit2 className="w-3 h-3" /> Editar y Descargar QR</button>
               </div>
             ))}
@@ -2351,6 +2386,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                 <input type="text" maxLength={8} value={editVipDni} onChange={(e) => setEditVipDni(sanitizeDNI(e.target.value))} className="w-full px-3 py-2 border rounded-xl text-sm font-mono" />
               </div>
               <div className="hidden" ref={adminQrRef}><QRCodeSVG value="ESRN005-ADMIN-QR-DUMMY" size={300} level="H" includeMargin={true} /></div>
+              <button type="button" onClick={() => alternarNoAsiste('invitados_especiales', modalEditarVip, 'VIP')} className={`w-full py-2 rounded-xl text-xs font-bold border cursor-pointer ${modalEditarVip.activo === false ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100' : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'}`}>{modalEditarVip.activo === false ? 'Reactivar (vuelve a ocupar plaza)' : 'Marcar No Asiste (libera la plaza)'}</button>
               <button type="button" onClick={() => eliminarVip(modalEditarVip)} className="w-full py-2 bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"><Trash2 className="w-4 h-4" /> Eliminar invitado VIP</button>
               <div className="flex gap-2 pt-3 border-t">
                 <button type="button" onClick={() => setModalEditarVip(null)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold">Cancelar</button>
@@ -2654,9 +2690,9 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
         <div className="flex justify-end mt-8">
           <button
             onClick={() => { setModalLogs(true); recargar(); }}
-            className="px-3 py-1.5 text-[11px] font-semibold text-slate-400 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg flex items-center gap-1.5 cursor-pointer"
+            className="px-4 py-2.5 text-sm font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-md flex items-center gap-2 cursor-pointer"
           >
-            <History className="w-3.5 h-3.5" /> Registro de actividad
+            <History className="w-4 h-4" /> Registro de actividad
           </button>
         </div>
       )}
