@@ -826,6 +826,17 @@ function PortalPrincipalDNI({ config, egresados, invitados, docentes, especiales
   );
 }
 
+const normalizarTexto = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+const coincideTexto = (campos, consulta) => {
+  const q = normalizarTexto(consulta);
+  if (!q) return false;
+  const digitos = String(consulta).replace(/\D/g, '');
+  return campos.some((c) => {
+    const valor = String(c || '');
+    return normalizarTexto(valor).includes(q) || (digitos.length >= 3 && valor.replace(/\D/g, '').includes(digitos));
+  });
+};
+
 const CONFIG_INGRESO = {
   egresado: {
     tabla: 'egresados', okTitulo: '✓ INGRESO PERMITIDO (EGRESADO)', dupTipo: 'warning', dupTitulo: '⚠️ EGRESADO YA INGRESÓ',
@@ -921,8 +932,15 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
 
   const alternarAsistencia = async (tabla, item) => {
     try {
-      const { error } = await supabase.from(tabla).update({ asistio: !item.asistio }).eq('id', item.id);
-      if (error) throw error;
+      if (!item.asistio) {
+        const extra = tabla === 'invitados' ? { hora_ingreso: new Date().toISOString() } : {};
+        const ok = await marcarIngreso(tabla, item.id, extra);
+        if (!ok) notify('Ya figuraba como presente (lo registró otro dispositivo).', 'warning');
+      } else {
+        if (!window.confirm(`¿Quitar el ingreso de ${item.nombre_completo}?`)) return;
+        const { error } = await supabase.from(tabla).update({ asistio: false }).eq('id', item.id);
+        if (error) throw error;
+      }
       await recargar();
     } catch (err) {
       notify('No se pudo guardar: ' + err.message, 'error');
@@ -1058,9 +1076,11 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
   useEffect(() => { return () => { apagarCamara(); }; }, []);
 
   const termino = busqueda.trim().toLowerCase();
-  const egresadosCoincidentes = termino ? egresados.filter((e) => (e.nombre_completo || '').toLowerCase().includes(termino) || e.dni.includes(termino)) : [];
+  const egresadosCoincidentes = termino ? egresados.filter((e) => coincideTexto([e.nombre_completo, e.dni], busqueda)) : [];
   const egrSel = egresadoSeleccionado ? (egresados.find((e) => e.id === egresadoSeleccionado.id) || egresadoSeleccionado) : null;
-  const docentesCoincidentes = termino ? docentes.filter((d) => (d.nombre_completo || '').toLowerCase().includes(termino) || d.dni.includes(termino)) : [];
+  const docentesCoincidentes = termino ? docentes.filter((d) => coincideTexto([d.nombre_completo, d.dni], busqueda)) : [];
+  const invitadosCoincidentes = termino ? invitados.filter((i) => coincideTexto([i.nombre_completo, i.dni, i.numero_entrada], busqueda)) : [];
+  const vipsCoincidentes = termino ? especiales.filter((v) => coincideTexto([v.nombre_completo, v.dni], busqueda)) : [];
 
   return (
     <div className="max-w-xl mx-auto space-y-4">
@@ -1190,6 +1210,36 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
                 </button>
               </div>
             ))}
+            {invitadosCoincidentes.map((inv) => {
+              const anfitrion = egresados.find((e) => e.id === inv.egresado_id);
+              return (
+                <div key={inv.id} className="p-3 rounded-xl border flex items-center justify-between gap-2">
+                  <div>
+                    <span className="text-[10px] font-bold uppercase text-amber-600">Familiar</span>
+                    <p className="font-bold text-sm">{inv.nombre_completo}</p>
+                    <p className="text-xs text-slate-500">DNI: {inv.dni || 'S/D'}{anfitrion ? ` · Invitado de ${anfitrion.nombre_completo}` : ''}</p>
+                  </div>
+                  <button onClick={() => alternarAsistencia('invitados', inv)} className={`px-3.5 py-1.5 rounded-xl text-xs font-bold shadow-xs shrink-0 ${inv.asistio ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-800'}`}>
+                    {inv.asistio ? '✓ Asistió' : 'Marcar Ingreso'}
+                  </button>
+                </div>
+              );
+            })}
+            {vipsCoincidentes.map((vip) => (
+              <div key={vip.id} className="p-3 rounded-xl border flex items-center justify-between gap-2">
+                <div>
+                  <span className="text-[10px] font-bold uppercase text-rose-600">VIP / Autoridad</span>
+                  <p className="font-bold text-sm">{vip.nombre_completo}</p>
+                  <p className="text-xs text-slate-500">DNI: {vip.dni || 'S/D'}</p>
+                </div>
+                <button onClick={() => alternarAsistencia('invitados_especiales', vip)} className={`px-3.5 py-1.5 rounded-xl text-xs font-bold shadow-xs shrink-0 ${vip.asistio ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-800'}`}>
+                  {vip.asistio ? '✓ Asistió' : 'Marcar Ingreso'}
+                </button>
+              </div>
+            ))}
+            {termino && egresadosCoincidentes.length + docentesCoincidentes.length + invitadosCoincidentes.length + vipsCoincidentes.length === 0 && (
+              <p className="text-center text-slate-400 text-sm py-4">No se encontraron resultados.</p>
+            )}
           </div>
         )}
       </div>
@@ -1347,6 +1397,43 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
       qrImage.src = blobURL;
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  // Protección: no se puede dejar al sistema sin administradores activos
+  const quedaOtroAdmin = (u) => usuariosSistema.some((x) => x.id !== u.id && String(x.rol || '').toLowerCase() === 'admin' && x.activo !== false);
+
+  const actualizarUsuario = async (u, cambios, detalle) => {
+    const esYo = (u.email || '').toLowerCase() === (perfilStaff?.email || '').toLowerCase();
+    const pierdeAdmin = cambios.activo === false || (cambios.rol && cambios.rol !== 'admin');
+    if (String(u.rol || '').toLowerCase() === 'admin' && pierdeAdmin && (esYo || !quedaOtroAdmin(u))) {
+      notify(esYo ? 'No podés quitarte a vos mismo el acceso de administrador.' : 'Tiene que quedar al menos un administrador activo.', 'error');
+      return;
+    }
+    try {
+      const { error } = await supabase.from('usuarios_sistema').update(cambios).eq('id', u.id);
+      if (error) throw error;
+      await registrarLog('EDITAR_USUARIO', 'Sistema', `${detalle}: ${u.nombre}`);
+      await recargar();
+      notify('Usuario actualizado.');
+    } catch (err) {
+      notify('Error al actualizar el usuario: ' + err.message, 'error');
+    }
+  };
+
+  const eliminarUsuarioSistema = async (u) => {
+    const esYo = (u.email || '').toLowerCase() === (perfilStaff?.email || '').toLowerCase();
+    if (esYo) { notify('No podés eliminar tu propio usuario.', 'error'); return; }
+    if (String(u.rol || '').toLowerCase() === 'admin' && !quedaOtroAdmin(u)) { notify('Tiene que quedar al menos un administrador activo.', 'error'); return; }
+    if (!window.confirm(`¿Eliminar a ${u.nombre}?`)) return;
+    try {
+      const { error } = await supabase.from('usuarios_sistema').delete().eq('id', u.id);
+      if (error) throw error;
+      await registrarLog('ELIMINAR_USUARIO', 'Sistema', `Se eliminó al usuario ${u.nombre}`);
+      await recargar();
+      notify('Usuario eliminado.');
+    } catch (err) {
+      notify('Error al eliminar el usuario: ' + err.message, 'error');
     }
   };
 
@@ -1794,6 +1881,48 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
   const vipsPresentesCount = especiales.filter(v => v.asistio).length;
   const totalAsistentesPresentes = egresadosPresentesCount + invitadosPresentesCount + docentesPresentesCount + vipsPresentesCount;
 
+  const exportarReporteAsistencia = async () => {
+    try {
+      const XLSX = await import('xlsx');
+      const si = (v) => (v ? 'SI' : 'NO');
+      const hora = (v) => { if (!v) return ''; const d = new Date(v); return isNaN(d.getTime()) ? '' : d.toLocaleString('es-AR'); };
+      const porId = {};
+      egresados.forEach((e) => { porId[e.id] = e; });
+
+      const hojaEgresados = egresados.map((e) => {
+        const susInv = invitados.filter((i) => i.egresado_id === e.id);
+        return { DNI: e.dni, 'Nombre completo': e.nombre_completo, Presente: si(e.asistio), 'Cupo asignado': e.cupo_asignado ?? '', 'Invitados cargados': susInv.length, 'Invitados presentes': susInv.filter((i) => i.asistio).length };
+      });
+      const hojaFamiliares = invitados.map((i) => ({ 'N° entrada': i.numero_entrada || '', DNI: i.dni || '', 'Nombre completo': i.nombre_completo, 'Invitado de': porId[i.egresado_id]?.nombre_completo || '', Presente: si(i.asistio), 'Hora de ingreso': i.asistio ? hora(i.hora_ingreso) : '' }));
+      const hojaDocentes = docentes.map((d) => ({ DNI: d.dni, 'Nombre completo': d.nombre_completo, Presente: si(d.asistio) }));
+      const hojaVip = especiales.map((v) => ({ DNI: v.dni || '', 'Nombre e institución': v.nombre_completo, Presente: si(v.asistio) }));
+
+      const resumen = [
+        { Concepto: 'Egresados presentes', Cantidad: egresadosPresentesCount, 'De un total de': egresados.length },
+        { Concepto: 'Familiares presentes', Cantidad: invitadosPresentesCount, 'De un total de': invitados.length },
+        { Concepto: 'Docentes presentes', Cantidad: docentesPresentesCount, 'De un total de': docentes.length },
+        { Concepto: 'VIP / autoridades presentes', Cantidad: vipsPresentesCount, 'De un total de': especiales.length },
+        { Concepto: 'TOTAL en la sala', Cantidad: totalAsistentesPresentes, 'De un total de': CAPACIDAD_MAXIMA },
+        { Concepto: 'Reporte generado el', Cantidad: new Date().toLocaleString('es-AR'), 'De un total de': '' },
+      ];
+
+      const libro = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(libro, XLSX.utils.json_to_sheet(resumen), 'Resumen');
+      XLSX.utils.book_append_sheet(libro, XLSX.utils.json_to_sheet(hojaEgresados), 'Egresados');
+      XLSX.utils.book_append_sheet(libro, XLSX.utils.json_to_sheet(hojaFamiliares), 'Familiares');
+      XLSX.utils.book_append_sheet(libro, XLSX.utils.json_to_sheet(hojaDocentes), 'Docentes');
+      XLSX.utils.book_append_sheet(libro, XLSX.utils.json_to_sheet(hojaVip), 'VIP');
+      const f = new Date();
+      const nombre = `reporte-asistencia-esrn5-${f.getFullYear()}-${String(f.getMonth() + 1).padStart(2, '0')}-${String(f.getDate()).padStart(2, '0')}.xlsx`;
+      XLSX.writeFile(libro, nombre);
+      notify(`Reporte descargado: ${nombre}`);
+    } catch (err) {
+      console.error(err);
+      notify('No se pudo generar el reporte: ' + err.message, 'error');
+    }
+  };
+
+
   const normTxt = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
   const coincideBusqueda = (item, q) => {
     const texto = normTxt(q);
@@ -1813,8 +1942,10 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
         <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Docentes</p><p className="text-2xl font-extrabold">{totalDocentes}</p></div>
         <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Especiales / VIP</p><p className="text-2xl font-extrabold">{totalEspeciales}</p></div>
         <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Cupos Familiares</p><p className="text-2xl font-extrabold">{totalCuposFamiliares}</p></div>
-        <div className={`col-span-2 sm:col-span-1 p-4 rounded-2xl border ${vacantesLibres < 0 ? 'bg-rose-50 text-rose-700' : 'bg-emerald-50 text-emerald-700'}`}>
+        <div className={`col-span-2 sm:col-span-1 p-4 rounded-2xl border ${vacantesLibres < 0 ? 'bg-rose-50 text-rose-700' : vacantesLibres <= 25 ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'}`}>
           <p className="text-xs font-semibold">Vacantes Libres (525 máx)</p><p className="text-2xl font-extrabold">{vacantesLibres}</p>
+          {vacantesLibres < 0 && <p className="text-[10px] font-bold mt-0.5">Cupos asignados por encima del aforo</p>}
+          {vacantesLibres >= 0 && vacantesLibres <= 25 && <p className="text-[10px] font-bold mt-0.5">Quedan pocas vacantes</p>}
         </div>
       </div>
 
@@ -2305,9 +2436,14 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
               <h3 className="font-bold text-base text-slate-900">📊 Panel de Acreditación y Asistencia en Vivo</h3>
               <p className="text-xs text-slate-500">Monitoreo en tiempo real de ingresos a la sala en el evento.</p>
             </div>
-            <button onClick={() => recargar()} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer">
-              <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Actualizar Datos
-            </button>
+            <div className="flex flex-wrap gap-2 justify-end">
+              <button onClick={exportarReporteAsistencia} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer">
+                <Download className="w-3.5 h-3.5" /> Reporte de asistencia (Excel)
+              </button>
+              <button onClick={() => recargar()} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer">
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Actualizar Datos
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
@@ -2337,6 +2473,14 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
             </div>
           </div>
 
+          {totalAsistentesPresentes >= CAPACIDAD_MAXIMA * 0.9 && (
+            <div className={`p-3 rounded-xl text-sm font-bold border ${totalAsistentesPresentes >= CAPACIDAD_MAXIMA ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-amber-50 text-amber-800 border-amber-200'}`}>
+              {totalAsistentesPresentes >= CAPACIDAD_MAXIMA
+                ? `⛔ Sala completa: ${totalAsistentesPresentes} presentes de ${CAPACIDAD_MAXIMA} butacas.`
+                : `⚠️ Aforo casi completo: ${totalAsistentesPresentes} presentes de ${CAPACIDAD_MAXIMA} (quedan ${CAPACIDAD_MAXIMA - totalAsistentesPresentes}).`}
+            </div>
+          )}
+
           <div className="p-5 bg-slate-900 text-white rounded-2xl flex flex-wrap items-center justify-between gap-4">
             <div>
               <p className="text-xs font-bold uppercase tracking-wider text-rose-300">Total de Asistentes en la Sala</p>
@@ -2348,7 +2492,7 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
                 <span>{Math.round((totalAsistentesPresentes / CAPACIDAD_MAXIMA) * 100)}%</span>
               </div>
               <div className="w-full bg-slate-700 h-2.5 rounded-full overflow-hidden">
-                <div className="bg-emerald-500 h-full transition-all" style={{ width: `${Math.min(100, Math.round((totalAsistentesPresentes / CAPACIDAD_MAXIMA) * 100))}%` }} />
+                <div className={`h-full transition-all ${totalAsistentesPresentes >= CAPACIDAD_MAXIMA ? 'bg-rose-500' : totalAsistentesPresentes >= CAPACIDAD_MAXIMA * 0.9 ? 'bg-amber-400' : 'bg-emerald-500'}`} style={{ width: `${Math.min(100, Math.round((totalAsistentesPresentes / CAPACIDAD_MAXIMA) * 100))}%` }} />
               </div>
             </div>
           </div>
@@ -2468,23 +2612,32 @@ function PanelAdministracion({ perfilStaff, config, egresados, invitados, docent
           </form>
 
           <div className="divide-y text-sm">
-            {usuariosSistema.map((u) => (
-              <div key={u.id} className="py-3 flex justify-between items-center">
-                <div>
-                  <p className="font-bold">{u.nombre}</p>
-                  <p className="text-xs text-slate-500">{u.email} · Rol: <strong className="uppercase">{u.rol}</strong></p>
+            {usuariosSistema.map((u) => {
+              const esYo = (u.email || '').toLowerCase() === (perfilStaff?.email || '').toLowerCase();
+              const rolU = String(u.rol || '').toLowerCase();
+              const activo = u.activo !== false;
+              return (
+                <div key={u.id} className={`py-3 flex flex-wrap justify-between items-center gap-3 ${activo ? '' : 'opacity-60'}`}>
+                  <div>
+                    <p className="font-bold">{u.nombre} {esYo && <span className="text-[10px] font-bold text-indigo-600 uppercase">(vos)</span>} {!activo && <span className="text-[10px] font-bold text-rose-600 uppercase">Desactivado</span>}</p>
+                    <p className="text-xs text-slate-500">{u.email}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <select value={rolU} onChange={(e) => actualizarUsuario(u, { rol: e.target.value }, `Cambió el rol a ${e.target.value}`)} className="px-2 py-1.5 rounded-lg border text-xs font-bold bg-white">
+                      <option value="puerta">Puerta</option>
+                      <option value="coordinador">Coordinador</option>
+                      <option value="admin">Administrador</option>
+                    </select>
+                    <button onClick={() => actualizarUsuario(u, { activo: !activo }, activo ? 'Desactivó al usuario' : 'Activó al usuario')} className={`px-2.5 py-1.5 rounded-lg text-xs font-bold cursor-pointer ${activo ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'}`}>
+                      {activo ? 'Desactivar' : 'Activar'}
+                    </button>
+                    <button onClick={() => eliminarUsuarioSistema(u)} className="text-rose-600 hover:text-rose-800 p-1 cursor-pointer">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
-                <button onClick={async () => {
-                  if(!window.confirm(`¿Eliminar a ${u.nombre}?`)) return;
-                  await supabase.from('usuarios_sistema').delete().eq('id', u.id);
-                  await registrarLog('ELIMINAR_USUARIO', 'Sistema', `Se eliminó al usuario ${u.nombre}`);
-                  await recargar();
-                  notify('Usuario eliminado.');
-                }} className="text-rose-600 hover:text-rose-800 p-1 cursor-pointer">
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
