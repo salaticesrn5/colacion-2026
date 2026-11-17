@@ -1432,6 +1432,7 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
   const [butacasFilaEdit, setButacasFilaEdit] = useState(config.butacas_por_fila || 35);
   const [guardandoConfig, setGuardandoConfig] = useState(false);
   const [cupoMasivo, setCupoMasivo] = useState('');
+  const [recortarSobrantes, setRecortarSobrantes] = useState(true);
   const [filtroInvitado, setFiltroInvitado] = useState('');
   const [aplicandoCupo, setAplicandoCupo] = useState(false);
 
@@ -1623,6 +1624,46 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
     }
   };
 
+  // Invitados que superan el cupo: se conservan primero los que ya ingresaron y luego los cargados antes
+  const planRecorte = (cupoDeEgr) => {
+    const aEliminar = [];
+    const detalle = [];
+    const afectados = new Set();
+    egresados.filter((e) => e.activo !== false).forEach((e) => {
+      const cupo = cupoDeEgr(e);
+      const mios = invitados.filter((i) => i.egresado_id === e.id);
+      if (mios.length <= cupo) return;
+      const ordenados = [...mios].sort((a, b) => (b.asistio ? 1 : 0) - (a.asistio ? 1 : 0) || new Date(a.creado_en || 0) - new Date(b.creado_en || 0));
+      ordenados.slice(cupo).filter((i) => !i.asistio).forEach((i) => {
+        aEliminar.push(i.id);
+        detalle.push(`${i.nombre_completo} (de ${e.nombre_completo})`);
+        afectados.add(e.id);
+      });
+    });
+    return { aEliminar, detalle, egresadosAfectados: afectados.size };
+  };
+
+  const borrarInvitadosPorIds = async (ids) => {
+    for (let k = 0; k < ids.length; k += 40) {
+      const { error } = await supabase.from('invitados').delete().in('id', ids.slice(k, k + 40));
+      if (error) throw error;
+    }
+  };
+
+  const ajustarInvitadosAlCupo = async () => {
+    const plan = planRecorte((e) => cupoDe(e, config));
+    if (plan.aEliminar.length === 0) { notify('No hay invitados por encima del cupo.'); return; }
+    if (!window.confirm(`Se van a ELIMINAR ${plan.aEliminar.length} invitado(s) de ${plan.egresadosAfectados} egresado(s) que superan su cupo actual.\n\nSe conservan los que ya ingresaron y los que se cargaron primero. No se puede deshacer.\n\n¿Continuar?`)) return;
+    try {
+      await borrarInvitadosPorIds(plan.aEliminar);
+      await registrarLog('AJUSTE_INVITADOS', 'Aforo', `Se eliminaron ${plan.aEliminar.length} invitados que superaban el cupo: ${plan.detalle.slice(0, 25).join('; ')}${plan.detalle.length > 25 ? '…' : ''}`);
+      await recargar();
+      notify(`Listo: se eliminaron ${plan.aEliminar.length} invitados sobrantes.`);
+    } catch (err) {
+      notify('Error al ajustar los invitados: ' + err.message, 'error');
+    }
+  };
+
   const aplicarCupoMasivo = async () => {
     const n = Number(cupoMasivo);
     if (cupoMasivo === '' || !Number.isInteger(n) || n < 0 || n > 10) {
@@ -1633,7 +1674,12 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
     if (afectados.length === 0) { notify('No hay egresados activos.', 'error'); return; }
     const conMas = afectados.filter((e) => invitados.filter((i) => i.egresado_id === e.id).length > n);
     let msg = `¿Asignar ${n} invitado(s) a cada uno de los ${afectados.length} egresados activos?\n\nEsto REEMPLAZA el cupo actual de cada egresado, incluidas las butacas extra que ya se hayan aprobado.`;
-    if (conMas.length > 0) msg += `\n\nAtención: ${conMas.length} egresado(s) ya tienen cargados más invitados que ese cupo (los invitados cargados no se borran, pero quedarían por encima del cupo).`;
+    const plan = recortarSobrantes ? planRecorte(() => n) : null;
+    if (plan && plan.aEliminar.length > 0) {
+      msg += `\n\nSe van a ELIMINAR ${plan.aEliminar.length} invitado(s) ya cargados de ${plan.egresadosAfectados} egresado(s) que superan el cupo de ${n} (se conservan los que ya ingresaron). No se puede deshacer.`;
+    } else if (conMas.length > 0) {
+      msg += `\n\nAtención: ${conMas.length} egresado(s) tienen cargados más invitados que ese cupo y quedarían por encima (no se borran porque la opción de recortar está desactivada o ya ingresaron).`;
+    }
     if (!window.confirm(msg)) return;
     setAplicandoCupo(true);
     try {
@@ -1647,7 +1693,8 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
         if (error) throw error;
         setCupoBaseEdit(String(n));
       }
-      await registrarLog('CUPO_MASIVO', 'Aforo', `Se asignó cupo de ${n} invitado(s) a ${ids.length} egresados activos.`);
+      if (plan && plan.aEliminar.length > 0) await borrarInvitadosPorIds(plan.aEliminar);
+      await registrarLog('CUPO_MASIVO', 'Aforo', `Se asignó cupo de ${n} invitado(s) a ${ids.length} egresados activos.${plan && plan.aEliminar.length > 0 ? ` Se eliminaron ${plan.aEliminar.length} invitados sobrantes: ${plan.detalle.slice(0, 25).join('; ')}${plan.detalle.length > 25 ? '…' : ''}` : ''}`);
       await recargar();
       notify(`Cupo de ${n} invitado(s) aplicado a ${ids.length} egresados.`);
     } catch (err) {
@@ -1718,6 +1765,27 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
                     {aplicandoCupo ? 'Aplicando...' : 'Aplicar a todos los egresados activos'}
                   </button>
                 </div>
+                <label className="flex items-start gap-2 text-xs text-slate-700 cursor-pointer">
+                  <input type="checkbox" checked={recortarSobrantes} onChange={(e) => setRecortarSobrantes(e.target.checked)} className="mt-0.5 w-4 h-4 accent-indigo-600" />
+                  <span><b>Al aplicar, eliminar los invitados ya cargados que pasen el cupo.</b> Se conservan los que ya ingresaron y los que se cargaron primero. No se puede deshacer.</span>
+                </label>
+                {(() => {
+                  const actual = planRecorte((e) => cupoDe(e, config));
+                  const conN = n === null ? null : planRecorte(() => n);
+                  return (
+                    <div className="space-y-1">
+                      {conN && conN.aEliminar.length > 0 && (
+                        <p className="text-xs font-bold text-amber-700">Con {n} por egresado, {conN.aEliminar.length} invitado(s) de {conN.egresadosAfectados} egresado(s) quedan por encima del cupo{recortarSobrantes ? ' y se eliminarían al aplicar.' : '.'}</p>
+                      )}
+                      {actual.aEliminar.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-xs text-slate-600">Hoy hay <b>{actual.aEliminar.length}</b> invitado(s) cargados por encima del cupo de {actual.egresadosAfectados} egresado(s).</p>
+                          <button type="button" onClick={ajustarInvitadosAlCupo} className="px-3 py-1.5 bg-amber-50 text-amber-800 border border-amber-200 rounded-lg text-xs font-bold cursor-pointer">Ajustar invitados al cupo actual</button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
                 {ocupacion !== null && (
                   <p className={`text-xs font-bold ${vac < 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
                     Con {n} por egresado: {ocupacion} de {CAPACIDAD_MAXIMA} butacas ({vac < 0 ? `faltan ${-vac}` : `sobran ${vac}`}).
