@@ -279,10 +279,11 @@ export default function App() {
   const reiniciarAsistenciasGeneral = async () => {
     if (!window.confirm("¿Estás seguro de reiniciar todas las asistencias a 0?")) return;
     try {
-      await supabase.from('egresados').update({ asistio: false }).neq('id', '00000000-0000-0000-0000-000000000000');
-      await supabase.from('invitados').update({ asistio: false, hora_ingreso: null }).neq('id', '00000000-0000-0000-0000-000000000000');
-      await supabase.from('docentes').update({ asistio: false }).neq('id', '00000000-0000-0000-0000-000000000000');
-      await supabase.from('invitados_especiales').update({ asistio: false }).neq('id', '00000000-0000-0000-0000-000000000000');
+      const verif = (r) => { if (r && r.error) throw r.error; };
+      verif(await supabase.from('egresados').update({ asistio: false }).neq('id', '00000000-0000-0000-0000-000000000000'));
+      verif(await supabase.from('invitados').update({ asistio: false, hora_ingreso: null }).neq('id', '00000000-0000-0000-0000-000000000000'));
+      verif(await supabase.from('docentes').update({ asistio: false }).neq('id', '00000000-0000-0000-0000-000000000000'));
+      verif(await supabase.from('invitados_especiales').update({ asistio: false }).neq('id', '00000000-0000-0000-0000-000000000000'));
       await registrarLog('REINICIO_ASISTENCIAS', 'Puerta', 'Se reiniciaron todas las asistencias a cero.');
       await cargarDatosGlobales();
       notify('Todas las asistencias han sido reiniciadas a cero.');
@@ -698,9 +699,32 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, egresados
       return;
     }
 
+    // Validación previa: cada invitado necesita nombre Y DNI (o ambos vacíos); no puede haber DNI repetidos
+    const dnisVistos = new Set();
+    for (let i = 0; i < filasInvitados.length; i++) {
+      const nombre = (filasInvitados[i].nombre_completo || '').trim();
+      const dniFila = sanitizeDNI(filasInvitados[i].dni || '');
+      if ((nombre && !dniFila) || (!nombre && dniFila)) {
+        notify(`Invitado #${i + 1}: completá el nombre y el DNI (o dejá los dos vacíos).`, 'error');
+        return;
+      }
+      if (dniFila) {
+        if (dnisVistos.has(dniFila)) {
+          notify(`Invitado #${i + 1}: el DNI ${dniFila} está repetido en el formulario.`, 'error');
+          return;
+        }
+        dnisVistos.add(dniFila);
+      }
+    }
+
+    const verificar = (r) => {
+      if (r && r.error) throw r.error;
+      return r;
+    };
+
     setGuardando(true);
     try {
-      await supabase.from('egresados').update({ celular }).eq('id', datosPersona.id);
+      verificar(await supabase.from('egresados').update({ celular }).eq('id', datosPersona.id));
 
       for (let i = 0; i < filasInvitados.length; i++) {
         const fila = filasInvitados[i];
@@ -709,31 +733,39 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, egresados
 
         if (nombreLimpio && dniLimpio) {
           if (fila.id) {
-            await supabase.from('invitados').update({ 
-              nombre_completo: nombreLimpio.toUpperCase(), 
+            verificar(await supabase.from('invitados').update({
+              nombre_completo: nombreLimpio.toUpperCase(),
               dni: dniLimpio,
-              es_grupal: fila.es_grupal 
-            }).eq('id', fila.id);
+              es_grupal: fila.es_grupal
+            }).eq('id', fila.id));
           } else {
             const numEntrada = `ENT-${datosPersona.dni.slice(-4)}-${i + 1}-${Math.floor(100 + Math.random() * 900)}`;
-            await supabase.from('invitados').insert({ 
-              egresado_id: datosPersona.id, 
-              nombre_completo: nombreLimpio.toUpperCase(), 
-              dni: dniLimpio, 
-              numero_entrada: numEntrada, 
+            verificar(await supabase.from('invitados').insert({
+              egresado_id: datosPersona.id,
+              nombre_completo: nombreLimpio.toUpperCase(),
+              dni: dniLimpio,
+              numero_entrada: numEntrada,
               es_grupal: fila.es_grupal,
-              asistio: false 
-            });
+              asistio: false
+            }));
           }
         } else if (!nombreLimpio && !dniLimpio && fila.id) {
-          await supabase.from('invitados').delete().eq('id', fila.id);
+          verificar(await supabase.from('invitados').delete().eq('id', fila.id));
         }
       }
       await recargar();
       setEditando(false);
       notify('Invitados y datos guardados correctamente.');
     } catch (err) {
-      notify('Error al guardar: ' + err.message, 'error');
+      console.error(err);
+      const m = String(err?.message || 'error desconocido');
+      const pista = /duplicate key|unique/i.test(m)
+        ? 'Hay un DNI o un número de entrada que ya existe en la base (un invitado con ese DNI ya está cargado). '
+        : /check constraint/i.test(m)
+          ? 'Algún dato no cumple las reglas de la base. '
+          : '';
+      await recargar();
+      notify(`No se pudieron guardar los invitados. ${pista}Detalle: ${m}`, 'error');
     } finally {
       setGuardando(false);
     }
@@ -2138,12 +2170,13 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
     if (!modalEditarEgr) return;
     setGuardandoEdicion(true);
     try {
-      await supabase.from('egresados').update({
+      const { error: errEgr } = await supabase.from('egresados').update({
         nombre_completo: editNombre.trim().toUpperCase(),
         dni: sanitizeDNI(editDni),
         celular: editCelular.trim(),
         cupo_asignado: Number(editCupo)
       }).eq('id', modalEditarEgr.id);
+      if (errEgr) throw errEgr;
       await registrarLog('EDITAR', 'Egresados', `Se editó el egresado ${editNombre.trim().toUpperCase()}`);
       setModalEditarEgr(null);
       await recargar();
