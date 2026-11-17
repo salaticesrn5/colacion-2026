@@ -30,11 +30,108 @@ const cupoBaseDe = (cfg) => { const b = aNumeroONulo(cfg?.cupo_base); return b =
 const cupoDe = (egr, cfg) => { const a = aNumeroONulo(egr?.cupo_asignado); return a === null ? cupoBaseDe(cfg) : a; };
 
 const parseCSV = (text) => {
-  const cleanText = text.replace(/^\uFEFF/, '').trim();
-  const lines = cleanText.split(/\r?\n/).filter((l) => l.trim().length > 0);
-  if (lines.length === 0) return [];
-  const sep = lines[0].includes(';') ? ';' : ',';
-  return lines.map((line) => line.split(sep).map((cell) => cell.replace(/^["']|["']$/g, '').trim()));
+  const limpio = String(text || '').replace(/^\uFEFF/, '').trim();
+  if (!limpio) return [];
+  const primera = limpio.split(/\r?\n/)[0];
+  const cuenta = (c) => primera.split(c).length - 1;
+  const sep = cuenta(';') >= cuenta(',') && cuenta(';') >= cuenta('\t') && cuenta(';') > 0 ? ';' : cuenta('\t') > cuenta(',') ? '\t' : ',';
+  const filas = [];
+  let fila = [];
+  let celda = '';
+  let enComillas = false;
+  for (let i = 0; i < limpio.length; i++) {
+    const ch = limpio[i];
+    if (enComillas) {
+      if (ch === '"') {
+        if (limpio[i + 1] === '"') { celda += '"'; i++; } else { enComillas = false; }
+      } else {
+        celda += ch;
+      }
+    } else if (ch === '"') {
+      enComillas = true;
+    } else if (ch === sep) {
+      fila.push(celda.trim());
+      celda = '';
+    } else if (ch === '\n') {
+      fila.push(celda.trim());
+      filas.push(fila);
+      fila = [];
+      celda = '';
+    } else if (ch !== '\r') {
+      celda += ch;
+    }
+  }
+  fila.push(celda.trim());
+  filas.push(fila);
+  return filas.filter((f) => f.some((c) => c !== ''));
+};
+
+const esDniTexto = (v) => /^\d{7,8}$/.test(String(v || '').replace(/[.\s]/g, ''));
+const tieneLetras = (v) => /[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]/.test(String(v || ''));
+
+// Detecta solo la columna del DNI y las del nombre (aunque vengan Apellido y Nombre separados o en otro orden)
+const analizarCSVPersonas = (texto, { dniObligatorio = true } = {}) => {
+  const res = { items: [], descartadas: 0, duplicadasEnArchivo: 0, unaPalabra: 0, columnas: '', error: '' };
+  const filas = parseCSV(texto);
+  if (filas.length === 0) { res.error = 'El archivo está vacío.'; return res; }
+  const pareceEncabezado = (f) => f.some((c) => /^(dni|documento|nombre|apellido|docente|agente|instituci|cargo|n[°º]|nro|num)/i.test(c)) || (dniObligatorio && !f.some(esDniTexto));
+  let datos = filas;
+  let encabezado = null;
+  if (filas.length > 1 && pareceEncabezado(filas[0])) { encabezado = filas[0]; datos = filas.slice(1); }
+  const nCols = Math.max(...datos.map((f) => f.length));
+  let dniCol = -1;
+  let mejor = 0;
+  for (let c = 0; c < nCols; c++) {
+    const n = datos.filter((f) => esDniTexto(f[c])).length;
+    if (n > mejor) { mejor = n; dniCol = c; }
+  }
+  if (dniCol !== -1 && mejor < Math.max(1, Math.round(datos.length * 0.3))) dniCol = -1;
+  if (dniCol === -1 && dniObligatorio) {
+    res.error = 'No encontré una columna con DNI de 7 u 8 dígitos. Revisá el archivo (¿trae CUIL de 11 dígitos?).';
+    return res;
+  }
+  let colsNombre = [];
+  if (encabezado) {
+    colsNombre = encabezado.map((h, i) => ({ h, i })).filter(({ h, i }) => i !== dniCol && /(apellido|nombre|docente|agente|persona|invitad|instituci)/i.test(h)).map(({ i }) => i);
+  }
+  if (colsNombre.length === 0) {
+    const conLetras = [];
+    for (let c = 0; c < nCols; c++) {
+      if (c === dniCol) continue;
+      const n = datos.filter((f) => tieneLetras(f[c])).length;
+      if (n >= datos.length * 0.5) conLetras.push(c);
+    }
+    colsNombre = conLetras.slice(0, 2);
+  }
+  if (colsNombre.length === 0) { res.error = 'No encontré una columna con el nombre.'; return res; }
+  const vistos = new Set();
+  datos.forEach((f) => {
+    const dni = dniCol === -1 ? '' : String(f[dniCol] || '').replace(/\D/g, '').slice(0, 8);
+    const nombre = colsNombre.map((c) => f[c] || '').filter(Boolean).join(' ').replace(/\s+/g, ' ').trim().toUpperCase();
+    if (nombre.length < 3 || (dniObligatorio && !esDniTexto(f[dniCol]))) { res.descartadas++; return; }
+    if (dni) {
+      if (vistos.has(dni)) { res.duplicadasEnArchivo++; return; }
+      vistos.add(dni);
+    }
+    if (nombre.split(' ').length < 2) res.unaPalabra++;
+    res.items.push({ dni, nombre });
+  });
+  res.columnas = `DNI: columna ${dniCol === -1 ? '(sin DNI)' : dniCol + 1} · Nombre: columna${colsNombre.length > 1 ? 's' : ''} ${colsNombre.map((c) => c + 1).join(' y ')}${encabezado ? ' · primera fila ignorada (encabezado)' : ''}`;
+  return res;
+};
+
+const descargarCSV = (nombreArchivo, filas) => {
+  const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const contenido = filas.map((f) => f.map(esc).join(',')).join('\r\n');
+  const blob = new Blob(['\uFEFF' + contenido], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = nombreArchivo;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 };
 
 export default function App() {
@@ -1335,7 +1432,7 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
   const [butacasFilaEdit, setButacasFilaEdit] = useState(config.butacas_por_fila || 35);
   const [guardandoConfig, setGuardandoConfig] = useState(false);
   const [cupoMasivo, setCupoMasivo] = useState('');
-  const [modalCupo, setModalCupo] = useState(false);
+  const [filtroInvitado, setFiltroInvitado] = useState('');
   const [aplicandoCupo, setAplicandoCupo] = useState(false);
 
   const [modalEditarEgr, setModalEditarEgr] = useState(null);
@@ -1553,7 +1650,6 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
       await registrarLog('CUPO_MASIVO', 'Aforo', `Se asignó cupo de ${n} invitado(s) a ${ids.length} egresados activos.`);
       await recargar();
       notify(`Cupo de ${n} invitado(s) aplicado a ${ids.length} egresados.`);
-      setModalCupo(false);
     } catch (err) {
       notify('Error al aplicar el cupo: ' + err.message + ' (puede haber quedado aplicado a una parte; revisá y repetí).', 'error');
     } finally {
@@ -1597,7 +1693,7 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
             const sobran = E > 0 ? CAPACIDAD_MAXIMA - fijos - maxCupo * E : 0;
             return (
               <div className="space-y-3">
-                <h4 className="font-bold text-sm text-slate-800 uppercase tracking-wide">Simulador y cupo de invitados por egresado</h4>
+                <h4 className="font-bold text-sm text-slate-800 uppercase tracking-wide">Cantidad de invitados por egresado <span className="normal-case font-semibold text-slate-500">(cupo base actual: {cupoBaseDe(config)})</span></h4>
                 <p className="text-xs text-slate-500">
                   Hoy: {E} egresados + {D} docentes con butaca + {V} VIP = <b>{fijos}</b> lugares fijos de {CAPACIDAD_MAXIMA}. Quedan <b>{Math.max(0, CAPACIDAD_MAXIMA - fijos)}</b> butacas para invitados.
                   {E > 0 && <> Con <b>{maxCupo}</b> invitado(s) por egresado entran todos y sobran <b>{sobran}</b> butaca(s) para solicitudes extra.</>}
@@ -1712,68 +1808,110 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
     notify(`Exportado ${nombreArchivo} con éxito.`);
   };
 
-  const handleImportarCSVEgresados = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const importarPersonas = async (ev, { tabla, modulo, plural, dniObligatorio, existentes, armar }) => {
+    const archivo = ev.target.files?.[0];
+    if (!archivo) return;
+    ev.target.value = '';
+    const idsCreados = [];
     try {
-      const text = await file.text();
-      const rows = parseCSV(text);
-      const registros = rows.map((r) => ({
-        dni: sanitizeDNI(r[0]),
-        nombre_completo: (r[1] || '').toUpperCase(),
-        cupo_asignado: cupoBaseDe(config),
-        cerrado: false,
-      })).filter(x => x.dni.length >= 7 && x.nombre_completo);
-
-      await supabase.from('egresados').upsert(registros, { onConflict: 'dni' });
-      await registrarLog('IMPORTAR_CSV', 'Egresados', `Se importaron ${registros.length} egresados.`);
+      const texto = await archivo.text();
+      const a = analizarCSVPersonas(texto, { dniObligatorio });
+      if (a.error) { notify(a.error, 'error'); return; }
+      const dnisActuales = new Set(existentes.map((x) => String(x.dni || '')).filter(Boolean));
+      const nuevos = a.items.filter((x) => !x.dni || !dnisActuales.has(x.dni));
+      const yaExisten = a.items.length - nuevos.length;
+      if (nuevos.length === 0) {
+        notify(`No hay ${plural} nuevos para importar${yaExisten ? ` (${yaExisten} ya estaban cargados)` : ''}.`, 'error');
+        return;
+      }
+      const ejemplos = nuevos.slice(0, 5).map((x, k) => `${k + 1}) ${x.nombre}${x.dni ? ' — DNI ' + x.dni : ''}`).join('\n');
+      const lineas = [`Se van a importar ${nuevos.length} ${plural} NUEVOS.`, '', a.columnas];
+      if (yaExisten) lineas.push(`Ya estaban cargados y se omiten (no se pisan): ${yaExisten}`);
+      if (a.descartadas) lineas.push(`Filas descartadas (sin ${dniObligatorio ? 'DNI válido o ' : ''}nombre): ${a.descartadas}`);
+      if (a.duplicadasEnArchivo) lineas.push(`Repetidas dentro del archivo (se toma la primera): ${a.duplicadasEnArchivo}`);
+      if (a.unaPalabra) lineas.push(`Atención: ${a.unaPalabra} nombre(s) tienen una sola palabra (¿falta el apellido o el nombre?).`);
+      lineas.push('', 'Ejemplos:', ejemplos, '', 'Si los ejemplos están mal, tocá Cancelar: no se carga nada.', '¿Importar?');
+      if (!window.confirm(lineas.join('\n'))) {
+        notify('Importación cancelada. No se cargó nada.', 'warning');
+        return;
+      }
+      for (let k = 0; k < nuevos.length; k += 100) {
+        const lote = nuevos.slice(k, k + 100).map(armar);
+        const { data, error } = await supabase.from(tabla).insert(lote).select('id');
+        if (error) throw error;
+        (data || []).forEach((r) => idsCreados.push(r.id));
+      }
+      await registrarLog('IMPORTAR_CSV', modulo, `Se importaron ${idsCreados.length} ${plural} nuevos. [IDS:${idsCreados.join(',')}]`);
       await recargar();
-      notify(`Importados ${registros.length} egresados.`);
+      notify(`Importados ${idsCreados.length} ${plural}.${yaExisten ? ` (${yaExisten} ya estaban cargados y no se tocaron)` : ''}`);
     } catch (err) {
-      notify('Error importando CSV: ' + err.message, 'error');
+      if (idsCreados.length > 0) {
+        await registrarLog('IMPORTAR_CSV', modulo, `Importación INCOMPLETA: se cargaron ${idsCreados.length} ${plural} antes del error. [IDS:${idsCreados.join(',')}]`);
+      }
+      await recargar();
+      notify('Error importando CSV: ' + err.message + (idsCreados.length ? ` (se alcanzaron a cargar ${idsCreados.length}; podés usar "Deshacer última importación")` : ''), 'error');
     }
   };
 
-  const handleImportarCSVDocentes = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const text = await file.text();
-      const rows = parseCSV(text);
-      const registros = rows.map((r) => ({
-        dni: sanitizeDNI(r[0]),
-        nombre_completo: (r[1] || '').toUpperCase(),
-        asistio: false,
-      })).filter(x => x.dni.length >= 7 && x.nombre_completo);
+  const handleImportarCSVEgresados = (ev) => importarPersonas(ev, {
+    tabla: 'egresados', modulo: 'Egresados', plural: 'egresados', dniObligatorio: true, existentes: egresados,
+    armar: (x) => ({ dni: x.dni, nombre_completo: x.nombre, cupo_asignado: cupoBaseDe(config), cerrado: false, activo: true }),
+  });
+  const handleImportarCSVDocentes = (ev) => importarPersonas(ev, {
+    tabla: 'docentes', modulo: 'Docentes', plural: 'docentes', dniObligatorio: true, existentes: docentes,
+    armar: (x) => ({ dni: x.dni, nombre_completo: x.nombre, asistio: false, activo: true }),
+  });
+  const handleImportarCSVVips = (ev) => importarPersonas(ev, {
+    tabla: 'invitados_especiales', modulo: 'VIP', plural: 'invitados VIP', dniObligatorio: false, existentes: especiales,
+    armar: (x) => ({ dni: x.dni || null, nombre_completo: x.nombre, asistio: false, activo: true }),
+  });
 
-      await supabase.from('docentes').upsert(registros, { onConflict: 'dni' });
-      await registrarLog('IMPORTAR_CSV', 'Docentes', `Se importaron ${registros.length} docentes.`);
+  // Deshacer la última importación (usa los ids guardados en el registro de actividad; solo admin)
+  const ultimaImportacion = (modulo) => {
+    for (const l of logsSistema) {
+      if (l.modulo !== modulo) continue;
+      if (l.accion === 'DESHACER_IMPORTACION') return null;
+      if (l.accion === 'IMPORTAR_CSV') {
+        const m = /\[IDS:([^\]]+)\]/.exec(l.detalle || '');
+        return m ? { log: l, ids: m[1].split(',').filter(Boolean) } : null;
+      }
+    }
+    return null;
+  };
+
+  const deshacerImportacion = async (modulo, tabla, plural) => {
+    const imp = ultimaImportacion(modulo);
+    if (!imp) return;
+    const cuando = new Date(imp.log.created_at).toLocaleString('es-AR');
+    const extra = tabla === 'egresados' ? '\n\nTambién se eliminan los invitados que esos egresados hayan cargado.' : '';
+    if (!window.confirm(`¿Deshacer la última importación de ${plural}?\n\nSe van a ELIMINAR ${imp.ids.length} registros cargados el ${cuando}.${extra}`)) return;
+    try {
+      for (let k = 0; k < imp.ids.length; k += 40) {
+        const lote = imp.ids.slice(k, k + 40);
+        if (tabla === 'egresados') {
+          const { error: e0 } = await supabase.from('invitados').delete().in('egresado_id', lote);
+          if (e0) throw e0;
+        }
+        const { error } = await supabase.from(tabla).delete().in('id', lote);
+        if (error) throw error;
+      }
+      await registrarLog('DESHACER_IMPORTACION', modulo, `Se eliminaron ${imp.ids.length} ${plural} de la importación del ${cuando}.`);
       await recargar();
-      notify(`Importados ${registros.length} docentes.`);
+      notify(`Importación deshecha: ${imp.ids.length} ${plural} eliminados.`);
     } catch (err) {
-      notify('Error importando CSV Docentes: ' + err.message, 'error');
+      notify('Error al deshacer: ' + err.message, 'error');
     }
   };
 
-  const handleImportarCSVVips = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const text = await file.text();
-      const rows = parseCSV(text);
-      const registros = rows.map((r) => ({
-        dni: sanitizeDNI(r[0]),
-        nombre_completo: (r[1] || '').toUpperCase(),
-        asistio: false,
-      })).filter(x => x.nombre_completo);
-
-      await supabase.from('invitados_especiales').upsert(registros, { onConflict: 'dni' });
-      await registrarLog('IMPORTAR_CSV', 'VIP', `Se importaron ${registros.length} invitados VIP.`);
-      await recargar();
-      notify(`Importados ${registros.length} invitados VIP.`);
-    } catch (err) {
-      notify('Error importando CSV VIP: ' + err.message, 'error');
-    }
+  const exportarInvitadosCSV = () => {
+    const porId = {};
+    egresados.forEach((e) => { porId[e.id] = e; });
+    const filas = [['N° entrada', 'DNI invitado', 'Nombre invitado', 'Invitado de', 'DNI egresado', 'Presente']];
+    invitados.forEach((i) => {
+      const anf = porId[i.egresado_id];
+      filas.push([i.numero_entrada || '', i.dni || '', i.nombre_completo || '', anf?.nombre_completo || '', anf?.dni || '', i.asistio ? 'SI' : 'NO']);
+    });
+    descargarCSV('invitados-de-egresados-esrn5.csv', filas);
   };
 
   const guardarConfiguracionAforo = async (e) => {
@@ -2259,41 +2397,6 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
         </div>
       </div>
 
-      {perfilStaff?.rol === 'admin' && (
-        <div className="bg-white p-4 rounded-2xl border flex flex-wrap items-center justify-between gap-4">
-          <div className="flex flex-wrap items-center gap-3">
-            <p className="text-xs font-bold uppercase text-slate-500">Invitados por egresado (cupo base)</p>
-            <span className="px-3 py-1 bg-slate-100 rounded-lg text-sm font-extrabold">{cupoBaseDe(config)}</span>
-            <button onClick={() => setModalCupo(true)} className="px-3.5 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer">Cambiar cantidad de invitados</button>
-          </div>
-          <div className="flex items-center gap-3">
-            <p className="text-xs font-bold uppercase text-slate-500">WhatsApp</p>
-            <button onClick={cambiarWhatsapp} className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${whatsappActivo ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}`}>
-              {whatsappActivo ? '● Activado' : '○ Desactivado'}
-            </button>
-          </div>
-          <div className="flex items-center gap-3">
-            <p className="text-xs font-bold uppercase text-slate-500">Portal VIP</p>
-            <button onClick={cambiarPortalVip} className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${vipPortalActivo ? 'bg-amber-600 hover:bg-amber-700 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}`}>
-              {vipPortalActivo ? '● Activado' : '○ Desactivado'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {perfilStaff?.rol === 'admin' && modalCupo && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-4" onClick={() => setModalCupo(false)}>
-          <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 shadow-2xl border-t-4 border-indigo-600" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-start justify-between gap-3 mb-3">
-              <h3 className="font-bold text-base text-indigo-900">Cantidad de invitados por egresado</h3>
-              <button onClick={() => setModalCupo(false)} title="Cerrar" className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 cursor-pointer"><X className="w-4 h-4" /></button>
-            </div>
-            {renderSimuladorCupo()}
-            <p className="text-[11px] text-slate-400 mt-3">Para cambiar el cupo de un solo egresado, abrí "Editar y Descargar QR" de esa persona y modificá "Cupo Asignado".</p>
-          </div>
-        </div>
-      )}
-
       {modalCierreParcialAbierto && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden border p-6 space-y-4">
@@ -2319,6 +2422,7 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
 
       <div className="flex flex-wrap gap-2">
         <button onClick={() => setTab('egresados')} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === 'egresados' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Egresados ({egresados.length})</button>
+        <button onClick={() => setTab('invitados')} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === 'invitados' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Invitados de egresados ({invitados.length})</button>
         <button onClick={() => setTab('docentes')} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === 'docentes' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Docentes ({docentes.length})</button>
         <button onClick={() => setTab('vip')} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === 'vip' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Invitados VIP ({especiales.length})</button>
         <button onClick={() => setTab('solicitudes')} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === 'solicitudes' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Solicitudes Butacas ({solicitudes.length})</button>
@@ -2338,6 +2442,9 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
               <button onClick={() => setModalAgregarEgresado(true)} className="px-3.5 py-2 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow cursor-pointer"><Plus className="w-4 h-4" /> Agregar Egresado</button>
               <input ref={fileEgrRef} type="file" accept=".csv,.txt" onChange={handleImportarCSVEgresados} className="hidden" />
               <button onClick={() => fileEgrRef.current?.click()} className="px-3 py-2 bg-indigo-50 text-indigo-700 border rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"><Upload className="w-4 h-4" /> Importar CSV</button>
+              {perfilStaff?.rol === 'admin' && ultimaImportacion('Egresados') && (
+                <button onClick={() => deshacerImportacion('Egresados', 'egresados', 'egresados')} className="px-3 py-2 bg-amber-50 text-amber-800 border border-amber-200 rounded-xl text-xs font-bold cursor-pointer">↩ Deshacer última importación ({ultimaImportacion('Egresados').ids.length})</button>
+              )}
               {perfilStaff?.rol === 'admin' && egresados.length > 0 && <button onClick={vaciarPadronEgresados} className="px-3 py-2 bg-rose-50 text-rose-700 border rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"><Trash2 className="w-4 h-4" /> Vaciar Padrón</button>}
             </div>
           </div>
@@ -2482,6 +2589,46 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
         </div>
       )}
 
+      {tab === 'invitados' && (() => {
+        const porId = {};
+        egresados.forEach((e) => { porId[e.id] = e; });
+        const lista = invitados.filter((i) => !filtroInvitado.trim() || coincideTexto([i.nombre_completo, i.dni, i.numero_entrada, porId[i.egresado_id]?.nombre_completo, porId[i.egresado_id]?.dni], filtroInvitado));
+        const cuposAsignados = egresados.filter((e) => e.activo !== false).reduce((acc, e) => acc + cupoDe(e, config), 0);
+        return (
+          <div className="bg-white rounded-2xl border p-5 space-y-4">
+            <div className="flex flex-wrap justify-between items-center gap-2">
+              <div>
+                <h3 className="font-bold">Invitados de los egresados ({invitados.length})</h3>
+                <p className="text-xs text-slate-500">{invitados.length} cargados de {cuposAsignados} cupos asignados · {invitados.filter((i) => i.asistio).length} presentes</p>
+              </div>
+              <button onClick={exportarInvitadosCSV} className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer">
+                <Download className="w-4 h-4" /> Exportar
+              </button>
+            </div>
+            <div className="relative">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+              <input type="text" placeholder="Buscar por invitado, DNI, número de entrada o egresado..." value={filtroInvitado} onChange={(e) => setFiltroInvitado(e.target.value)} className="w-full pl-10 pr-4 py-2 rounded-xl border text-sm outline-none focus:border-[#6B1D2F]" />
+            </div>
+            <div className="max-h-[28rem] overflow-y-auto divide-y">
+              {lista.length === 0 && <p className="text-center text-slate-400 text-sm py-6">No se encontraron invitados.</p>}
+              {lista.slice(0, 500).map((i) => {
+                const anfitrion = porId[i.egresado_id];
+                return (
+                  <div key={i.id} className="py-2.5 flex flex-wrap justify-between items-center gap-2 text-sm">
+                    <div>
+                      <span className="font-semibold">{i.nombre_completo}</span> <span className="text-xs text-slate-500">({i.dni || 'S/D'})</span>
+                      <p className="text-xs text-slate-400">Invitado de <b>{anfitrion ? anfitrion.nombre_completo : 'egresado eliminado'}</b>{i.numero_entrada ? ` · Entrada ${i.numero_entrada}` : ''}</p>
+                    </div>
+                    <span className={`px-2.5 py-1 rounded-lg text-[11px] font-bold ${i.asistio ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'}`}>{i.asistio ? '✓ Presente' : 'Pendiente'}</span>
+                  </div>
+                );
+              })}
+              {lista.length > 500 && <p className="text-center text-slate-400 text-xs py-3">Mostrando 500 de {lista.length}. Usá el buscador para acotar.</p>}
+            </div>
+          </div>
+        );
+      })()}
+
       {tab === 'docentes' && (
         <div className="bg-white rounded-2xl border p-5 space-y-4">
           <div className="flex flex-wrap justify-between items-center gap-2">
@@ -2491,6 +2638,9 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
               <button onClick={() => setModalAgregarDocente(true)} className="px-3.5 py-2 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold"><Plus className="w-4 h-4" /> Agregar Docente</button>
               <input ref={fileDocRef} type="file" accept=".csv,.txt" onChange={handleImportarCSVDocentes} className="hidden" />
               <button onClick={() => fileDocRef.current?.click()} className="px-3 py-2 bg-indigo-50 text-indigo-700 border rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"><Upload className="w-4 h-4" /> Importar CSV</button>
+              {perfilStaff?.rol === 'admin' && ultimaImportacion('Docentes') && (
+                <button onClick={() => deshacerImportacion('Docentes', 'docentes', 'docentes')} className="px-3 py-2 bg-amber-50 text-amber-800 border border-amber-200 rounded-xl text-xs font-bold cursor-pointer">↩ Deshacer última importación ({ultimaImportacion('Docentes').ids.length})</button>
+              )}
               {perfilStaff?.rol === 'admin' && docentes.length > 0 && <button onClick={vaciarPadronDocentes} className="px-3 py-2 bg-rose-50 text-rose-700 border rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"><Trash2 className="w-4 h-4" /> Vaciar Padrón</button>}
             </div>
           </div>
@@ -2618,6 +2768,9 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
               <button onClick={() => setModalAgregarVip(true)} className="px-3.5 py-2 bg-amber-600 text-white rounded-xl text-xs font-bold"><Plus className="w-4 h-4" /> Agregar VIP</button>
               <input ref={fileVipRef} type="file" accept=".csv,.txt" onChange={handleImportarCSVVips} className="hidden" />
               <button onClick={() => fileVipRef.current?.click()} className="px-3 py-2 bg-indigo-50 text-indigo-700 border rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"><Upload className="w-4 h-4" /> Importar CSV</button>
+              {perfilStaff?.rol === 'admin' && ultimaImportacion('VIP') && (
+                <button onClick={() => deshacerImportacion('VIP', 'invitados_especiales', 'invitados VIP')} className="px-3 py-2 bg-amber-50 text-amber-800 border border-amber-200 rounded-xl text-xs font-bold cursor-pointer">↩ Deshacer última importación ({ultimaImportacion('VIP').ids.length})</button>
+              )}
               {perfilStaff?.rol === 'admin' && especiales.length > 0 && <button onClick={vaciarPadronVip} className="px-3 py-2 bg-rose-50 text-rose-700 border rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"><Trash2 className="w-4 h-4" /> Vaciar Padrón</button>}
             </div>
           </div>
@@ -2916,10 +3069,7 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
           </form>
 
           {perfilStaff?.rol === 'admin' && (
-            <div className="pt-4 border-t flex flex-wrap items-center justify-between gap-3">
-              <p className="text-xs text-slate-500">Para cambiar la cantidad de invitados de <b>todos</b> los egresados usá el simulador de cupo.</p>
-              <button type="button" onClick={() => setModalCupo(true)} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold cursor-pointer">Abrir simulador de cupo</button>
-            </div>
+            <div className="pt-4 border-t">{renderSimuladorCupo()}</div>
           )}
 
           {/* Mapa Visual Interactivo de la Sala */}
@@ -3011,7 +3161,19 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
 
       {/* REGISTRO DE ACTIVIDAD (SOLO ADMIN): botón discreto que abre un modal */}
       {perfilStaff?.rol === 'admin' && (
-        <div className="flex justify-end mt-8">
+        <div className="flex flex-wrap justify-end items-center gap-3 mt-8">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold uppercase text-slate-500">WhatsApp</span>
+            <button onClick={cambiarWhatsapp} className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${whatsappActivo ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}`}>
+              {whatsappActivo ? '● Activado' : '○ Desactivado'}
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold uppercase text-slate-500">Portal VIP</span>
+            <button onClick={cambiarPortalVip} className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${vipPortalActivo ? 'bg-amber-600 hover:bg-amber-700 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}`}>
+              {vipPortalActivo ? '● Activado' : '○ Desactivado'}
+            </button>
+          </div>
           <button
             onClick={() => { setModalLogs(true); recargar(); }}
             className="px-4 py-2.5 text-sm font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-md flex items-center gap-2 cursor-pointer"
