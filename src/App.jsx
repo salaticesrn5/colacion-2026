@@ -71,8 +71,8 @@ const esDniTexto = (v) => /^\d{7,8}$/.test(String(v || '').replace(/[.\s]/g, '')
 const tieneLetras = (v) => /[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]/.test(String(v || ''));
 
 // Detecta solo la columna del DNI y las del nombre (aunque vengan Apellido y Nombre separados o en otro orden)
-const analizarCSVPersonas = (texto, { dniObligatorio = true } = {}) => {
-  const res = { items: [], descartadas: 0, duplicadasEnArchivo: 0, unaPalabra: 0, columnas: '', error: '' };
+const analizarCSVPersonas = (texto, { dniObligatorio = true, detectarButaca = false } = {}) => {
+  const res = { items: [], descartadas: 0, duplicadasEnArchivo: 0, unaPalabra: 0, sinButaca: 0, columnas: '', error: '' };
   const filas = parseCSV(texto);
   if (filas.length === 0) { res.error = 'El archivo está vacío.'; return res; }
   const pareceEncabezado = (f) => f.some((c) => /^(dni|documento|nombre|apellido|docente|agente|instituci|cargo|n[°º]|nro|num)/i.test(c)) || (dniObligatorio && !f.some(esDniTexto));
@@ -91,14 +91,19 @@ const analizarCSVPersonas = (texto, { dniObligatorio = true } = {}) => {
     res.error = 'No encontré una columna con DNI de 7 u 8 dígitos. Revisá el archivo (¿trae CUIL de 11 dígitos?).';
     return res;
   }
+  // Columna opcional "Butaca" / "Ocupa butaca" / "Sin butaca" (solo docentes; requiere fila de encabezado)
+  const butacaCol = detectarButaca && encabezado ? encabezado.findIndex((h) => /butaca/i.test(h)) : -1;
+  const butacaInvertida = butacaCol !== -1 && /sin/i.test(encabezado[butacaCol]); // encabezado "Sin butaca": SI = no ocupa
+  const esSi = (v) => /^(s|si|sí|x|1|true|verdadero)$/i.test(String(v || '').trim());
+  const esNo = (v) => /^(n|no|0|false|falso|sin)$/i.test(String(v || '').trim());
   let colsNombre = [];
   if (encabezado) {
-    colsNombre = encabezado.map((h, i) => ({ h, i })).filter(({ h, i }) => i !== dniCol && /(apellido|nombre|docente|agente|persona|invitad|instituci)/i.test(h)).map(({ i }) => i);
+    colsNombre = encabezado.map((h, i) => ({ h, i })).filter(({ h, i }) => i !== dniCol && i !== butacaCol && /(apellido|nombre|docente|agente|persona|invitad|instituci)/i.test(h)).map(({ i }) => i);
   }
   if (colsNombre.length === 0) {
     const conLetras = [];
     for (let c = 0; c < nCols; c++) {
-      if (c === dniCol) continue;
+      if (c === dniCol || c === butacaCol) continue;
       const n = datos.filter((f) => tieneLetras(f[c])).length;
       if (n >= datos.length * 0.5) conLetras.push(c);
     }
@@ -115,9 +120,11 @@ const analizarCSVPersonas = (texto, { dniObligatorio = true } = {}) => {
       vistos.add(dni);
     }
     if (nombre.split(' ').length < 2) res.unaPalabra++;
-    res.items.push({ dni, nombre });
+    const sinButaca = butacaCol !== -1 && (butacaInvertida ? esSi(f[butacaCol]) : esNo(f[butacaCol]));
+    if (sinButaca) res.sinButaca++;
+    res.items.push({ dni, nombre, sinButaca });
   });
-  res.columnas = `DNI: columna ${dniCol === -1 ? '(sin DNI)' : dniCol + 1} · Nombre: columna${colsNombre.length > 1 ? 's' : ''} ${colsNombre.map((c) => c + 1).join(' y ')}${encabezado ? ' · primera fila ignorada (encabezado)' : ''}`;
+  res.columnas = `DNI: columna ${dniCol === -1 ? '(sin DNI)' : dniCol + 1} · Nombre: columna${colsNombre.length > 1 ? 's' : ''} ${colsNombre.map((c) => c + 1).join(' y ')}${butacaCol !== -1 ? ` · Butaca: columna ${butacaCol + 1} ("${encabezado[butacaCol]}")` : ''}${encabezado ? ' · primera fila ignorada (encabezado)' : ''}`;
   return res;
 };
 
@@ -134,6 +141,7 @@ const descargarCSV = (nombreArchivo, filas) => {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 };
+
 
 // ¿El egresado tiene una solicitud de butacas extra aprobada (total o parcial)?
 const tieneExtraAprobada = (egr, solicitudes) => (solicitudes || []).some((s) => s.egresado_id === egr.id && String(s.estado || '').toLowerCase() === 'aprobada');
@@ -300,10 +308,16 @@ export default function App() {
     if (!window.confirm("¿Estás seguro de reiniciar todas las asistencias a 0?")) return;
     try {
       const verif = (r) => { if (r && r.error) throw r.error; };
-      verif(await supabase.from('egresados').update({ asistio: false }).neq('id', '00000000-0000-0000-0000-000000000000'));
+      const reiniciar = async (tabla) => {
+        const todos = (q) => q.neq('id', '00000000-0000-0000-0000-000000000000');
+        let r = await todos(supabase.from(tabla).update({ asistio: false, hora_ingreso_real: null }));
+        if (r.error && esErrorColumna(r.error, 'hora_ingreso_real')) r = await todos(supabase.from(tabla).update({ asistio: false }));
+        verif(r);
+      };
+      await reiniciar('egresados');
       verif(await supabase.from('invitados').update({ asistio: false, hora_ingreso: null }).neq('id', '00000000-0000-0000-0000-000000000000'));
-      verif(await supabase.from('docentes').update({ asistio: false }).neq('id', '00000000-0000-0000-0000-000000000000'));
-      verif(await supabase.from('invitados_especiales').update({ asistio: false }).neq('id', '00000000-0000-0000-0000-000000000000'));
+      await reiniciar('docentes');
+      await reiniciar('invitados_especiales');
       await registrarLog('REINICIO_ASISTENCIAS', 'Puerta', 'Se reiniciaron todas las asistencias a cero.');
       await cargarDatosGlobales();
       notify('Todas las asistencias han sido reiniciadas a cero.');
@@ -338,7 +352,8 @@ export default function App() {
   // (el resto del cupo queda libre para reasignar). En el Cierre Definitivo, a todos se les cuentan los cargados.
   const totalCuposFamiliares = egresadosActivos.reduce((acc, e) => acc + plazasFamiliaresDe(e, { config, invitados, solicitudes }), 0);
   const totalOcupado = totalEgresados + totalDocentesConButaca + totalEspeciales + totalCuposFamiliares;
-  const vacantesLibres = CAPACIDAD_MAXIMA - totalOcupado;
+  const CAPACIDAD = capacidadDe(config);
+  const vacantesLibres = CAPACIDAD - totalOcupado;
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans relative pb-24 overflow-x-hidden">
@@ -431,7 +446,7 @@ export default function App() {
         ) : vista === 'login' && !session ? (
           <LoginStaff onSuccess={() => { cargarDatosGlobales(); setVista('admin'); }} notify={notify} />
         ) : vista === 'puerta' && session ? (
-          <ModuloPuerta egresados={egresados} invitados={invitados} docentes={docentes} especiales={especiales} recargar={cargarDatosGlobales} notify={notify} perfilStaff={perfilStaff} />
+          <ModuloPuerta config={config} egresados={egresados} invitados={invitados} docentes={docentes} especiales={especiales} recargar={cargarDatosGlobales} notify={notify} perfilStaff={perfilStaff} />
         ) : vista === 'admin' && session && puedeAdministrar ? (
           <PanelAdministracion
             vipPortalActivo={vipPortalActivo}
@@ -785,9 +800,9 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, egresados
   const hayGuardados = misInvitadosGuardados.length > 0;
   const descargarMiPase = () => {
     if (!personaPase) return;
-    if (tipoUsuario === 'egresado') paseEgresado(personaPase, config.escudo);
-    else if (tipoUsuario === 'docente') paseDocente(personaPase, config.escudo);
-    else paseVip(personaPase, config.escudo);
+    if (tipoUsuario === 'egresado') paseEgresado(personaPase, config);
+    else if (tipoUsuario === 'docente') paseDocente(personaPase, config);
+    else paseVip(personaPase, config);
   };
 
   return (
@@ -852,7 +867,7 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, egresados
                 <ul className="text-xs text-slate-700 space-y-0.5">
                   {miGrupo.map((g) => <li key={g.id}>{g.nombre_completo}{tieneMovilidad(g) ? ' ♿' : ''}</li>)}
                 </ul>
-                <button type="button" onClick={() => paseGrupo(datosPersona, miGrupo, config.escudo)} className="w-full py-2.5 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 shadow cursor-pointer" style={{ backgroundColor: colorFamiliaDe(datosPersona) }}>
+                <button type="button" onClick={() => paseGrupo(datosPersona, miGrupo, config)} className="w-full py-2.5 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 shadow cursor-pointer" style={{ backgroundColor: colorFamiliaDe(datosPersona) }}>
                   <Download className="w-4 h-4" /> Descargar QR del Grupo Familiar
                 </button>
                 <p className="text-[11px] font-bold text-slate-600">📍 {accesoFamiliaDe(datosPersona)}</p>
@@ -907,7 +922,7 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, egresados
                           ) : (
                             <button 
                               type="button" 
-                              onClick={() => paseInvitado(guardadoInv, datosPersona, config.escudo)} 
+                              onClick={() => paseInvitado(guardadoInv, datosPersona, config)} 
                               className="text-white px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 shadow-xs cursor-pointer"
                               style={{ backgroundColor: colorFamiliaDe(datosPersona) }}
                             >
@@ -1139,7 +1154,7 @@ const rectRedondeado = (ctx, x, y, w, h, r) => {
   else ctx.rect(x, y, w, h);
 };
 
-const descargarPase = async ({ nombre, subtitulo, rol, valor, color = COLOR_PASE.egresado, acceso, integrantes = [], movilidad = false, escudo, archivo }) => {
+const descargarPase = async ({ nombre, subtitulo, rol, valor, color = COLOR_PASE.egresado, acceso, ubicacion = '', integrantes = [], movilidad = false, escudo, archivo }) => {
   if (!valor) {
     alert('No se pudo generar la imagen del QR.');
     return;
@@ -1240,6 +1255,14 @@ const descargarPase = async ({ nombre, subtitulo, rol, valor, color = COLOR_PASE
       y += 110;
     }
 
+    if (ubicacion) {
+      const textoUbic = `UBICACIÓN: ${ubicacion}`;
+      ctx.fillStyle = '#111827';
+      ajustarFuente(ctx, textoUbic, 'bold', 28, 820, 18);
+      ctx.fillText(textoUbic, 540, y + 6);
+      y += 50;
+    }
+
     if (integrantes.length > 0) {
       ctx.fillStyle = '#111827';
       ctx.font = 'bold 28px sans-serif';
@@ -1289,35 +1312,118 @@ const descargarPase = async ({ nombre, subtitulo, rol, valor, color = COLOR_PASE
   }
 };
 
-// Atajos para cada tipo de pase (los usan el portal y Administración)
-const paseEgresado = (egr, escudo) => descargarPase({
+// Atajos para cada tipo de pase (los usan el portal y Administración). Reciben la configuración (escudo y sectores).
+const paseEgresado = (egr, config) => descargarPase({
   nombre: egr.nombre_completo,
   subtitulo: [`DNI: ${egr.dni}`, textoCurso(egr)].filter(Boolean).join(' · '),
   rol: 'EGRESADO/A', valor: valorQREgresado(egr), color: COLOR_PASE.egresado,
-  acceso: ACCESO_TEXTO.egresados, escudo, archivo: `Egresado-${egr.nombre_completo}`,
+  acceso: ACCESO_TEXTO.egresados, ubicacion: ubicacionPara({ tipo: 'egresado' }, config),
+  escudo: config?.escudo, archivo: `Egresado-${egr.nombre_completo}`,
 });
-const paseGrupo = (egr, integrantes, escudo) => descargarPase({
+const paseGrupo = (egr, integrantes, config) => descargarPase({
   nombre: egr.nombre_completo,
   subtitulo: [`Grupo familiar · ${integrantes.length} persona(s)`, textoCurso(egr)].filter(Boolean).join(' · '),
   rol: 'GRUPO FAMILIAR', valor: valorQRGrupo(egr), color: colorFamiliaDe(egr),
-  acceso: accesoFamiliaDe(egr), integrantes, escudo, archivo: `Grupo-Familiar-${egr.nombre_completo}`,
+  acceso: accesoFamiliaDe(egr), ubicacion: ubicacionPara({ tipo: 'invitado', egr }, config),
+  integrantes, escudo: config?.escudo, archivo: `Grupo-Familiar-${egr.nombre_completo}`,
 });
-const paseInvitado = (inv, egr, escudo) => descargarPase({
+const paseInvitado = (inv, egr, config) => descargarPase({
   nombre: inv.nombre_completo,
   subtitulo: `Invitado/a de ${egr?.nombre_completo || 'egresado/a'}`,
   rol: 'INVITADO INDIVIDUAL', valor: inv.numero_entrada, color: colorFamiliaDe(egr),
-  acceso: accesoFamiliaDe(egr), movilidad: tieneMovilidad(inv), escudo, archivo: `Invitado-${inv.nombre_completo}`,
+  acceso: accesoFamiliaDe(egr), ubicacion: ubicacionPara({ tipo: 'invitado', egr, movilidad: tieneMovilidad(inv) }, config),
+  movilidad: tieneMovilidad(inv), escudo: config?.escudo, archivo: `Invitado-${inv.nombre_completo}`,
 });
-const paseDocente = (doc, escudo) => descargarPase({
+const paseDocente = (doc, config) => descargarPase({
   nombre: doc.nombre_completo, subtitulo: `DNI: ${doc.dni}`,
   rol: 'DOCENTE', valor: valorQRDocente(doc), color: COLOR_PASE.docente,
-  acceso: ACCESO_TEXTO.abajo, escudo, archivo: `Docente-${doc.nombre_completo}`,
+  acceso: ACCESO_TEXTO.abajo, ubicacion: doc.ocupa_butaca === false ? '' : ubicacionPara({ tipo: 'docente' }, config),
+  escudo: config?.escudo, archivo: `Docente-${doc.nombre_completo}`,
 });
-const paseVip = (vip, escudo) => descargarPase({
+const paseVip = (vip, config) => descargarPase({
   nombre: vip.nombre_completo, subtitulo: vip.dni ? `DNI: ${vip.dni}` : 'Autoridad / Invitado especial',
   rol: 'INVITADO VIP', valor: valorQRVip(vip), color: COLOR_PASE.vip,
-  acceso: ACCESO_TEXTO.abajo, movilidad: tieneMovilidad(vip), escudo, archivo: `VIP-${vip.nombre_completo}`,
+  acceso: ACCESO_TEXTO.abajo, ubicacion: ubicacionPara({ tipo: 'vip', movilidad: tieneMovilidad(vip) }, config),
+  movilidad: tieneMovilidad(vip), escudo: config?.escudo, archivo: `VIP-${vip.nombre_completo}`,
 });
+
+// ============================================================================
+// SALA: croquis del Teatro CCC, capacidad y sectores asignables por grupo
+// ============================================================================
+// Butacas numeradas de mayor (izquierda) a 1 (derecha), mirando al escenario.
+// Cada fila tiene tramos [desde, hasta] de butacas que existen.
+const FILAS_TEATRO = [
+  { fila: 'F1', bloque: 'delantero', tramos: [[16, 25], [1, 9]], cortesia: true },
+  ...['F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9'].map((f) => ({ fila: f, bloque: 'delantero', tramos: [[1, 25]] })),
+  { fila: 'F10', bloque: 'delantero', tramos: [[16, 25], [1, 10]] }, // área técnica: 11 a 15
+  { fila: 'F11', bloque: 'delantero', tramos: [[17, 25], [1, 9]] },  // área técnica: 10 a 16
+  ...Array.from({ length: 10 }, (_, k) => ({ fila: `F${12 + k}`, bloque: 'trasero', tramos: [[22, 26], [6, 21], [1, 5]] })),
+];
+const numeroFila = (f) => Number(String(f || '').replace(/\D/g, '')) || 0;
+const existeButaca = (filaObj, n) => filaObj.tramos.some(([a, b]) => n >= a && n <= b);
+const butacasDeFila = (filaObj) => filaObj.tramos.reduce((acc, [a, b]) => acc + (b - a + 1), 0);
+const BUTACAS_CROQUIS = FILAS_TEATRO.reduce((acc, f) => acc + butacasDeFila(f), 0); // 517
+const BUTACAS_CORTESIA = butacasDeFila(FILAS_TEATRO[0]); // 19
+
+const GRUPOS_SALA = [
+  { valor: 'egresados', etiqueta: 'Egresados', color: COLOR_PASE.egresado },
+  { valor: 'familias_cn', etiqueta: 'Familias de Cs. Naturales (TM)', color: COLOR_PASE.cn },
+  { valor: 'familias_edu', etiqueta: 'Familias de Educación (TT)', color: COLOR_PASE.edu },
+  { valor: 'familias', etiqueta: 'Familias (cualquier orientación)', color: '#0F766E' },
+  { valor: 'docentes', etiqueta: 'Docentes', color: COLOR_PASE.docente },
+  { valor: 'vip', etiqueta: 'VIP / Autoridades', color: COLOR_PASE.vip },
+  { valor: 'movilidad', etiqueta: 'Movilidad reducida', color: '#D97706' },
+  { valor: 'reservado', etiqueta: 'Reservado / No usar', color: '#94A3B8' },
+];
+const grupoSalaInfo = (v) => GRUPOS_SALA.find((g) => g.valor === v) || GRUPOS_SALA[GRUPOS_SALA.length - 1];
+
+const salaConfigDe = (config) => {
+  const s = config?.sala_config && typeof config.sala_config === 'object' ? config.sala_config : {};
+  return { capacidad: aNumeroONulo(s.capacidad), sectores: Array.isArray(s.sectores) ? s.sectores : [] };
+};
+// Capacidad que usa todo el sistema: la guardada en Aforo y Sala, o 525 si todavía no se guardó ninguna
+const capacidadDe = (config) => salaConfigDe(config).capacidad ?? CAPACIDAD_MAXIMA;
+
+// Butacas reales que abarca un sector (respeta pasillos, área técnica y huecos del croquis)
+const butacasDeSector = (sec) => {
+  const fd = Math.min(numeroFila(sec.filaDesde), numeroFila(sec.filaHasta));
+  const fh = Math.max(numeroFila(sec.filaDesde), numeroFila(sec.filaHasta));
+  const bd = Math.min(Number(sec.butacaDesde) || 1, Number(sec.butacaHasta) || 26);
+  const bh = Math.max(Number(sec.butacaDesde) || 1, Number(sec.butacaHasta) || 26);
+  const lista = [];
+  FILAS_TEATRO.forEach((f) => {
+    const nf = numeroFila(f.fila);
+    if (nf < fd || nf > fh) return;
+    for (let n = bd; n <= bh; n++) if (existeButaca(f, n)) lista.push(`${f.fila}-${n}`);
+  });
+  return lista;
+};
+const describirSector = (sec) => {
+  const filas = numeroFila(sec.filaDesde) === numeroFila(sec.filaHasta) ? `Fila ${sec.filaDesde}` : `Filas ${sec.filaDesde} a ${sec.filaHasta}`;
+  const todas = (Number(sec.butacaDesde) || 1) <= 1 && (Number(sec.butacaHasta) || 26) >= 25;
+  return todas ? filas : `${filas}, butacas ${sec.butacaDesde} a ${sec.butacaHasta}`;
+};
+const textoSectores = (lista) => lista.map((s) => (s.nombre ? `${s.nombre} (${describirSector(s)})` : describirSector(s))).join(' · ');
+
+// Ubicación (sector) que corresponde mostrar a cada persona. Devuelve '' si no hay sectores asignados.
+const ubicacionPara = ({ tipo, egr, movilidad }, config) => {
+  const { sectores } = salaConfigDe(config);
+  if (sectores.length === 0) return '';
+  const de = (g) => sectores.filter((s) => s.grupo === g);
+  let grupos;
+  if (tipo === 'egresado') grupos = ['egresados'];
+  else if (tipo === 'docente') grupos = ['docentes'];
+  else if (tipo === 'vip') grupos = ['vip'];
+  else grupos = [{ cn: 'familias_cn', edu: 'familias_edu' }[tipoOrientacion(egr)], 'familias'].filter(Boolean);
+  if (movilidad && de('movilidad').length) return `${textoSectores(de('movilidad'))} (movilidad reducida)`;
+  for (const g of grupos) if (de(g).length) return textoSectores(de(g));
+  return '';
+};
+
+// Hora real de ingreso (columna hora_ingreso_real). Si la columna todavía no existe, la Puerta no se frena.
+const TABLAS_HORA_REAL = ['egresados', 'docentes', 'invitados_especiales'];
+const tablasSinHoraReal = new Set();
+const esErrorColumna = (err, columna) => new RegExp(columna, 'i').test(err?.message || '') || err?.code === 'PGRST204' || err?.code === '42703';
 
 const CONFIG_INGRESO = {
   egresado: {
@@ -1383,7 +1489,7 @@ const buscarCodigoEnBase = async (code, esQrEgresado) => {
   return null;
 };
 
-function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, notify, perfilStaff }) {
+function ModuloPuerta({ config, egresados, invitados, docentes, especiales, recargar, notify, perfilStaff }) {
   const [busqueda, setBusqueda] = useState('');
   const [egresadoSeleccionado, setEgresadoSeleccionado] = useState(null);
   const [escaneandoCamara, setEscaneandoCamara] = useState(false);
@@ -1430,18 +1536,27 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
     notifyRef.current = notify;
     recargarRef.current = recargar;
   });
+  const configRef = useRef(config);
+  useEffect(() => { configRef.current = config; });
   const ultimoEscaneoRef = useRef({ code: '', t: 0 });
   const procesandoRef = useRef(false);
 
   // Registra el ingreso en la base de forma atómica: solo si todavía no figuraba como presente.
   // Devuelve true si se registró ahora, false si ya estaba registrado (duplicado).
   const marcarIngreso = async (tabla, id, extra = {}) => {
-    const { data, error } = await supabase
+    // Egresados, docentes y VIP guardan además la hora real de ingreso (si la columna existe; si no, se sigue igual)
+    const conHora = TABLAS_HORA_REAL.includes(tabla) && !tablasSinHoraReal.has(tabla) ? { hora_ingreso_real: new Date().toISOString() } : {};
+    const intentar = (cambios) => supabase
       .from(tabla)
-      .update({ asistio: true, ...extra })
+      .update({ asistio: true, ...extra, ...cambios })
       .eq('id', id)
       .or('asistio.is.null,asistio.eq.false')
       .select('id');
+    let { data, error } = await intentar(conHora);
+    if (error && conHora.hora_ingreso_real && esErrorColumna(error, 'hora_ingreso_real')) {
+      tablasSinHoraReal.add(tabla);
+      ({ data, error } = await intentar({}));
+    }
     if (error) throw error;
     return Array.isArray(data) && data.length > 0;
   };
@@ -1460,7 +1575,12 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
         }
       } else {
         if (!window.confirm(`¿Quitar el ingreso de ${item.nombre_completo}?`)) return;
-        const { error } = await supabase.from(tabla).update({ asistio: false }).eq('id', item.id);
+        const limpiarHora = TABLAS_HORA_REAL.includes(tabla) && !tablasSinHoraReal.has(tabla);
+        let { error } = await supabase.from(tabla).update(limpiarHora ? { asistio: false, hora_ingreso_real: null } : { asistio: false }).eq('id', item.id);
+        if (error && limpiarHora && esErrorColumna(error, 'hora_ingreso_real')) {
+          tablasSinHoraReal.add(tabla);
+          ({ error } = await supabase.from(tabla).update({ asistio: false }).eq('id', item.id));
+        }
         if (error) throw error;
         logPuerta('QUITAR_INGRESO', `${item.nombre_completo} (DNI ${item.dni || 'S/D'})`);
       }
@@ -1552,6 +1672,9 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
         recargarRef.current();
         const lista = grupales.map((g) => ({ nombre: g.nombre_completo, movilidad: g.movilidad_reducida === true, nuevo: nuevos.includes(g.id) }));
         const conMovilidad = grupales.filter((g) => g.movilidad_reducida === true).length;
+        const ubicMov = conMovilidad > 0 ? ubicacionPara({ tipo: 'invitado', egr: f, movilidad: true }, configRef.current) : '';
+        const ubicGrupo = ubicacionPara({ tipo: 'invitado', egr: f }, configRef.current);
+        acceso.ubicacion = [ubicGrupo, ubicMov && ubicMov !== ubicGrupo ? `♿ ${ubicMov}` : ''].filter(Boolean).join(' · ');
         if (nuevos.length > 0) {
           const faltaban = nuevos.length < grupales.length;
           setResultadoIngreso({ tipo: faltaban ? 'warning' : 'success', titulo: faltaban ? `✓ INGRESAN ${nuevos.length} DE ${grupales.length} (los demás ya habían ingresado)` : `✓ INGRESO GRUPO FAMILIAR (${nuevos.length})`, nombre: nombreGrupo, detalle: textoCurso(f), acceso, lista, movilidad: conMovilidad > 0 });
@@ -1568,6 +1691,8 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
       const c = CONFIG_INGRESO[hallado.tipo];
       const acceso = accesoPuertaDe(hallado.tipo, f, egrsLocal);
       const movilidad = f.movilidad_reducida === true;
+      acceso.ubicacion = hallado.tipo === 'docente' && f.ocupa_butaca === false ? 'No ocupa butaca'
+        : ubicacionPara({ tipo: hallado.tipo, egr: hallado.tipo === 'invitado' ? egrsLocal.find((e) => e.id === f.egresado_id) : null, movilidad }, configRef.current);
 
       if (hallado.tipo !== 'invitado' && f.activo === false) {
         setResultadoIngreso({ tipo: 'warning', titulo: '⛔ FIGURA COMO "NO ASISTE"', nombre: f.nombre_completo, detalle: 'Dio de baja su asistencia. Consultar con coordinación antes de dejarlo pasar.' });
@@ -1726,6 +1851,9 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
             {resultadoIngreso.acceso && (
               <p className="px-3 py-2 rounded-xl text-white text-sm font-black text-center" style={{ backgroundColor: resultadoIngreso.acceso.color }}>📍 {resultadoIngreso.acceso.texto}</p>
             )}
+            {resultadoIngreso.acceso?.ubicacion && (
+              <p className="px-3 py-1.5 rounded-xl bg-white border-2 text-sm font-black text-center text-slate-800" style={{ borderColor: resultadoIngreso.acceso.color }}>🪑 {resultadoIngreso.acceso.ubicacion}</p>
+            )}
             {resultadoIngreso.lista && (
               <ul className="text-sm space-y-0.5 bg-white/70 rounded-lg p-2">
                 {resultadoIngreso.lista.map((p, i) => (
@@ -1872,6 +2000,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
 }
 
 function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActivo, perfilStaff, config, egresados, invitados, docentes, especiales, solicitudes, usuariosSistema, logsSistema, totalEgresados, totalDocentes, totalDocentesConButaca, totalDocentesSinButaca, totalEspeciales, totalCuposFamiliares, totalOcupado, vacantesLibres, recargar, notify, reiniciarAsistenciasGeneral, borrarInvitadosEgresados, registrarLog }) {
+  const CAPACIDAD = capacidadDe(config);
   const [tab, setTab] = useState('egresados');
   const [filtroEgresado, setFiltroEgresado] = useState('');
   const [filtroDocente, setFiltroDocente] = useState('');
@@ -1913,6 +2042,14 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
   const [editVipMovilidad, setEditVipMovilidad] = useState(false);
   const [cantAprobar, setCantAprobar] = useState({});
   const [subiendoEscudo, setSubiendoEscudo] = useState(false);
+  const [salaEdit, setSalaEdit] = useState(() => ({ capacidad: capacidadDe(config), sectores: salaConfigDe(config).sectores }));
+  const [salaCambiada, setSalaCambiada] = useState(false);
+  const [guardandoSala, setGuardandoSala] = useState(false);
+  const salaGuardadaJSON = JSON.stringify(config.sala_config || null);
+  useEffect(() => {
+    // si cambia lo guardado en la base (y no hay cambios sin guardar), se vuelve a cargar el editor
+    if (!salaCambiada) setSalaEdit({ capacidad: capacidadDe(config), sectores: salaConfigDe(config).sectores });
+  }, [salaGuardadaJSON]);
   const fileEscudoRef = useRef(null);
   const [guardandoEdicion, setGuardandoEdicion] = useState(false);
 
@@ -2152,20 +2289,20 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
             const fijos = E + D + V;
             const n = cupoMasivo === '' ? null : Number(cupoMasivo);
             const ocupacion = n === null ? null : fijos + n * E;
-            const vac = ocupacion === null ? null : CAPACIDAD_MAXIMA - ocupacion;
-            const maxCupo = E > 0 ? Math.max(0, Math.floor((CAPACIDAD_MAXIMA - fijos) / E)) : 0;
-            const sobran = E > 0 ? CAPACIDAD_MAXIMA - fijos - maxCupo * E : 0;
+            const vac = ocupacion === null ? null : CAPACIDAD - ocupacion;
+            const maxCupo = E > 0 ? Math.max(0, Math.floor((CAPACIDAD - fijos) / E)) : 0;
+            const sobran = E > 0 ? CAPACIDAD - fijos - maxCupo * E : 0;
             return (
               <div className="space-y-3">
                 <h4 className="font-bold text-sm text-slate-800 uppercase tracking-wide">Cantidad de invitados por egresado <span className="normal-case font-semibold text-slate-500">(cupo base actual: {cupoBaseDe(config)})</span></h4>
                 <p className="text-xs text-slate-500">
-                  Hoy: {E} egresados + {D} docentes con butaca + {V} VIP = <b>{fijos}</b> lugares fijos de {CAPACIDAD_MAXIMA}. Quedan <b>{Math.max(0, CAPACIDAD_MAXIMA - fijos)}</b> butacas para invitados.
+                  Hoy: {E} egresados + {D} docentes con butaca + {V} VIP = <b>{fijos}</b> lugares fijos de {CAPACIDAD}. Quedan <b>{Math.max(0, CAPACIDAD - fijos)}</b> butacas para invitados.
                   {E > 0 && <> Con <b>{maxCupo}</b> invitado(s) por egresado entran todos y sobran <b>{sobran}</b> butaca(s) para solicitudes extra.</>}
                 </p>
                 <div className="flex flex-wrap gap-2">
                   {[0, 1, 2, 3, 4].map((k) => {
                     const oc = fijos + k * E;
-                    const v = CAPACIDAD_MAXIMA - oc;
+                    const v = CAPACIDAD - oc;
                     return (
                       <button key={k} type="button" onClick={() => setCupoMasivo(String(k))} className={`px-3 py-2 rounded-xl border text-xs font-bold cursor-pointer text-left ${String(k) === cupoMasivo ? 'ring-2 ring-indigo-500' : ''} ${v < 0 ? 'bg-rose-50 border-rose-200 text-rose-700' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
                         {k} por egresado<br /><span className="font-semibold">{oc} ocupadas · {v < 0 ? `faltan ${-v}` : `sobran ${v}`}</span>
@@ -2205,7 +2342,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
                 })()}
                 {ocupacion !== null && (
                   <p className={`text-xs font-bold ${vac < 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
-                    Con {n} por egresado: {ocupacion} de {CAPACIDAD_MAXIMA} butacas ({vac < 0 ? `faltan ${-vac}` : `sobran ${vac}`}).
+                    Con {n} por egresado: {ocupacion} de {CAPACIDAD} butacas ({vac < 0 ? `faltan ${-vac}` : `sobran ${vac}`}).
                   </p>
                 )}
                 <p className="text-[11px] text-slate-400">Aplicar reemplaza el cupo de cada egresado activo (incluidas butacas extra ya aprobadas) y también actualiza el cupo base para los egresados nuevos. Los invitados ya cargados no se borran.</p>
@@ -2293,14 +2430,14 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
     notify(`Exportado ${nombreArchivo} con éxito.`);
   };
 
-  const importarPersonas = async (ev, { tabla, modulo, plural, dniObligatorio, existentes, armar }) => {
+  const importarPersonas = async (ev, { tabla, modulo, plural, dniObligatorio, detectarButaca = false, existentes, armar }) => {
     const archivo = ev.target.files?.[0];
     if (!archivo) return;
     ev.target.value = '';
     const idsCreados = [];
     try {
       const texto = await archivo.text();
-      const a = analizarCSVPersonas(texto, { dniObligatorio });
+      const a = analizarCSVPersonas(texto, { dniObligatorio, detectarButaca });
       if (a.error) { notify(a.error, 'error'); return; }
       const dnisActuales = new Set(existentes.map((x) => String(x.dni || '')).filter(Boolean));
       const nuevos = a.items.filter((x) => !x.dni || !dnisActuales.has(x.dni));
@@ -2315,6 +2452,10 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
       if (a.descartadas) lineas.push(`Filas descartadas (sin ${dniObligatorio ? 'DNI válido o ' : ''}nombre): ${a.descartadas}`);
       if (a.duplicadasEnArchivo) lineas.push(`Repetidas dentro del archivo (se toma la primera): ${a.duplicadasEnArchivo}`);
       if (a.unaPalabra) lineas.push(`Atención: ${a.unaPalabra} nombre(s) tienen una sola palabra (¿falta el apellido o el nombre?).`);
+      if (detectarButaca) {
+        const sinB = nuevos.filter((x) => x.sinButaca).length;
+        lineas.push(a.columnas.includes('Butaca:') ? `Sin butaca (de los nuevos): ${sinB} · con butaca: ${nuevos.length - sinB}` : 'No se encontró columna "Butaca": todos entran CON butaca.');
+      }
       lineas.push('', 'Ejemplos:', ejemplos, '', 'Si los ejemplos están mal, tocá Cancelar: no se carga nada.', '¿Importar?');
       if (!window.confirm(lineas.join('\n'))) {
         notify('Importación cancelada. No se cargó nada.', 'warning');
@@ -2343,8 +2484,8 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
     armar: (x) => ({ dni: x.dni, nombre_completo: x.nombre, cupo_asignado: cupoBaseDe(config), cerrado: false, activo: true }),
   });
   const handleImportarCSVDocentes = (ev) => importarPersonas(ev, {
-    tabla: 'docentes', modulo: 'Docentes', plural: 'docentes', dniObligatorio: true, existentes: docentes,
-    armar: (x) => ({ dni: x.dni, nombre_completo: x.nombre, asistio: false, activo: true }),
+    tabla: 'docentes', modulo: 'Docentes', plural: 'docentes', dniObligatorio: true, detectarButaca: true, existentes: docentes,
+    armar: (x) => ({ dni: x.dni, nombre_completo: x.nombre, asistio: false, activo: true, ...(x.sinButaca ? { ocupa_butaca: false } : {}) }),
   });
   const handleImportarCSVVips = (ev) => importarPersonas(ev, {
     tabla: 'invitados_especiales', modulo: 'VIP', plural: 'invitados VIP', dniObligatorio: false, existentes: especiales,
@@ -2404,26 +2545,56 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
     setGuardandoConfig(true);
     try {
       if (config.id) {
-        await supabase.from('configuracion').update({
-          cupo_base: Number(cupoBaseEdit),
-          filas: Number(filasEdit),
-          butacas_por_fila: Number(butacasFilaEdit)
-        }).eq('id', config.id);
+        const { error: errCfg } = await supabase.from('configuracion').update({ cupo_base: Number(cupoBaseEdit) }).eq('id', config.id);
+        if (errCfg) throw errCfg;
       } else {
-        await supabase.from('configuracion').insert({
-          cupo_base: Number(cupoBaseEdit),
-          filas: Number(filasEdit),
-          butacas_por_fila: Number(butacasFilaEdit),
-          estado_etapa: 'abierta'
-        });
+        const { error: errCfg } = await supabase.from('configuracion').insert({ cupo_base: Number(cupoBaseEdit), estado_etapa: 'abierta' });
+        if (errCfg) throw errCfg;
       }
-      await registrarLog('CONFIGURACION', 'Aforo', 'Se actualizó la configuración de la sala.');
+      await registrarLog('CONFIGURACION', 'Aforo', `Cupo base para egresados nuevos: ${Number(cupoBaseEdit)}.`);
       await recargar();
-      notify('Configuración de aforo y sala guardada correctamente.');
+      notify('Cupo base guardado (se usa para los egresados que se agreguen de ahora en más).');
     } catch (err) {
       notify('Error guardando aforo: ' + err.message, 'error');
     } finally {
       setGuardandoConfig(false);
+    }
+  };
+
+  // ---- Sala: capacidad y sectores ----
+  const editarSala = (cambios) => { setSalaEdit((s) => ({ ...s, ...cambios })); setSalaCambiada(true); };
+  const editarSector = (idx, cambios) => editarSala({ sectores: salaEdit.sectores.map((s, k) => (k === idx ? { ...s, ...cambios } : s)) });
+  const agregarSector = () => editarSala({ sectores: [...salaEdit.sectores, { id: `s${Date.now()}`, nombre: '', grupo: 'familias_cn', filaDesde: 'F12', filaHasta: 'F21', butacaDesde: 1, butacaHasta: 26 }] });
+  const quitarSector = (idx) => editarSala({ sectores: salaEdit.sectores.filter((_, k) => k !== idx) });
+  const descartarCambiosSala = () => { setSalaEdit({ capacidad: capacidadDe(config), sectores: salaConfigDe(config).sectores }); setSalaCambiada(false); };
+
+  const guardarSala = async () => {
+    const cap = Number(salaEdit.capacidad);
+    if (!Number.isInteger(cap) || cap < 50 || cap > 2000) { notify('La capacidad tiene que ser un número entero (por ejemplo 517).', 'error'); return; }
+    const sectores = salaEdit.sectores.map((s) => ({
+      id: s.id, nombre: String(s.nombre || '').trim(), grupo: s.grupo,
+      filaDesde: s.filaDesde, filaHasta: s.filaHasta,
+      butacaDesde: Math.max(1, Math.min(26, Number(s.butacaDesde) || 1)), butacaHasta: Math.max(1, Math.min(26, Number(s.butacaHasta) || 26)),
+    }));
+    const vacio = sectores.findIndex((s) => butacasDeSector(s).length === 0);
+    if (vacio !== -1) { notify(`El sector #${vacio + 1} no abarca ninguna butaca. Revisá filas y butacas.`, 'error'); return; }
+    if (cap !== capacidadDe(config) && !window.confirm(`¿Cambiar la capacidad de la sala de ${capacidadDe(config)} a ${cap} butacas?\n\nCambian las vacantes libres, el simulador de cupo y la Acreditación en Vivo.`)) return;
+    setGuardandoSala(true);
+    try {
+      const sala_config = { capacidad: cap, sectores };
+      const resultado = config.id
+        ? await supabase.from('configuracion').update({ sala_config }).eq('id', config.id)
+        : await supabase.from('configuracion').insert({ estado_etapa: config.estado_etapa || 'abierta', cupo_base: cupoBaseDe(config), sala_config });
+      if (resultado.error) throw resultado.error;
+      await registrarLog('CONFIGURACION', 'Sala', `Capacidad ${cap} butacas · ${sectores.length} sector(es): ${sectores.map((s) => `${grupoSalaInfo(s.grupo).etiqueta} ${describirSector(s)}`).join('; ') || 'ninguno'}`);
+      setSalaCambiada(false);
+      await recargar();
+      notify('Sala guardada: capacidad y sectores actualizados.');
+    } catch (err) {
+      const faltaColumna = /sala_config/i.test(err.message || '') || err.code === 'PGRST204' || err.code === '42703';
+      notify(faltaColumna ? 'Falta crear la columna "sala_config" en la tabla configuracion (Supabase). Ejecutá el SQL de la tanda 14 y volvé a intentar.' : 'No se pudo guardar la sala: ' + err.message, 'error');
+    } finally {
+      setGuardandoSala(false);
     }
   };
 
@@ -2842,11 +3013,11 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
 
       const hojaEgresados = egresados.map((e) => {
         const susInv = invitados.filter((i) => i.egresado_id === e.id);
-        return { DNI: e.dni, 'Nombre completo': e.nombre_completo, 'División': e.division || '', 'Orientación': e.orientacion || '', Estado: e.activo === false ? 'NO ASISTE' : 'Asiste', Presente: si(e.asistio), 'Cupo asignado': e.cupo_asignado ?? '', 'Invitados cargados': susInv.length, 'Invitados presentes': susInv.filter((i) => i.asistio).length };
+        return { DNI: e.dni, 'Nombre completo': e.nombre_completo, 'División': e.division || '', 'Orientación': e.orientacion || '', Estado: e.activo === false ? 'NO ASISTE' : 'Asiste', Presente: si(e.asistio), 'Hora de ingreso': e.asistio ? hora(e.hora_ingreso_real) : '', 'Cupo asignado': e.cupo_asignado ?? '', 'Invitados cargados': susInv.length, 'Invitados presentes': susInv.filter((i) => i.asistio).length };
       });
       const hojaFamiliares = invitados.map((i) => ({ 'N° entrada': i.numero_entrada || '', DNI: i.dni || '', 'Nombre completo': i.nombre_completo, 'Invitado de': porId[i.egresado_id]?.nombre_completo || '', Modalidad: esGrupal(i) ? 'En grupo' : 'Individual', 'Movilidad reducida': tieneMovilidad(i) ? 'SI' : '', Acceso: accesoFamiliaDe(porId[i.egresado_id]), Presente: si(i.asistio), 'Hora de ingreso': i.asistio ? hora(i.hora_ingreso) : '' }));
-      const hojaDocentes = docentes.map((d) => ({ DNI: d.dni, 'Nombre completo': d.nombre_completo, Estado: d.activo === false ? 'NO ASISTE' : 'Asiste', 'Ocupa butaca': d.ocupa_butaca === false ? 'NO' : 'SI', Presente: si(d.asistio) }));
-      const hojaVip = especiales.map((v) => ({ DNI: v.dni || '', 'Nombre e institución': v.nombre_completo, 'Movilidad reducida': tieneMovilidad(v) ? 'SI' : '', Estado: v.activo === false ? 'NO ASISTE' : 'Asiste', Presente: si(v.asistio) }));
+      const hojaDocentes = docentes.map((d) => ({ DNI: d.dni, 'Nombre completo': d.nombre_completo, Estado: d.activo === false ? 'NO ASISTE' : 'Asiste', 'Ocupa butaca': d.ocupa_butaca === false ? 'NO' : 'SI', Presente: si(d.asistio), 'Hora de ingreso': d.asistio ? hora(d.hora_ingreso_real) : '' }));
+      const hojaVip = especiales.map((v) => ({ DNI: v.dni || '', 'Nombre e institución': v.nombre_completo, 'Movilidad reducida': tieneMovilidad(v) ? 'SI' : '', Estado: v.activo === false ? 'NO ASISTE' : 'Asiste', Presente: si(v.asistio), 'Hora de ingreso': v.asistio ? hora(v.hora_ingreso_real) : '' }));
 
       const resumen = [
         { Concepto: 'Egresados presentes', Cantidad: egresadosPresentesCount, 'De un total de': totalEgresados },
@@ -2855,7 +3026,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
         { Concepto: '   de ellos, docentes sin butaca', Cantidad: docentesSinButacaPresentes, 'De un total de': totalDocentesSinButaca },
         { Concepto: 'VIP / autoridades presentes', Cantidad: vipsPresentesCount, 'De un total de': totalEspeciales },
         { Concepto: 'TOTAL de personas presentes', Cantidad: totalAsistentesPresentes, 'De un total de': '' },
-        { Concepto: 'BUTACAS ocupadas', Cantidad: butacasOcupadasPresentes, 'De un total de': CAPACIDAD_MAXIMA },
+        { Concepto: 'BUTACAS ocupadas', Cantidad: butacasOcupadasPresentes, 'De un total de': CAPACIDAD },
         { Concepto: 'Reporte generado el', Cantidad: new Date().toLocaleString('es-AR'), 'De un total de': '' },
       ];
 
@@ -2896,7 +3067,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
         <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Especiales / VIP</p><p className="text-2xl font-extrabold">{totalEspeciales}</p></div>
         <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Plazas Familiares</p><p className="text-2xl font-extrabold">{totalCuposFamiliares}</p>{(config.estado_etapa || 'abierta') !== 'abierta' && <p className="text-[10px] text-slate-500 mt-0.5">cargadas + extras aprobadas</p>}</div>
         <div className={`col-span-2 sm:col-span-1 p-4 rounded-2xl border ${vacantesLibres < 0 ? 'bg-rose-50 text-rose-700' : vacantesLibres <= 25 ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'}`}>
-          <p className="text-xs font-semibold">Vacantes Libres (525 máx)</p><p className="text-2xl font-extrabold">{vacantesLibres}</p>
+          <p className="text-xs font-semibold">Vacantes Libres ({CAPACIDAD} máx)</p><p className="text-2xl font-extrabold">{vacantesLibres}</p>
           {vacantesLibres < 0 && <p className="text-[10px] font-bold mt-0.5">Cupos asignados por encima del aforo</p>}
           {vacantesLibres >= 0 && vacantesLibres <= 25 && <p className="text-[10px] font-bold mt-0.5">Quedan pocas vacantes</p>}
         </div>
@@ -3077,7 +3248,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
                   <p className="font-bold text-sm text-slate-900">QR del Egresado</p>
                   <p className="text-[11px] text-slate-500">Solo el egresado · {ACCESO_TEXTO.egresados.toLowerCase()}</p>
                 </div>
-                <button type="button" onClick={() => paseEgresado(modalEditarEgr, config.escudo)} className="px-3.5 py-2 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shrink-0"><Download className="w-4 h-4" /> Descargar QR</button>
+                <button type="button" onClick={() => paseEgresado(modalEditarEgr, config)} className="px-3.5 py-2 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shrink-0"><Download className="w-4 h-4" /> Descargar QR</button>
               </div>
               {(() => {
                 const grupo = invitados.filter((i) => i.egresado_id === modalEditarEgr.id && esGrupal(i));
@@ -3088,7 +3259,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
                       <p className="font-bold text-sm" style={{ color: colorFamiliaDe(modalEditarEgr) }}>QR del Grupo Familiar ({grupo.length})</p>
                       <p className="text-[11px] text-slate-500">{grupo.map((g) => g.nombre_completo + (tieneMovilidad(g) ? ' ♿' : '')).join(', ')}</p>
                     </div>
-                    <button type="button" onClick={() => paseGrupo(modalEditarEgr, grupo, config.escudo)} className="px-3.5 py-2 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shrink-0" style={{ backgroundColor: colorFamiliaDe(modalEditarEgr) }}><Download className="w-4 h-4" /> Descargar QR</button>
+                    <button type="button" onClick={() => paseGrupo(modalEditarEgr, grupo, config)} className="px-3.5 py-2 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shrink-0" style={{ backgroundColor: colorFamiliaDe(modalEditarEgr) }}><Download className="w-4 h-4" /> Descargar QR</button>
                   </div>
                 );
               })()}
@@ -3134,7 +3305,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
                         <p className="text-[11px] text-slate-500">DNI: {inv.dni} · <span className="font-mono">{inv.numero_entrada}</span></p>
                       </div>
                       {!esGrupal(inv) ? (
-                        <button type="button" onClick={() => paseInvitado(inv, modalEditarEgr, config.escudo)} className="px-3 py-1.5 text-white rounded-lg text-xs font-bold flex items-center gap-1 shrink-0" style={{ backgroundColor: colorFamiliaDe(modalEditarEgr) }}><Download className="w-3.5 h-3.5" /> QR individual</button>
+                        <button type="button" onClick={() => paseInvitado(inv, modalEditarEgr, config)} className="px-3 py-1.5 text-white rounded-lg text-xs font-bold flex items-center gap-1 shrink-0" style={{ backgroundColor: colorFamiliaDe(modalEditarEgr) }}><Download className="w-3.5 h-3.5" /> QR individual</button>
                       ) : (
                         <span className="text-[11px] font-bold text-amber-700 text-right">En grupo · entra con el QR del grupo</span>
                       )}
@@ -3205,7 +3376,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
               <button onClick={() => exportarCSV('docentes')} className="px-3.5 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold"><Download className="w-4 h-4" /> Exportar</button>
               <button onClick={() => setModalAgregarDocente(true)} className="px-3.5 py-2 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold"><Plus className="w-4 h-4" /> Agregar Docente</button>
               <input ref={fileDocRef} type="file" accept=".csv,.txt" onChange={handleImportarCSVDocentes} className="hidden" />
-              <button onClick={() => fileDocRef.current?.click()} className="px-3 py-2 bg-indigo-50 text-indigo-700 border rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"><Upload className="w-4 h-4" /> Importar CSV</button>
+              <button onClick={() => fileDocRef.current?.click()} title='El CSV puede traer una columna "Butaca" (SI/NO) o "Sin butaca" (SI/NO). Si no la trae, todos entran con butaca.' className="px-3 py-2 bg-indigo-50 text-indigo-700 border rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"><Upload className="w-4 h-4" /> Importar CSV</button>
               {perfilStaff?.rol === 'admin' && ultimaImportacion('Docentes') && (
                 <button onClick={() => deshacerImportacion('Docentes', 'docentes', 'docentes')} className="px-3 py-2 bg-amber-50 text-amber-800 border border-amber-200 rounded-xl text-xs font-bold cursor-pointer">↩ Deshacer última importación ({ultimaImportacion('Docentes').ids.length})</button>
               )}
@@ -3277,7 +3448,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
                 />
               </div>
               <label className="flex items-center justify-between gap-3 p-3 rounded-xl border bg-slate-50 cursor-pointer">
-                <span className="text-xs"><b className="text-slate-800">Ocupa butaca</b><br /><span className="text-slate-500">Si se apaga, el docente asiste y escanea su QR pero no cuenta en las 525 butacas.</span></span>
+                <span className="text-xs"><b className="text-slate-800">Ocupa butaca</b><br /><span className="text-slate-500">Si se apaga, el docente asiste y escanea su QR pero no cuenta en las butacas de la sala.</span></span>
                 <input type="checkbox" checked={nuevoDocButaca} onChange={(e) => setNuevoDocButaca(e.target.checked)} className="w-5 h-5 accent-emerald-600 shrink-0" />
               </label>
               <div className="flex gap-2 pt-3 border-t">
@@ -3301,7 +3472,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
                 <div>
                   <p className="font-bold text-sm text-slate-900">QR Oficial del Docente</p>
                 </div>
-                <button type="button" onClick={() => paseDocente(modalEditarDoc, config.escudo)} className="px-3.5 py-2 bg-slate-700 text-white rounded-xl text-xs font-bold"><Download className="w-4 h-4" /> Descargar QR</button>
+                <button type="button" onClick={() => paseDocente(modalEditarDoc, config)} className="px-3.5 py-2 bg-slate-700 text-white rounded-xl text-xs font-bold"><Download className="w-4 h-4" /> Descargar QR</button>
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">Nombre y Apellido</label>
@@ -3312,7 +3483,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
                 <input type="text" required maxLength={8} value={editDocDni} onChange={(e) => setEditDocDni(sanitizeDNI(e.target.value))} className="w-full px-3 py-2 border rounded-xl text-sm font-mono" />
               </div>
               <label className="flex items-center justify-between gap-3 p-3 rounded-xl border bg-slate-50 cursor-pointer">
-                <span className="text-xs"><b className="text-slate-800">Ocupa butaca</b><br /><span className="text-slate-500">Si se apaga, el docente asiste y escanea su QR pero no cuenta en las 525 butacas.</span></span>
+                <span className="text-xs"><b className="text-slate-800">Ocupa butaca</b><br /><span className="text-slate-500">Si se apaga, el docente asiste y escanea su QR pero no cuenta en las butacas de la sala.</span></span>
                 <input type="checkbox" checked={editDocButaca} onChange={(e) => setEditDocButaca(e.target.checked)} className="w-5 h-5 accent-emerald-600 shrink-0" />
               </label>
               <button type="button" onClick={() => alternarNoAsiste('docentes', modalEditarDoc, 'Docentes')} className={`w-full py-2 rounded-xl text-xs font-bold border cursor-pointer ${modalEditarDoc.activo === false ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100' : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'}`}>{modalEditarDoc.activo === false ? 'Reactivar (vuelve a ocupar plaza)' : 'Marcar No Asiste (libera la plaza)'}</button>
@@ -3415,7 +3586,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
                 <div>
                   <p className="font-bold text-sm text-slate-900">QR Oficial VIP</p>
                 </div>
-                <button type="button" onClick={() => paseVip({ ...modalEditarVip, movilidad_reducida: editVipMovilidad }, config.escudo)} className="px-3.5 py-2 bg-amber-600 text-white rounded-xl text-xs font-bold"><Download className="w-4 h-4" /> Descargar QR</button>
+                <button type="button" onClick={() => paseVip({ ...modalEditarVip, movilidad_reducida: editVipMovilidad }, config)} className="px-3.5 py-2 bg-amber-600 text-white rounded-xl text-xs font-bold"><Download className="w-4 h-4" /> Descargar QR</button>
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">Nombre / Institución</label>
@@ -3569,27 +3740,27 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
             </div>
           </div>
 
-          {butacasOcupadasPresentes >= CAPACIDAD_MAXIMA * 0.9 && (
-            <div className={`p-3 rounded-xl text-sm font-bold border ${butacasOcupadasPresentes >= CAPACIDAD_MAXIMA ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-amber-50 text-amber-800 border-amber-200'}`}>
-              {butacasOcupadasPresentes >= CAPACIDAD_MAXIMA
-                ? `⛔ Sala completa: ${butacasOcupadasPresentes} presentes de ${CAPACIDAD_MAXIMA} butacas.`
-                : `⚠️ Aforo casi completo: ${butacasOcupadasPresentes} presentes de ${CAPACIDAD_MAXIMA} (quedan ${CAPACIDAD_MAXIMA - butacasOcupadasPresentes}).`}
+          {butacasOcupadasPresentes >= CAPACIDAD * 0.9 && (
+            <div className={`p-3 rounded-xl text-sm font-bold border ${butacasOcupadasPresentes >= CAPACIDAD ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-amber-50 text-amber-800 border-amber-200'}`}>
+              {butacasOcupadasPresentes >= CAPACIDAD
+                ? `⛔ Sala completa: ${butacasOcupadasPresentes} presentes de ${CAPACIDAD} butacas.`
+                : `⚠️ Aforo casi completo: ${butacasOcupadasPresentes} presentes de ${CAPACIDAD} (quedan ${CAPACIDAD - butacasOcupadasPresentes}).`}
             </div>
           )}
 
           <div className="p-5 bg-slate-900 text-white rounded-2xl flex flex-wrap items-center justify-between gap-4">
             <div>
               <p className="text-xs font-bold uppercase tracking-wider text-rose-300">Butacas ocupadas en la sala</p>
-              <p className="text-4xl font-black mt-0.5">{butacasOcupadasPresentes} <span className="text-lg font-normal opacity-70">/ {CAPACIDAD_MAXIMA} Máx</span></p>
+              <p className="text-4xl font-black mt-0.5">{butacasOcupadasPresentes} <span className="text-lg font-normal opacity-70">/ {CAPACIDAD} Máx</span></p>
               <p className="text-[11px] text-slate-300 mt-1">Personas presentes en el acto: <b>{totalAsistentesPresentes}</b>{docentesSinButacaPresentes > 0 ? ` (incluye ${docentesSinButacaPresentes} docente(s) sin butaca)` : ''}</p>
             </div>
             <div className="w-full sm:w-72 bg-slate-800 p-3 rounded-xl border border-slate-700 space-y-1.5">
               <div className="flex justify-between text-xs font-semibold">
                 <span>Ocupación del Salón</span>
-                <span>{Math.round((butacasOcupadasPresentes / CAPACIDAD_MAXIMA) * 100)}%</span>
+                <span>{Math.round((butacasOcupadasPresentes / CAPACIDAD) * 100)}%</span>
               </div>
               <div className="w-full bg-slate-700 h-2.5 rounded-full overflow-hidden">
-                <div className={`h-full transition-all ${butacasOcupadasPresentes >= CAPACIDAD_MAXIMA ? 'bg-rose-500' : butacasOcupadasPresentes >= CAPACIDAD_MAXIMA * 0.9 ? 'bg-amber-400' : 'bg-emerald-500'}`} style={{ width: `${Math.min(100, Math.round((butacasOcupadasPresentes / CAPACIDAD_MAXIMA) * 100))}%` }} />
+                <div className={`h-full transition-all ${butacasOcupadasPresentes >= CAPACIDAD ? 'bg-rose-500' : butacasOcupadasPresentes >= CAPACIDAD * 0.9 ? 'bg-amber-400' : 'bg-emerald-500'}`} style={{ width: `${Math.min(100, Math.round((butacasOcupadasPresentes / CAPACIDAD) * 100))}%` }} />
               </div>
             </div>
           </div>
@@ -3597,100 +3768,210 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
       )}
 
       {/* CONFIGURACIÓN DE AFORO Y SALA */}
-      {tab === 'aforo' && (
-        <div className="bg-white rounded-2xl border p-5 space-y-6">
+      {tab === 'aforo' && (() => {
+        const esAdmin = perfilStaff?.rol === 'admin';
+        // Qué butaca le toca a cada sector (el primero que la abarca) y superposiciones
+        const asignacion = {};
+        const superpuestas = new Set();
+        salaEdit.sectores.forEach((s, k) => {
+          butacasDeSector(s).forEach((b) => { if (asignacion[b] !== undefined) superpuestas.add(b); else asignacion[b] = k; });
+        });
+        const butacasPorGrupo = {};
+        Object.values(asignacion).forEach((k) => { const g = salaEdit.sectores[k].grupo; butacasPorGrupo[g] = (butacasPorGrupo[g] || 0) + 1; });
+        // Lo que necesita cada grupo hoy
+        const ctx = { config, invitados, solicitudes };
+        const activos = egresados.filter((e) => e.activo !== false);
+        const famDe = (t) => activos.filter((e) => tipoOrientacion(e) === t).reduce((acc, e) => acc + plazasFamiliaresDe(e, ctx), 0);
+        const famSinOri = activos.filter((e) => !tipoOrientacion(e)).reduce((acc, e) => acc + plazasFamiliaresDe(e, ctx), 0);
+        const idsActivos = new Set(activos.map((e) => e.id));
+        const necesita = {
+          egresados: totalEgresados,
+          familias_cn: famDe('cn'),
+          familias_edu: famDe('edu'),
+          familias: famDe('cn') + famDe('edu') + famSinOri,
+          docentes: totalDocentesConButaca,
+          vip: totalEspeciales,
+          movilidad: invitados.filter((i) => tieneMovilidad(i) && idsActivos.has(i.egresado_id)).length + especiales.filter((v) => v.activo !== false && tieneMovilidad(v)).length,
+        };
+        const totalAsignadas = Object.keys(asignacion).length;
+        const filasOpciones = FILAS_TEATRO.map((f) => f.fila);
+        const capNum = Number(salaEdit.capacidad) || 0;
+        return (
+        <div className="bg-white rounded-2xl border p-4 sm:p-5 space-y-6">
           <div className="border-b pb-3">
-            <h3 className="font-bold text-base text-slate-900">⚙️ Configuración de Aforo y Distribución de Butacas</h3>
-            <p className="text-xs text-slate-500">Parámetros generales de la sala para el Acto de Colación 2026.</p>
+            <h3 className="font-bold text-base text-slate-900">⚙️ Aforo y Sala — Teatro CCC</h3>
+            <p className="text-xs text-slate-500">Capacidad, cupo de invitados y sectores de la sala (por grupo, sin número de butaca).</p>
           </div>
 
-          <form onSubmit={guardarConfiguracionAforo} className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-2xl">
+          {/* Capacidad */}
+          <div className="space-y-2">
+            <h4 className="font-bold text-sm text-slate-800 uppercase tracking-wide">Capacidad de la sala</h4>
+            <p className="text-xs text-slate-600">
+              Según el croquis hay <b>{BUTACAS_CROQUIS}</b> butacas (<b>{BUTACAS_CROQUIS - BUTACAS_CORTESIA}</b> sin la fila de cortesía F1). El sistema usa hoy <b>{CAPACIDAD}</b>{salaConfigDe(config).capacidad === null ? ' (valor por defecto, todavía no se guardó ninguno)' : ''}.
+            </p>
+            {esAdmin ? (
+              <div className="flex flex-wrap items-end gap-2">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Capacidad a usar</label>
+                  <input type="number" min="50" max="2000" value={salaEdit.capacidad} onChange={(e) => editarSala({ capacidad: e.target.value })} className="w-32 px-3 py-2 border rounded-xl text-sm bg-white" />
+                </div>
+                <button type="button" onClick={() => editarSala({ capacidad: BUTACAS_CROQUIS })} className="px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-bold cursor-pointer">Usar {BUTACAS_CROQUIS} (todo el croquis)</button>
+                <button type="button" onClick={() => editarSala({ capacidad: BUTACAS_CROQUIS - BUTACAS_CORTESIA })} className="px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-bold cursor-pointer">Usar {BUTACAS_CROQUIS - BUTACAS_CORTESIA} (sin fila de cortesía)</button>
+              </div>
+            ) : <p className="text-[11px] text-slate-400">Solo el administrador puede cambiar la capacidad y los sectores.</p>}
+          </div>
+
+          {/* Cupo base */}
+          <form onSubmit={guardarConfiguracionAforo} className="flex flex-wrap items-end gap-3 pt-4 border-t">
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Cupo Base por Egresado</label>
-              <input
-                type="number"
-                min="0"
-                max="10"
-                value={cupoBaseEdit}
-                onChange={(e) => setCupoBaseEdit(e.target.value)}
-                className="w-full px-3 py-2 border rounded-xl text-sm bg-white"
-                required
-              />
+              <label className="block text-xs font-bold text-slate-700 mb-1">Cupo base por egresado (para egresados nuevos)</label>
+              <input type="number" min="0" max="10" value={cupoBaseEdit} onChange={(e) => setCupoBaseEdit(e.target.value)} className="w-32 px-3 py-2 border rounded-xl text-sm bg-white" required />
             </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Filas en el Salón</label>
-              <input
-                type="number"
-                min="5"
-                max="50"
-                value={filasEdit}
-                onChange={(e) => setFilasEdit(e.target.value)}
-                className="w-full px-3 py-2 border rounded-xl text-sm bg-white"
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Butacas por Fila</label>
-              <input
-                type="number"
-                min="10"
-                max="100"
-                value={butacasFilaEdit}
-                onChange={(e) => setButacasFilaEdit(e.target.value)}
-                className="w-full px-3 py-2 border rounded-xl text-sm bg-white"
-                required
-              />
-            </div>
-            <div className="sm:col-span-3 pt-2">
-              <button
-                type="submit"
-                disabled={guardandoConfig}
-                className="px-5 py-2.5 bg-indigo-700 hover:bg-indigo-800 text-white rounded-xl text-xs font-bold shadow cursor-pointer"
-              >
-                {guardandoConfig ? 'Guardando...' : 'Guardar Configuración de Sala'}
-              </button>
-            </div>
+            <button type="submit" disabled={guardandoConfig} className="px-4 py-2.5 bg-indigo-700 hover:bg-indigo-800 text-white rounded-xl text-xs font-bold shadow cursor-pointer">{guardandoConfig ? 'Guardando...' : 'Guardar cupo base'}</button>
           </form>
 
-          {perfilStaff?.rol === 'admin' && (
-            <div className="pt-4 border-t">{renderSimuladorCupo()}</div>
-          )}
+          {esAdmin && <div className="pt-4 border-t">{renderSimuladorCupo()}</div>}
 
-          {/* Mapa Visual Interactivo de la Sala */}
+          {/* Sectores */}
           <div className="space-y-3 pt-4 border-t">
-            <div className="flex justify-between items-center">
-              <h4 className="font-bold text-sm text-slate-800 uppercase tracking-wide">Mapa Visual de Butacas ({totalFilas} filas x {butacasPorFila} asientos)</h4>
-              <div className="flex items-center gap-3 text-xs">
-                <span className="flex items-center gap-1"><span className="w-3 h-3 bg-emerald-500 rounded-sm inline-block" /> Ocupado / Presente</span>
-                <span className="flex items-center gap-1"><span className="w-3 h-3 bg-slate-200 rounded-sm inline-block" /> Libre</span>
+            <div className="flex flex-wrap justify-between items-center gap-2">
+              <div>
+                <h4 className="font-bold text-sm text-slate-800 uppercase tracking-wide">Sectores de la sala</h4>
+                <p className="text-xs text-slate-500">Cada sector es un rango de filas y butacas reservado para un grupo. La ubicación aparece en los pases, en Puerta y en el Resumen Papel. Si un grupo no tiene sector, no se muestra ubicación.</p>
               </div>
+              {esAdmin && <button type="button" onClick={agregarSector} className="px-3.5 py-2 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"><Plus className="w-4 h-4" /> Agregar sector</button>}
             </div>
 
-            <div className="bg-slate-900 text-white p-4 rounded-xl text-center font-bold text-xs tracking-widest uppercase mb-2">
-              — Escenario / Autoridades —
-            </div>
-
-            <div className="bg-slate-50 border p-4 rounded-xl overflow-x-auto max-h-96">
-              <div className="inline-grid gap-1.5" style={{ gridTemplateColumns: `repeat(${butacasPorFila}, minmax(18px, 1fr))` }}>
-                {Array.from({ length: totalFilas * butacasPorFila }).map((_, idx) => {
-                  const ocupado = idx < totalOcupado;
-                  return (
-                    <div
-                      key={idx}
-                      title={`Butaca #${idx + 1} (${ocupado ? 'Ocupada' : 'Libre'})`}
-                      className={`w-5 h-5 rounded-xs transition-colors text-[9px] flex items-center justify-center font-mono ${
-                        ocupado ? 'bg-emerald-500 text-white font-bold shadow-xs' : 'bg-slate-200 text-slate-500 hover:bg-slate-300'
-                      }`}
-                    >
-                      {idx + 1}
+            {salaEdit.sectores.length === 0 && <p className="text-xs text-slate-400 italic">Todavía no hay sectores. {esAdmin ? 'Tocá "Agregar sector".' : ''}</p>}
+            <div className="space-y-2">
+              {salaEdit.sectores.map((s, k) => {
+                const info = grupoSalaInfo(s.grupo);
+                const cant = butacasDeSector(s).length;
+                return (
+                  <div key={s.id || k} className="p-3 rounded-xl border-2 bg-slate-50 space-y-2" style={{ borderColor: info.color }}>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="w-3 h-3 rounded-sm inline-block shrink-0" style={{ backgroundColor: info.color }} />
+                      <span className="text-xs font-bold text-slate-800">Sector #{k + 1}</span>
+                      <span className="text-xs text-slate-500">{describirSector(s)} · <b>{cant}</b> butacas</span>
+                      {esAdmin && <button type="button" onClick={() => quitarSector(k)} className="ml-auto text-rose-600 hover:text-rose-800 p-1 cursor-pointer" title="Quitar sector"><Trash2 className="w-4 h-4" /></button>}
                     </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-6 gap-2">
+                      <input type="text" disabled={!esAdmin} placeholder="Nombre (opcional, ej: Platea baja)" value={s.nombre || ''} onChange={(e) => editarSector(k, { nombre: e.target.value })} className="col-span-2 px-2.5 py-1.5 border rounded-lg text-xs bg-white" />
+                      <select disabled={!esAdmin} value={s.grupo} onChange={(e) => editarSector(k, { grupo: e.target.value })} className="col-span-2 px-2 py-1.5 border rounded-lg text-xs bg-white font-semibold">
+                        {GRUPOS_SALA.map((g) => <option key={g.valor} value={g.valor}>{g.etiqueta}</option>)}
+                      </select>
+                      <label className="text-[11px] font-bold text-slate-600">Filas
+                        <span className="flex gap-1 mt-0.5">
+                          <select disabled={!esAdmin} value={s.filaDesde} onChange={(e) => editarSector(k, { filaDesde: e.target.value })} className="px-1.5 py-1 border rounded-lg text-xs bg-white">{filasOpciones.map((f) => <option key={f}>{f}</option>)}</select>
+                          <select disabled={!esAdmin} value={s.filaHasta} onChange={(e) => editarSector(k, { filaHasta: e.target.value })} className="px-1.5 py-1 border rounded-lg text-xs bg-white">{filasOpciones.map((f) => <option key={f}>{f}</option>)}</select>
+                        </span>
+                      </label>
+                      <label className="text-[11px] font-bold text-slate-600">Butacas
+                        <span className="flex gap-1 mt-0.5">
+                          <input disabled={!esAdmin} type="number" min="1" max="26" value={s.butacaDesde} onChange={(e) => editarSector(k, { butacaDesde: e.target.value })} className="w-14 px-1.5 py-1 border rounded-lg text-xs bg-white" />
+                          <input disabled={!esAdmin} type="number" min="1" max="26" value={s.butacaHasta} onChange={(e) => editarSector(k, { butacaHasta: e.target.value })} className="w-14 px-1.5 py-1 border rounded-lg text-xs bg-white" />
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {superpuestas.size > 0 && <p className="text-xs font-bold text-amber-700">⚠️ Hay {superpuestas.size} butaca(s) en más de un sector: cuentan para el primero de la lista.</p>}
+            {esAdmin && (
+              <div className="flex flex-wrap gap-2">
+                <button type="button" disabled={guardandoSala || !salaCambiada} onClick={guardarSala} className="px-4 py-2.5 bg-indigo-700 hover:bg-indigo-800 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow cursor-pointer">{guardandoSala ? 'Guardando...' : 'Guardar capacidad y sectores'}</button>
+                {salaCambiada && <button type="button" onClick={descartarCambiosSala} className="px-4 py-2.5 bg-white border rounded-xl text-xs font-bold cursor-pointer">Descartar cambios</button>}
+                {salaCambiada && <span className="text-xs font-bold text-amber-700 self-center">Hay cambios sin guardar</span>}
+              </div>
+            )}
+          </div>
+
+          {/* Balance por grupo */}
+          <div className="space-y-2 pt-4 border-t">
+            <h4 className="font-bold text-sm text-slate-800 uppercase tracking-wide">Butacas asignadas vs. necesarias</h4>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs border-collapse">
+                <thead><tr className="bg-slate-100"><th className="p-2 border text-left">Grupo</th><th className="p-2 border">Necesita hoy</th><th className="p-2 border">Butacas asignadas</th><th className="p-2 border">Diferencia</th></tr></thead>
+                <tbody>
+                  {GRUPOS_SALA.filter((g) => g.valor !== 'reservado').map((g) => {
+                    const asig = butacasPorGrupo[g.valor] || 0;
+                    const nec = necesita[g.valor] || 0;
+                    const usado = asig > 0 || ['egresados', 'docentes', 'vip', 'familias_cn', 'familias_edu'].includes(g.valor);
+                    if (!usado) return null;
+                    const dif = asig - nec;
+                    return (
+                      <tr key={g.valor}>
+                        <td className="p-2 border font-semibold"><span className="inline-block w-2.5 h-2.5 rounded-sm mr-1.5" style={{ backgroundColor: g.color }} />{g.etiqueta}</td>
+                        <td className="p-2 border text-center">{nec}</td>
+                        <td className="p-2 border text-center">{asig || '—'}</td>
+                        <td className={`p-2 border text-center font-bold ${asig === 0 ? 'text-slate-400' : dif < 0 ? 'text-rose-700' : 'text-emerald-700'}`}>{asig === 0 ? 'sin sector' : dif < 0 ? `faltan ${-dif}` : `sobran ${dif}`}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-[11px] text-slate-500">
+              Butacas en sectores: <b>{totalAsignadas}</b> · sin asignar: <b>{BUTACAS_CROQUIS - totalAsignadas}</b> · ocupación prevista: <b>{totalOcupado}</b> de <b>{capNum || CAPACIDAD}</b>.
+              {' '}"Familias" se calcula con la etapa actual (en Cierre Parcial cuenta los invitados cargados). Las personas con movilidad reducida también están contadas en su familia.
+            </p>
+          </div>
+
+          {/* Mapa */}
+          <div className="space-y-2 pt-4 border-t">
+            <h4 className="font-bold text-sm text-slate-800 uppercase tracking-wide">Mapa de la sala</h4>
+            <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
+              {GRUPOS_SALA.filter((g) => salaEdit.sectores.some((s) => s.grupo === g.valor)).map((g) => (
+                <span key={g.valor} className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm inline-block" style={{ backgroundColor: g.color }} /> {g.etiqueta}</span>
+              ))}
+              <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm inline-block bg-slate-200 border border-slate-300" /> Sin asignar</span>
+              <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm inline-block bg-slate-200 border-2 border-lime-500" /> Fila de cortesía</span>
+            </div>
+            <div className="bg-slate-50 border p-3 rounded-xl overflow-x-auto">
+              <div className="min-w-max mx-auto space-y-1">
+                <div className="bg-[#2D3B1F] text-white py-1.5 rounded-full text-center font-bold text-[11px] tracking-widest uppercase">Pantalla / Escenario</div>
+                {FILAS_TEATRO.map((f) => {
+                  const maximo = f.bloque === 'trasero' ? 26 : 25;
+                  const celdas = [];
+                  for (let n = maximo; n >= 1; n--) {
+                    const clave = `${f.fila}-${n}`;
+                    if (!existeButaca(f, n)) {
+                      celdas.push(<span key={clave} className="w-4 h-4 inline-block" />);
+                    } else {
+                      const k = asignacion[clave];
+                      const sec = k !== undefined ? salaEdit.sectores[k] : null;
+                      const col = sec ? grupoSalaInfo(sec.grupo).color : null;
+                      celdas.push(
+                        <span key={clave} title={`${f.fila} · butaca ${n}${sec ? ` · ${sec.nombre || grupoSalaInfo(sec.grupo).etiqueta}` : ''}${superpuestas.has(clave) ? ' · ¡en dos sectores!' : ''}`}
+                          className={`w-4 h-4 inline-block rounded-[3px] ${col ? '' : 'bg-slate-200'} ${f.cortesia ? 'border-2 border-lime-500' : 'border border-black/10'} ${superpuestas.has(clave) ? 'ring-2 ring-rose-500' : ''}`}
+                          style={col ? { backgroundColor: col } : undefined} />
+                      );
+                    }
+                    if (f.bloque === 'trasero' && (n === 22 || n === 6)) celdas.push(<span key={`${clave}-pasillo`} className="w-3 h-4 inline-block" />);
+                  }
+                  return (
+                    <React.Fragment key={f.fila}>
+                      {f.fila === 'F12' && <div className="h-3" />}
+                      {(f.fila === 'F1' || f.fila === 'F12') && (
+                        <div className="text-[10px] font-bold text-lime-700 uppercase">← {f.fila === 'F1' ? 'Acceso de arriba (bloque F1–F11)' : 'Acceso de abajo (bloque F12–F21)'}</div>
+                      )}
+                      <div className="flex items-center gap-[2px]">
+                        <span className="w-8 text-[10px] font-bold text-slate-500 shrink-0">{f.fila}</span>
+                        <div className="flex gap-[2px] justify-center flex-1">{celdas}</div>
+                        <span className="w-8 text-[10px] font-bold text-slate-500 text-right shrink-0">{butacasDeFila(f)}</span>
+                      </div>
+                    </React.Fragment>
                   );
                 })}
+                <div className="text-[10px] font-bold text-[#6B1D2F] uppercase text-center pt-1">↑ Ingreso de egresados por detrás de la última fila</div>
               </div>
             </div>
+            <p className="text-[11px] text-slate-500">Butacas numeradas de izquierda (25 o 26) a derecha (1) mirando al escenario. El número de la derecha es la cantidad de butacas de cada fila. Pasá el mouse por una butaca para ver su fila, número y sector.</p>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {tab === 'usuarios' && perfilStaff?.rol === 'admin' && (
         <div className="bg-white rounded-2xl border p-5 space-y-5">
@@ -3872,6 +4153,22 @@ function ReporteResumenPapel({ egresados, invitados, docentes, especiales, confi
           <li><b>Familiares de Educación (TT):</b> {ACCESO_TEXTO.arriba.toLowerCase()}.</li>
           <li><b>Docentes y VIP:</b> {ACCESO_TEXTO.abajo.toLowerCase()}.</li>
         </ul>
+        {salaConfigDe(config).sectores.length > 0 && (
+          <>
+            <h3 className="font-bold text-sm text-[#6B1D2F] uppercase tracking-wide pt-2">Ubicación en la sala</h3>
+            <ul className="list-disc pl-5 space-y-0.5">
+              {[
+                ['Egresados', ubicacionPara({ tipo: 'egresado' }, config)],
+                ['Familias de Ciencias Naturales', ubicacionPara({ tipo: 'invitado', egr: { orientacion: 'CIENCIAS NATURALES' } }, config)],
+                ['Familias de Educación', ubicacionPara({ tipo: 'invitado', egr: { orientacion: 'EDUCACION' } }, config)],
+                ['Docentes', ubicacionPara({ tipo: 'docente' }, config)],
+                ['VIP / Autoridades', ubicacionPara({ tipo: 'vip' }, config)],
+                ['Movilidad reducida', textoSectores(salaConfigDe(config).sectores.filter((s) => s.grupo === 'movilidad'))],
+                ['Reservado / No usar', textoSectores(salaConfigDe(config).sectores.filter((s) => s.grupo === 'reservado'))],
+              ].filter(([, t]) => t).map(([g, t]) => <li key={g}><b>{g}:</b> {t}</li>)}
+            </ul>
+          </>
+        )}
       </div>
 
       <div className="space-y-3">
