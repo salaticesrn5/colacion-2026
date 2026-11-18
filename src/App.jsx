@@ -135,6 +135,25 @@ const descargarCSV = (nombreArchivo, filas) => {
   URL.revokeObjectURL(url);
 };
 
+// ¿El egresado tiene una solicitud de butacas extra aprobada (total o parcial)?
+const tieneExtraAprobada = (egr, solicitudes) => (solicitudes || []).some((s) => s.egresado_id === egr.id && String(s.estado || '').toLowerCase() === 'aprobada');
+
+// ¿Puede el egresado cargar o modificar invitados en la etapa actual?
+const puedeEditarInvitados = (egr, { config, solicitudes }) => {
+  const etapa = config?.estado_etapa || 'abierta';
+  if (etapa === 'abierta') return true;
+  if (etapa === 'cierre_parcial') return tieneExtraAprobada(egr, solicitudes);
+  return false;
+};
+
+// Butacas familiares que ocupa un egresado activo según la etapa
+const plazasFamiliaresDe = (egr, { config, invitados, solicitudes }) => {
+  const cupo = cupoDe(egr, config);
+  if (puedeEditarInvitados(egr, { config, solicitudes })) return cupo;
+  const cargados = (invitados || []).filter((i) => i.egresado_id === egr.id).length;
+  return Math.min(cupo, cargados);
+};
+
 export default function App() {
   const [vista, setVista] = useState('portal'); // 'portal', 'login', 'puerta', 'admin', 'reporte_papel'
   const [session, setSession] = useState(null);
@@ -314,12 +333,15 @@ export default function App() {
   const totalDocentesConButaca = docentesActivos.filter((d) => d.ocupa_butaca !== false).length; // los que usan butaca
   const totalDocentesSinButaca = totalDocentes - totalDocentesConButaca;
   const totalEspeciales = especiales.filter((v) => v.activo !== false).length;
-  const totalCuposFamiliares = egresadosActivos.reduce((acc, e) => acc + (Number(e.cupo_asignado) || 0), 0);
+  // Plazas familiares: en etapa Abierta cuenta el cupo completo de cada egresado.
+  // Desde el Cierre Parcial, a quien NO tiene plazas extra aprobadas solo se le cuentan los invitados cargados
+  // (el resto del cupo queda libre para reasignar). En el Cierre Definitivo, a todos se les cuentan los cargados.
+  const totalCuposFamiliares = egresadosActivos.reduce((acc, e) => acc + plazasFamiliaresDe(e, { config, invitados, solicitudes }), 0);
   const totalOcupado = totalEgresados + totalDocentesConButaca + totalEspeciales + totalCuposFamiliares;
   const vacantesLibres = CAPACIDAD_MAXIMA - totalOcupado;
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans relative pb-16">
+    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans relative pb-24 overflow-x-hidden">
       {toast && (
         <div className={`fixed bottom-5 right-5 z-50 flex items-center gap-3 px-5 py-3.5 rounded-xl shadow-xl text-white text-sm font-medium transition-all ${
           toast.type === 'error' ? 'bg-rose-600' : toast.type === 'warning' ? 'bg-amber-600' : 'bg-emerald-600'
@@ -331,56 +353,48 @@ export default function App() {
 
       {/* Encabezado Institucional ESRN N° 005 */}
       <header className="bg-[#6B1D2F] text-white shadow-md sticky top-0 z-40 print:hidden">
-        <div className="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3 cursor-pointer" onClick={() => setVista('portal')}>
-            <div className="w-9 h-9 bg-white rounded-full flex items-center justify-center font-bold text-[#6B1D2F] text-sm shadow">
-              05
-            </div>
-            <div>
-              <h1 className="font-bold text-base sm:text-lg leading-tight">ESRN N° 005 — Cipolletti</h1>
-              <p className="text-xs text-rose-200">Acto de Colación 2026 · Aforo: {CAPACIDAD_MAXIMA} butacas</p>
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 py-2.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+          <div className="flex items-center gap-2.5 cursor-pointer min-w-0" onClick={() => setVista('portal')}>
+            {config.escudo ? (
+              <img src={config.escudo} alt="Escudo" className="w-9 h-9 bg-white rounded-full object-contain p-0.5 shadow shrink-0" />
+            ) : (
+              <div className="w-9 h-9 bg-white rounded-full flex items-center justify-center font-bold text-[#6B1D2F] text-sm shadow shrink-0">05</div>
+            )}
+            <div className="min-w-0">
+              <h1 className="font-bold text-sm sm:text-lg leading-tight truncate">ESRN N° 005 — Cipolletti</h1>
+              <p className="text-[11px] sm:text-xs text-rose-200 truncate">Acto de Colación 2026</p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <nav className="flex flex-wrap items-center justify-end gap-1.5 max-w-full">
             <button
               onClick={() => setVista('portal')}
-              className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition ${
+              className={`px-2.5 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition ${
                 vista === 'portal' ? 'bg-white text-[#6B1D2F] font-bold' : 'text-rose-200 hover:text-white'
               }`}
             >
-              Portal Principal
+              Portal
             </button>
 
             {session && (
               <>
                 <button
                   onClick={() => setVista('puerta')}
-                  className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition ${
+                  className={`px-2.5 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition ${
                     vista === 'puerta' ? 'bg-white text-[#6B1D2F] font-bold' : 'text-rose-200 hover:text-white'
                   }`}
                 >
                   Puerta
                 </button>
-                {(perfilStaff?.rol === 'admin' || perfilStaff?.rol === 'coordinador') && (
-                  <>
-                    <button
-                      onClick={() => setVista('admin')}
-                      className={`px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-bold shadow transition ${
-                        vista === 'admin' ? 'bg-white text-[#6B1D2F]' : 'bg-amber-500 hover:bg-amber-600 text-white'
-                      }`}
-                    >
-                      Administración
-                    </button>
-                    <button
-                      onClick={() => setVista('reporte_papel')}
-                      className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition flex items-center gap-1 ${
-                        vista === 'reporte_papel' ? 'bg-white text-[#6B1D2F]' : 'bg-indigo-700 hover:bg-indigo-800 text-white'
-                      }`}
-                    >
-                      <FileText className="w-4 h-4" /> Resumen Papel
-                    </button>
-                  </>
+                {puedeAdministrar && (
+                  <button
+                    onClick={() => setVista('admin')}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs sm:text-sm font-bold shadow transition ${
+                      vista === 'admin' || vista === 'reporte_papel' ? 'bg-white text-[#6B1D2F]' : 'bg-amber-500 hover:bg-amber-600 text-white'
+                    }`}
+                  >
+                    Administración
+                  </button>
                 )}
               </>
             )}
@@ -388,7 +402,7 @@ export default function App() {
             {!session ? (
               <button
                 onClick={() => setVista('login')}
-                className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition ${
+                className={`px-2.5 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition ${
                   vista === 'login' ? 'bg-amber-500 text-white font-bold' : 'text-rose-200 hover:text-white'
                 }`}
               >
@@ -397,18 +411,18 @@ export default function App() {
             ) : (
               <button
                 onClick={handleLogout}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-700 hover:bg-rose-800 text-white transition ml-2"
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-rose-700 hover:bg-rose-800 text-white transition"
                 title="Cerrar Sesión"
               >
                 <LogOut className="w-3.5 h-3.5" />
                 Salir
               </button>
             )}
-          </div>
+          </nav>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 py-6">
+      <main className="max-w-7xl mx-auto px-3 sm:px-4 py-5 sm:py-6">
         {(loadingAuth || (session && !perfilStaff)) ? (
           <div className="flex justify-center items-center py-24 text-slate-500 gap-2">
             <RefreshCw className="w-5 h-5 animate-spin" />
@@ -426,11 +440,12 @@ export default function App() {
             docentes={docentes} especiales={especiales} solicitudes={solicitudes} usuariosSistema={usuariosSistema} logsSistema={logsSistema}
             totalEgresados={totalEgresados} totalDocentes={totalDocentes} totalDocentesConButaca={totalDocentesConButaca} totalDocentesSinButaca={totalDocentesSinButaca} totalEspeciales={totalEspeciales}
             totalCuposFamiliares={totalCuposFamiliares} totalOcupado={totalOcupado} vacantesLibres={vacantesLibres} recargar={cargarDatosGlobales} notify={notify}
+            abrirResumenPapel={() => setVista('reporte_papel')}
             reiniciarAsistenciasGeneral={reiniciarAsistenciasGeneral}
             borrarInvitadosEgresados={borrarInvitadosEgresados} registrarLog={registrarLog}
           />
         ) : vista === 'reporte_papel' && session && puedeAdministrar ? (
-          <ReporteResumenPapel egresados={egresados} invitados={invitados} docentes={docentes} especiales={especiales} />
+          <ReporteResumenPapel egresados={egresados} invitados={invitados} docentes={docentes} especiales={especiales} config={config} volver={() => setVista('admin')} />
         ) : (
           <PortalPrincipalDNI vipPortalActivo={vipPortalActivo} whatsappActivo={whatsappActivo} config={config} egresados={egresados} invitados={invitados} docentes={docentes} especiales={especiales} solicitudes={solicitudes} recargar={cargarDatosGlobales} notify={notify} />
         )}
@@ -441,7 +456,7 @@ export default function App() {
         href="https://wa.me/5492996326617?text=Hola,%20necesito%20ayuda%20con%20el%20sistema%20de%20acceso%20de%20la%20Colación%20ESRN%20N°%20005."
         target="_blank"
         rel="noopener noreferrer"
-        className="fixed bottom-6 right-6 z-50 bg-green-600 hover:bg-green-700 text-white p-3.5 rounded-full shadow-2xl flex items-center justify-center transition-transform hover:scale-110 cursor-pointer print:hidden"
+        className="fixed bottom-4 right-4 sm:bottom-6 sm:right-6 z-50 bg-green-600 hover:bg-green-700 text-white p-3.5 rounded-full shadow-2xl flex items-center justify-center transition-transform hover:scale-110 cursor-pointer print:hidden"
         title="¿Necesitas ayuda? Escribinos por WhatsApp"
       >
         <Phone className="w-6 h-6" />
@@ -521,6 +536,7 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, egresados
   const [cantExtra, setCantExtra] = useState(1);
   const [obsExtra, setObsExtra] = useState('');
   const [enviandoSol, setEnviandoSol] = useState(false);
+  const [avisoSolicitud, setAvisoSolicitud] = useState(false);
   const qrRef = useRef(null);
 
   useEffect(() => {
@@ -531,11 +547,13 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, egresados
         prepararFilasInvitados(actualizado);
       }
     }
-  }, [egresados, invitados]);
+  }, [egresados, invitados, solicitudes, config.estado_etapa]);
 
   const prepararFilasInvitados = (egr) => {
     const misInv = invitados.filter((i) => i.egresado_id === egr.id);
-    const cupo = cupoDe(egr, config);
+    // Fuera de la etapa de carga solo se muestran los invitados ya cargados (los cupos sin usar quedan liberados)
+    const habilitado = puedeEditarInvitados(egr, { config, solicitudes });
+    const cupo = habilitado ? Math.max(cupoDe(egr, config), misInv.length) : misInv.length;
     const arr = [];
     for (let idx = 0; idx < cupo; idx++) {
       if (misInv[idx]) {
@@ -544,11 +562,12 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, egresados
           nombre_completo: misInv[idx].nombre_completo || '', 
           dni: misInv[idx].dni || '', 
           numero_entrada: misInv[idx].numero_entrada || '', 
-          es_grupal: misInv[idx].es_grupal !== undefined ? misInv[idx].es_grupal : true, 
+          es_grupal: esGrupal(misInv[idx]), 
+          movilidad_reducida: tieneMovilidad(misInv[idx]),
           guardado: true 
         });
       } else {
-        arr.push({ id: null, nombre_completo: '', dni: '', numero_entrada: '', es_grupal: true, guardado: false });
+        arr.push({ id: null, nombre_completo: '', dni: '', numero_entrada: '', es_grupal: false, movilidad_reducida: false, guardado: false });
       }
     }
     setFilasInvitados(arr);
@@ -606,9 +625,11 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, egresados
     return obj.nombre_completo || obj.nombre || obj.docente || obj.apellido_y_nombre || obj.profesor || obj.name || '';
   };
 
-  const descargarTarjeta1080x1920 = (nombreQR, subtituloQR, textoRolQR, valorQR) => descargarTarjetaQR(nombreQR, subtituloQR, textoRolQR, valorQR || valorQRPrincipal);
-
   const guardarInvitados = async () => {
+    if (!puedeEditarInvitados(datosPersona, { config, solicitudes })) {
+      notify('La carga de invitados está cerrada. Si necesitás un cambio, comunicate con la escuela.', 'error');
+      return;
+    }
     if (whatsappActivo && (!celular || celular.trim().length < 6)) {
       notify('El número de celular/WhatsApp es obligatorio para continuar.', 'error');
       return;
@@ -651,7 +672,8 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, egresados
             verificar(await supabase.from('invitados').update({
               nombre_completo: nombreLimpio.toUpperCase(),
               dni: dniLimpio,
-              es_grupal: fila.es_grupal
+              es_grupal: fila.es_grupal === true,
+              movilidad_reducida: fila.movilidad_reducida === true
             }).eq('id', fila.id));
           } else {
             const numEntrada = `ENT-${datosPersona.dni.slice(-4)}-${i + 1}-${Math.floor(100 + Math.random() * 900)}`;
@@ -660,7 +682,8 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, egresados
               nombre_completo: nombreLimpio.toUpperCase(),
               dni: dniLimpio,
               numero_entrada: numEntrada,
-              es_grupal: fila.es_grupal,
+              es_grupal: fila.es_grupal === true,
+              movilidad_reducida: fila.movilidad_reducida === true,
               asistio: false
             }));
           }
@@ -674,7 +697,9 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, egresados
     } catch (err) {
       console.error(err);
       const m = String(err?.message || 'error desconocido');
-      const pista = /duplicate key|unique/i.test(m)
+      const pista = /movilidad_reducida/i.test(m)
+        ? 'Falta crear la columna "movilidad_reducida" en Supabase (avisale a la escuela). '
+        : /duplicate key|unique/i.test(m)
         ? 'Hay un DNI o un número de entrada que ya existe en la base (un invitado con ese DNI ya está cargado). '
         : /check constraint/i.test(m)
           ? 'Algún dato no cumple las reglas de la base. '
@@ -686,15 +711,38 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, egresados
     }
   };
 
-  const enviarSolicitudExtra = async (e) => {
+  // Paso 1: al apretar "Solicitar" se muestra el aviso (las plazas no están garantizadas)
+  const pedirSolicitudExtra = (e) => {
     e.preventDefault();
+    if (misSolicitudes.length > 0) {
+      notify('Ya enviaste una solicitud de butacas extra. Solo se puede pedir una vez.', 'error');
+      return;
+    }
+    const cel = (celular || datosPersona?.celular || '').trim();
+    if (whatsappActivo && cel.length < 6) {
+      notify('Antes de pedir butacas extra, cargá tu celular / WhatsApp y guardá los datos: por ahí te avisamos si se aprueba.', 'error');
+      return;
+    }
+    setAvisoSolicitud(true);
+  };
+
+  // Paso 2: confirmado el aviso, se envía (una sola solicitud por egresado)
+  const enviarSolicitudExtra = async () => {
+    setAvisoSolicitud(false);
     setEnviandoSol(true);
     try {
+      const { data: previas, error: errPrev } = await supabase.from('solicitudes_butacas').select('id').eq('egresado_id', datosPersona.id).limit(1);
+      if (errPrev) throw errPrev;
+      if (previas && previas.length > 0) {
+        await recargar();
+        notify('Ya enviaste una solicitud de butacas extra. Solo se puede pedir una vez.', 'error');
+        return;
+      }
       const { error: errSol } = await supabase.from('solicitudes_butacas').insert({
         egresado_id: datosPersona.id,
         egresado_nombre: datosPersona.nombre_completo,
         egresado_dni: datosPersona.dni,
-        egresado_celular: datosPersona.celular || null,
+        egresado_celular: (celular || datosPersona.celular || '').trim() || null,
         cantidad_solicitada: Number(cantExtra),
         observacion: obsExtra.trim(),
         estado: 'pendiente',
@@ -711,7 +759,10 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, egresados
   };
 
   const marcarNoAsistire = async () => {
-    if (!window.confirm('¿Estás seguro de que no asistirás? Esto liberará tu plaza.')) return;
+    const aviso = tipoUsuario === 'egresado'
+      ? '¿Estás seguro de que no asistirás?\n\nSe liberará tu butaca y también las de tus invitados: tus pases y los de tu grupo dejarán de servir para ingresar.'
+      : '¿Estás seguro de que no asistirás? Esto liberará tu plaza.';
+    if (!window.confirm(aviso)) return;
     let tabla = tipoUsuario === 'egresado' ? 'egresados' : tipoUsuario === 'docente' ? 'docentes' : 'invitados_especiales';
     const { error } = await supabase.from(tabla).update({ activo: false }).eq('id', datosPersona.id);
     if (error) { notify('No se pudo registrar: ' + error.message, 'error'); return; }
@@ -722,13 +773,27 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, egresados
   };
 
   const nombreMostrado = obtenerNombreReal(datosPersona);
-  const valorQRPrincipal = datosPersona ? `ESRN005-${tipoUsuario.toUpperCase()}-${datosPersona.dni || dni}-${sinTildes(nombreMostrado)}` : '';
+  const personaPase = datosPersona ? { ...datosPersona, dni: datosPersona.dni || dni, nombre_completo: nombreMostrado } : null;
+  const valorQRPrincipal = !personaPase ? '' : tipoUsuario === 'egresado' ? valorQREgresado(personaPase) : tipoUsuario === 'docente' ? valorQRDocente(personaPase) : valorQRVip(personaPase);
   const textoRolTarjeta = tipoUsuario === 'egresado' ? 'EGRESADO' : tipoUsuario === 'docente' ? 'DOCENTE' : 'INVITADO VIP';
   const misSolicitudes = tipoUsuario === 'egresado' && datosPersona ? solicitudes.filter((s) => s.egresado_id === datosPersona.id) : [];
+  const miSolicitud = misSolicitudes[0] || null;
+  const etapaCarga = config.estado_etapa || 'abierta';
+  const cargaHabilitada = tipoUsuario === 'egresado' && datosPersona ? puedeEditarInvitados(datosPersona, { config, solicitudes }) : false;
+  const misInvitadosGuardados = tipoUsuario === 'egresado' && datosPersona ? invitados.filter((i) => i.egresado_id === datosPersona.id) : [];
+  const miGrupo = misInvitadosGuardados.filter(esGrupal);
+  const hayGuardados = misInvitadosGuardados.length > 0;
+  const descargarMiPase = () => {
+    if (!personaPase) return;
+    if (tipoUsuario === 'egresado') paseEgresado(personaPase, config.escudo);
+    else if (tipoUsuario === 'docente') paseDocente(personaPase, config.escudo);
+    else paseVip(personaPase, config.escudo);
+  };
 
   return (
     <div className="max-w-md mx-auto space-y-4">
       <div className="bg-gradient-to-r from-[#6B1D2F] to-[#8a253c] text-white rounded-xl shadow-md p-5 text-center">
+        {config.escudo && <img src={config.escudo} alt="Escudo institucional" className="w-20 h-20 mx-auto mb-2 bg-white rounded-full object-contain p-1.5 shadow" />}
         <h2 className="text-xl font-bold mb-1">¡Bienvenidos al Acto de Colación 2026! 🎉</h2>
         <p className="text-xs text-rose-100 leading-relaxed">
           Seleccioná tu rol e ingresá tu DNI para consultar tu pase QR institucional.
@@ -755,7 +820,7 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, egresados
             </div>
             {error && <p className="text-sm text-red-600">{error}</p>}
             <button type="submit" className="w-full py-2.5 bg-[#6B1D2F] text-white rounded-lg hover:bg-opacity-90 font-medium shadow">
-              Consultar mi Pase QR
+              Continuar
             </button>
           </form>
         ) : (
@@ -769,13 +834,31 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, egresados
                 </p>
               </div>
 
-              <button type="button" onClick={() => descargarTarjeta1080x1920(nombreMostrado, `DNI: ${datosPersona.dni || dni}`, textoRolTarjeta)} className="w-full py-2.5 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 shadow cursor-pointer">
-                <Download className="w-4 h-4" /> Descargar Mi QR Personal
+              {tipoUsuario === 'egresado' && textoCurso(datosPersona) && (
+                <p className="text-xs font-semibold text-slate-600">{textoCurso(datosPersona)}</p>
+              )}
+              <button type="button" onClick={descargarMiPase} className={`w-full py-2.5 hover:bg-opacity-90 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 shadow cursor-pointer ${tipoUsuario === 'vip' ? 'bg-amber-700' : tipoUsuario === 'docente' ? 'bg-slate-700' : 'bg-[#6B1D2F]'}`}>
+                <Download className="w-4 h-4" /> {tipoUsuario === 'egresado' ? 'Descargar QR de Egresado' : tipoUsuario === 'docente' ? 'Descargar QR de Docente' : 'Descargar QR VIP'}
               </button>
+              <p className="text-[11px] font-bold text-slate-600">📍 {tipoUsuario === 'egresado' ? ACCESO_TEXTO.egresados : ACCESO_TEXTO.abajo}</p>
               {tipoUsuario === 'egresado' && (
-                <p className="text-[11px] text-slate-500 text-center mt-2">Este QR es el <b>pase de todo tu grupo</b>: vos y tus invitados marcados como <b>grupales</b> ingresan juntos con este mismo código. Los invitados <b>individuales</b> tienen su propio QR.</p>
+                <p className="text-[11px] text-slate-500 text-center">Este QR es <b>solo para vos</b>. Tus invitados marcados <b>en grupo</b> entran juntos con el <b>QR del Grupo Familiar</b>, y los <b>individuales</b> con su propio QR.</p>
               )}
             </div>
+
+            {tipoUsuario === 'egresado' && miGrupo.length > 0 && (
+              <div className="p-4 rounded-lg border-2 text-center space-y-2" style={{ borderColor: colorFamiliaDe(datosPersona) }}>
+                <p className="font-bold text-sm" style={{ color: colorFamiliaDe(datosPersona) }}>👨‍👩‍👧 Pase del Grupo Familiar ({miGrupo.length} persona{miGrupo.length === 1 ? '' : 's'})</p>
+                <ul className="text-xs text-slate-700 space-y-0.5">
+                  {miGrupo.map((g) => <li key={g.id}>{g.nombre_completo}{tieneMovilidad(g) ? ' ♿' : ''}</li>)}
+                </ul>
+                <button type="button" onClick={() => paseGrupo(datosPersona, miGrupo, config.escudo)} className="w-full py-2.5 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 shadow cursor-pointer" style={{ backgroundColor: colorFamiliaDe(datosPersona) }}>
+                  <Download className="w-4 h-4" /> Descargar QR del Grupo Familiar
+                </button>
+                <p className="text-[11px] font-bold text-slate-600">📍 {accesoFamiliaDe(datosPersona)}</p>
+                <p className="text-[11px] text-slate-500">Un solo QR para todo el grupo: con escanearlo una vez ingresan todos los que figuran en la lista.</p>
+              </div>
+            )}
 
             <div className="hidden" ref={qrRef}>
               <QRCodeSVG value={valorQRPrincipal} size={300} level="H" includeMargin={true} />
@@ -798,40 +881,40 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, egresados
                 </div>
 
                 <div className="border-2 border-[#6B1D2F] bg-rose-50/40 p-4 rounded-xl space-y-3">
-                  <div className="bg-amber-100 border border-amber-300 p-3 rounded-lg flex justify-between items-center">
-                    <div>
+                  {cargaHabilitada ? (
+                    <div className="bg-amber-100 border border-amber-300 p-3 rounded-lg">
                       <p className="text-xs font-bold text-amber-900">⚠️ Atención: Revise bien sus datos</p>
                       <p className="text-[11px] text-amber-800 mt-0.5">Verifique nombre y DNI antes de guardar. Una vez guardado, asegúrese de revisar la exactitud de la información.</p>
                     </div>
-                    {!editando && (
-                      <button
-                        type="button"
-                        onClick={() => setEditando(true)}
-                        className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold shadow cursor-pointer shrink-0"
-                      >
-                        ✏️ Modificar
-                      </button>
-                    )}
-                  </div>
+                  ) : (
+                    <div className="bg-slate-100 border border-slate-300 p-3 rounded-lg">
+                      <p className="text-xs font-bold text-slate-800">🔒 La carga de invitados está cerrada</p>
+                      <p className="text-[11px] text-slate-600 mt-0.5">Podés descargar los pases de los invitados que ya cargaste. Si necesitás un cambio, comunicate con la escuela.</p>
+                    </div>
+                  )}
 
-                  <h4 className="font-bold text-sm text-[#6B1D2F]">Carga de Invitados ({filasInvitados.length} cupos)</h4>
+                  <h4 className="font-bold text-sm text-[#6B1D2F]">{cargaHabilitada ? `Carga de Invitados (${filasInvitados.length} cupos)` : `Tus invitados (${filasInvitados.length})`}</h4>
+                  {filasInvitados.length === 0 && <p className="text-xs text-slate-500">No cargaste invitados.</p>}
                   {filasInvitados.map((fila, idx) => (
                     <div key={idx} className="p-3 bg-white border rounded-lg space-y-2.5">
                       <div className="flex justify-between items-center">
                         <span className="text-xs font-bold text-[#6B1D2F]">Invitado #{idx + 1}</span>
-                        {fila.guardado && fila.numero_entrada && (
-                          fila.es_grupal ? (
-                            <span className="text-[11px] font-bold text-slate-500 text-right">Entra con tu pase (grupal)</span>
+                        {fila.guardado && fila.numero_entrada && !editando && (() => {
+                          const guardadoInv = misInvitadosGuardados.find((i) => i.id === fila.id);
+                          if (!guardadoInv) return null;
+                          return esGrupal(guardadoInv) ? (
+                            <span className="text-[11px] font-bold text-slate-500 text-right">Entra con el QR del grupo</span>
                           ) : (
                             <button 
                               type="button" 
-                              onClick={() => descargarTarjeta1080x1920(fila.nombre_completo, `Invitado de ${nombreMostrado}`, 'ACCESO INDIVIDUAL', fila.numero_entrada)} 
-                              className="bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 shadow-xs cursor-pointer"
+                              onClick={() => paseInvitado(guardadoInv, datosPersona, config.escudo)} 
+                              className="text-white px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 shadow-xs cursor-pointer"
+                              style={{ backgroundColor: colorFamiliaDe(datosPersona) }}
                             >
-                              <Download className="w-3.5 h-3.5" /> QR
+                              <Download className="w-3.5 h-3.5" /> QR individual
                             </button>
-                          )
-                        )}
+                          );
+                        })()}
                       </div>
 
                       <input 
@@ -863,35 +946,93 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, egresados
                           className="w-4 h-4 text-[#6B1D2F] rounded border-gray-300 focus:ring-[#6B1D2F] cursor-pointer"
                         />
                         <label htmlFor={`grupal-${idx}`} className="text-[11px] font-semibold text-slate-700 cursor-pointer">
-                          Ingresa de forma grupal con el egresado
+                          Ingresa en grupo (con el QR del grupo familiar)
+                        </label>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input 
+                          type="checkbox" 
+                          id={`movilidad-${idx}`}
+                          checked={fila.movilidad_reducida === true}
+                          disabled={!editando}
+                          onChange={(e) => { const arr = [...filasInvitados]; arr[idx].movilidad_reducida = e.target.checked; setFilasInvitados(arr); }}
+                          className="w-4 h-4 text-[#6B1D2F] rounded border-gray-300 focus:ring-[#6B1D2F] cursor-pointer"
+                        />
+                        <label htmlFor={`movilidad-${idx}`} className="text-[11px] font-semibold text-slate-700 cursor-pointer">
+                          ♿ Tiene movilidad reducida
                         </label>
                       </div>
                     </div>
                   ))}
                 </div>
 
-                {editando && (
-                  <button onClick={guardarInvitados} disabled={guardando} className="w-full py-2.5 bg-[#6B1D2F] text-white rounded-lg text-sm font-bold hover:bg-opacity-95 shadow cursor-pointer">
-                    {guardando ? 'Guardando...' : 'Guardar Cambios y Generar QR'}
+                {cargaHabilitada && (editando ? (
+                  <div className="flex gap-2">
+                    {hayGuardados && (
+                      <button type="button" onClick={() => prepararFilasInvitados(datosPersona)} disabled={guardando} className="px-4 py-2.5 bg-white border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold cursor-pointer">Cancelar</button>
+                    )}
+                    <button onClick={guardarInvitados} disabled={guardando} className="flex-1 py-2.5 bg-[#6B1D2F] text-white rounded-lg text-sm font-bold hover:bg-opacity-95 shadow cursor-pointer">
+                      {guardando ? 'Guardando...' : 'Guardar y Generar QR'}
+                    </button>
+                  </div>
+                ) : (
+                  <button type="button" onClick={() => setEditando(true)} className="w-full py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-bold shadow cursor-pointer">
+                    ✏️ Editar invitados
                   </button>
-                )}
+                ))}
 
                 <div className="bg-gray-50 border rounded-xl p-4 space-y-3">
                   <h4 className="font-bold text-xs text-gray-800 uppercase">Solicitar Butacas Extra</h4>
-                  <form onSubmit={enviarSolicitudExtra} className="flex flex-col sm:flex-row gap-2">
-                    <select value={cantExtra} onChange={(e) => setCantExtra(e.target.value)} className="px-2 py-2 border rounded-xl text-xs bg-white">
-                      <option value={1}>+1</option><option value={2}>+2</option><option value={3}>+3</option>
-                    </select>
-                    <input type="text" placeholder="Observación (ej: abuelos)" value={obsExtra} onChange={(e) => setObsExtra(e.target.value)} className="w-full sm:flex-1 px-3 py-2 border rounded-xl text-xs bg-white outline-none" />
-                    <button type="submit" disabled={enviandoSol} className="w-full sm:w-auto px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow shrink-0 cursor-pointer">Solicitar</button>
-                  </form>
-                  {misSolicitudes.map((s) => (
-                    <div key={s.id} className="text-xs bg-white p-2 border rounded flex justify-between">
-                      <span>+{s.cantidad_solicitada} lugar(es)</span>
-                      <span className="font-bold uppercase text-amber-700">{s.estado}</span>
-                    </div>
-                  ))}
+                  {miSolicitud ? (() => {
+                    const est = String(miSolicitud.estado || '').toLowerCase();
+                    const aprob = Number(miSolicitud.cantidad_aprobada ?? miSolicitud.cantidad_solicitada) || 0;
+                    return (
+                      <div className={`text-xs p-3 border rounded-lg space-y-1 ${est === 'aprobada' ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : est === 'rechazada' ? 'bg-rose-50 border-rose-200 text-rose-900' : 'bg-amber-50 border-amber-200 text-amber-900'}`}>
+                        <p className="font-bold">
+                          {est === 'aprobada'
+                            ? `✓ Solicitud aprobada: +${aprob} butaca(s)${aprob < Number(miSolicitud.cantidad_solicitada) ? ` (pediste ${miSolicitud.cantidad_solicitada})` : ''}`
+                            : est === 'rechazada'
+                              ? '✕ Solicitud no aprobada'
+                              : `⏳ Solicitud enviada: +${miSolicitud.cantidad_solicitada} butaca(s), pendiente de revisión`}
+                        </p>
+                        {est === 'aprobada' && cargaHabilitada && <p>Ya podés cargar a tus invitados adicionales arriba (apretá "Editar invitados").</p>}
+                        {est !== 'aprobada' && <p className="opacity-80">Solo se puede enviar una solicitud por egresado.</p>}
+                      </div>
+                    );
+                  })() : etapaCarga === 'cierre_definitivo' ? (
+                    <p className="text-xs text-slate-500">La carga está cerrada: ya no se reciben solicitudes.</p>
+                  ) : (
+                    <>
+                      <form onSubmit={pedirSolicitudExtra} className="flex flex-col sm:flex-row gap-2">
+                        <select value={cantExtra} onChange={(e) => setCantExtra(e.target.value)} className="px-2 py-2 border rounded-xl text-xs bg-white">
+                          <option value={1}>+1</option><option value={2}>+2</option><option value={3}>+3</option>
+                        </select>
+                        <input type="text" placeholder="Observación (ej: abuelos)" value={obsExtra} onChange={(e) => setObsExtra(e.target.value)} className="w-full sm:flex-1 px-3 py-2 border rounded-xl text-xs bg-white outline-none" />
+                        <button type="submit" disabled={enviandoSol} className="w-full sm:w-auto px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow shrink-0 cursor-pointer">{enviandoSol ? 'Enviando...' : 'Solicitar'}</button>
+                      </form>
+                      <p className="text-[11px] text-slate-500">Se puede enviar <b>una sola solicitud</b> por egresado.</p>
+                    </>
+                  )}
                 </div>
+
+                {avisoSolicitud && (
+                  <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+                    <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl p-5 space-y-4 border-t-4 border-indigo-600">
+                      <h3 className="font-extrabold text-base text-slate-900">Antes de enviar tu solicitud</h3>
+                      <p className="text-sm text-slate-700">Estás pidiendo <b>+{cantExtra} butaca(s)</b>{obsExtra.trim() ? <> ({obsExtra.trim()})</> : null}.</p>
+                      <ul className="list-disc pl-5 text-xs text-slate-600 space-y-1.5">
+                        <li><b>Las plazas adicionales no están garantizadas</b>: dependen de la disponibilidad de la sala.</li>
+                        <li>La escuela puede aprobarla completa, en parte o no aprobarla.</li>
+                        <li>{whatsappActivo ? <>En caso de aprobarse, vas a recibir una <b>notificación por WhatsApp</b> para volver a ingresar y cargar a tus invitados.</> : <>En caso de aprobarse, la escuela te va a avisar para que vuelvas a ingresar y cargues a tus invitados.</>}</li>
+                        <li>Se puede enviar <b>una sola solicitud</b>.</li>
+                      </ul>
+                      <div className="flex gap-2 pt-2 border-t">
+                        <button type="button" onClick={() => setAvisoSolicitud(false)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold cursor-pointer">Cancelar</button>
+                        <button type="button" onClick={enviarSolicitudExtra} className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow cursor-pointer">Entendido, enviar</button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </>
             )}
 
@@ -929,92 +1070,254 @@ const sinTildes = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036
 const svgQRComoTexto = (valor) =>
   renderToStaticMarkup(<QRCodeSVG value={valor} size={300} level="H" includeMargin={true} />).replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" ');
 
-const descargarTarjetaQR = (nombreQR, subtituloQR, textoRolQR, valorQR) => {
-  if (!valorQR) {
+// ============================================================================
+// PASES: colores por rol y orientación, accesos a la sala y tarjeta 1080x1920
+// ============================================================================
+const COLOR_PASE = {
+  egresado: '#6B1D2F', // bordó institucional
+  cn: '#15803D',       // familiares de Ciencias Naturales (TM)
+  edu: '#1D4ED8',      // familiares de Educación (TT)
+  familia: '#475569',  // familiares sin orientación cargada
+  docente: '#374151',  // gris oscuro
+  vip: '#A16207',      // dorado
+};
+
+// Por dónde entra cada uno (para cambiar un texto, se cambia solo acá)
+const ACCESO_TEXTO = {
+  egresados: 'INGRESO POR DETRÁS DE LA ÚLTIMA FILA',
+  arriba: 'INGRESO POR EL ACCESO DE ARRIBA',
+  abajo: 'INGRESO POR EL ACCESO DE ABAJO',
+  aConfirmar: 'ACCESO A CONFIRMAR CON LA ESCUELA',
+};
+
+const ORIENTACIONES = [
+  { valor: 'CIENCIAS NATURALES', etiqueta: 'Ciencias Naturales (TM)' },
+  { valor: 'EDUCACION', etiqueta: 'Educación (TT)' },
+];
+
+const tipoOrientacion = (egr) => {
+  const o = String(egr?.orientacion || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  if (o.includes('natural')) return 'cn';
+  if (o.includes('educ')) return 'edu';
+  return null;
+};
+const etiquetaOrientacion = (egr) => ({ cn: 'Cs. Naturales', edu: 'Educación' }[tipoOrientacion(egr)] || '');
+const accesoFamiliaDe = (egr) => ({ cn: ACCESO_TEXTO.abajo, edu: ACCESO_TEXTO.arriba }[tipoOrientacion(egr)] || ACCESO_TEXTO.aConfirmar);
+const colorFamiliaDe = (egr) => COLOR_PASE[tipoOrientacion(egr)] || COLOR_PASE.familia;
+const textoCurso = (egr) => [egr?.division, etiquetaOrientacion(egr)].filter(Boolean).join(' · ');
+const esGrupal = (inv) => inv?.es_grupal === true;
+const tieneMovilidad = (p) => p?.movilidad_reducida === true;
+
+// Texto que va dentro de cada QR (sin tildes: algunos lectores fallan con ellas)
+const valorQREgresado = (egr) => `ESRN005-EGRESADO-${egr.dni}-${sinTildes(egr.nombre_completo)}`;
+const valorQRGrupo = (egr) => `ESRN005-GRUPO-${egr.dni}-${sinTildes(egr.nombre_completo)}`;
+const valorQRDocente = (doc) => `ESRN005-DOCENTE-${doc.dni}-${sinTildes(doc.nombre_completo)}`;
+const valorQRVip = (vip) => `ESRN005-VIP-${vip.dni || ''}-${sinTildes(vip.nombre_completo)}`;
+
+const cargarImagen = (src) => new Promise((resolve) => {
+  if (!src) { resolve(null); return; }
+  const img = new Image();
+  img.onload = () => resolve(img);
+  img.onerror = () => resolve(null);
+  img.src = src;
+});
+
+// Achica la letra hasta que el texto entre en el ancho indicado
+const ajustarFuente = (ctx, texto, peso, tamMax, anchoMax, tamMin = 18) => {
+  let t = tamMax;
+  ctx.font = `${peso} ${t}px sans-serif`;
+  while (t > tamMin && ctx.measureText(texto).width > anchoMax) {
+    t -= 2;
+    ctx.font = `${peso} ${t}px sans-serif`;
+  }
+  return t;
+};
+
+const rectRedondeado = (ctx, x, y, w, h, r) => {
+  ctx.beginPath();
+  if (typeof ctx.roundRect === 'function') ctx.roundRect(x, y, w, h, r);
+  else ctx.rect(x, y, w, h);
+};
+
+const descargarPase = async ({ nombre, subtitulo, rol, valor, color = COLOR_PASE.egresado, acceso, integrantes = [], movilidad = false, escudo, archivo }) => {
+  if (!valor) {
     alert('No se pudo generar la imagen del QR.');
     return;
   }
-
   try {
-    const svgData = svgQRComoTexto(valorQR);
-    const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
-    const URL = window.URL || window.webkitURL || window;
-    const blobURL = URL.createObjectURL(svgBlob);
+    const svgData = svgQRComoTexto(valor);
+    const blobURL = window.URL.createObjectURL(new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' }));
+    const [qrImage, escudoImg] = await Promise.all([cargarImagen(blobURL), cargarImagen(escudo)]);
+    window.URL.revokeObjectURL(blobURL);
+    if (!qrImage) throw new Error('No se pudo dibujar el QR');
 
-    const qrImage = new Image();
-    qrImage.onload = () => {
-      try {
-        const canvas = document.createElement('canvas');
-        canvas.width = 1080;
-        canvas.height = 1920;
-        const ctx = canvas.getContext('2d');
+    const canvas = document.createElement('canvas');
+    canvas.width = 1080;
+    canvas.height = 1920;
+    const ctx = canvas.getContext('2d');
+    ctx.textAlign = 'center';
 
-        ctx.fillStyle = '#F3F4F6';
-        ctx.fillRect(0, 0, 1080, 1920);
+    // Fondo y franja superior del color del pase
+    ctx.fillStyle = '#F3F4F6';
+    ctx.fillRect(0, 0, 1080, 1920);
+    ctx.fillStyle = color;
+    ctx.fillRect(0, 0, 1080, 400);
 
-        ctx.fillStyle = '#6B1D2F';
-        ctx.fillRect(0, 0, 1080, 380);
+    let yTitulo = 160;
+    if (escudoImg) {
+      const caja = 150;
+      const escala = Math.min(caja / escudoImg.width, caja / escudoImg.height);
+      const w = escudoImg.width * escala;
+      const h = escudoImg.height * escala;
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.arc(540, 115, 92, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.drawImage(escudoImg, 540 - w / 2, 115 - h / 2, w, h);
+      yTitulo = 270;
+    }
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 42px sans-serif';
+    ctx.fillText('ESRN N° 005 — CIPOLLETTI', 540, yTitulo);
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.font = '26px sans-serif';
+    ctx.fillText('Acto de Colación 2026 — Pase Oficial de Ingreso', 540, yTitulo + 55);
 
-        ctx.fillStyle = '#FFFFFF';
-        ctx.font = 'bold 42px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('ESRN N° 005 — CIPOLLETTI', 540, 120);
+    // Tarjeta blanca
+    ctx.fillStyle = '#FFFFFF';
+    rectRedondeado(ctx, 90, 440, 900, 1400, 30);
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#E5E7EB';
+    ctx.stroke();
 
-        ctx.fillStyle = '#FBCFE8';
-        ctx.font = '26px sans-serif';
-        ctx.fillText('Acto de Colación 2026 — Pase Oficial de Ingreso', 540, 180);
+    // Nombre, subtítulo y rol
+    ctx.fillStyle = '#111827';
+    ajustarFuente(ctx, String(nombre || '').toUpperCase(), 'bold', 46, 820, 24);
+    ctx.fillText(String(nombre || '').toUpperCase(), 540, 535);
+    if (subtitulo) {
+      ctx.fillStyle = '#4B5563';
+      ajustarFuente(ctx, subtitulo, 'normal', 30, 820, 20);
+      ctx.fillText(subtitulo, 540, 588);
+    }
+    ctx.font = 'bold 30px sans-serif';
+    const anchoRol = ctx.measureText(rol).width + 70;
+    ctx.fillStyle = color;
+    rectRedondeado(ctx, 540 - anchoRol / 2, 620, anchoRol, 58, 29);
+    ctx.fill();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillText(rol, 540, 660);
 
-        ctx.fillStyle = '#FFFFFF';
-        ctx.beginPath();
-        if (typeof ctx.roundRect === 'function') ctx.roundRect(120, 440, 840, 1280, 30);
-        else ctx.rect(120, 440, 840, 1280);
-        ctx.fill();
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = '#E5E7EB';
-        ctx.stroke();
+    // QR (siempre negro sobre blanco: así lo leen todos los celulares)
+    const tamQR = integrantes.length > 6 ? 420 : 460;
+    ctx.drawImage(qrImage, 540 - tamQR / 2, 700, tamQR, tamQR);
+    let y = 700 + tamQR + 20;
 
-        ctx.fillStyle = '#111827';
-        ctx.font = 'bold 44px sans-serif';
-        ctx.fillText(String(nombreQR).toUpperCase(), 540, 580);
+    if (movilidad) {
+      ctx.fillStyle = '#FEF3C7';
+      rectRedondeado(ctx, 230, y, 620, 60, 30);
+      ctx.fill();
+      ctx.fillStyle = '#92400E';
+      ctx.font = 'bold 28px sans-serif';
+      ctx.fillText('♿ MOVILIDAD REDUCIDA', 540, y + 41);
+      y += 80;
+    }
 
-        ctx.fillStyle = '#4B5563';
-        ctx.font = '32px sans-serif';
-        ctx.fillText(subtituloQR, 540, 650);
+    if (acceso) {
+      ctx.save();
+      ctx.globalAlpha = 0.12;
+      ctx.fillStyle = color;
+      rectRedondeado(ctx, 130, y, 820, 84, 18);
+      ctx.fill();
+      ctx.restore();
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = color;
+      rectRedondeado(ctx, 130, y, 820, 84, 18);
+      ctx.stroke();
+      ctx.fillStyle = color;
+      ajustarFuente(ctx, acceso, 'bold', 32, 780, 20);
+      ctx.fillText(acceso, 540, y + 54);
+      y += 110;
+    }
 
-        ctx.fillStyle = '#6B1D2F';
-        ctx.font = 'bold 28px sans-serif';
-        ctx.fillText(textoRolQR, 540, 710);
-
-        ctx.drawImage(qrImage, 290, 780, 500, 500);
-
-        ctx.fillStyle = '#374151';
-        ctx.font = 'bold 30px sans-serif';
-        ctx.fillText('Pase Autorizado para Ingreso', 540, 1370);
-
-        ctx.fillStyle = '#6B7280';
-        ctx.font = '24px sans-serif';
-        ctx.fillText('Presentar en puerta (digital o impreso)', 540, 1430);
-
-        ctx.fillStyle = '#9CA3AF';
-        ctx.font = '24px sans-serif';
-        ctx.fillText('ESRN N° 005 — Cipolletti', 540, 1810);
-
-        const pngUrl = canvas.toDataURL('image/png');
-        const downloadLink = document.createElement('a');
-        downloadLink.href = pngUrl;
-        downloadLink.download = `Pase-Oficial-${nombreQR.replace(/\s+/g, '-')}.png`;
-        document.body.appendChild(downloadLink);
-        downloadLink.click();
-        document.body.removeChild(downloadLink);
-      } catch (canvasErr) {
-        console.error(canvasErr);
+    if (integrantes.length > 0) {
+      ctx.fillStyle = '#111827';
+      ctx.font = 'bold 28px sans-serif';
+      ctx.fillText(`INTEGRANTES DEL GRUPO (${integrantes.length})`, 540, y + 10);
+      y += 30;
+      const limite = 1760;
+      let alto = 42;
+      let tam = 30;
+      if (y + integrantes.length * alto > limite) { alto = 34; tam = 25; }
+      const entran = Math.max(1, Math.floor((limite - y) / alto));
+      const mostrar = integrantes.length > entran ? integrantes.slice(0, entran - 1) : integrantes;
+      ctx.fillStyle = '#374151';
+      mostrar.forEach((p) => {
+        y += alto;
+        const linea = `• ${String(p.nombre_completo || '').toUpperCase()}${tieneMovilidad(p) ? '  ♿' : ''}`;
+        ajustarFuente(ctx, linea, 'normal', tam, 800, 18);
+        ctx.fillText(linea, 540, y);
+      });
+      if (mostrar.length < integrantes.length) {
+        y += alto;
+        ctx.font = `italic ${tam}px sans-serif`;
+        ctx.fillText(`y ${integrantes.length - mostrar.length} más`, 540, y);
       }
-    };
-    qrImage.src = blobURL;
+    } else {
+      ctx.fillStyle = '#374151';
+      ctx.font = 'bold 30px sans-serif';
+      ctx.fillText('Pase Autorizado para Ingreso', 540, Math.max(y + 40, 1500));
+    }
+
+    ctx.fillStyle = '#6B7280';
+    ctx.font = '24px sans-serif';
+    ctx.fillText('Presentar en puerta (digital o impreso)', 540, 1805);
+    ctx.fillStyle = '#9CA3AF';
+    ctx.font = '24px sans-serif';
+    ctx.fillText('ESRN N° 005 — Cipolletti · Colación 2026', 540, 1885);
+
+    const pngUrl = canvas.toDataURL('image/png');
+    const a = document.createElement('a');
+    a.href = pngUrl;
+    a.download = `Pase-${String(archivo || nombre || 'QR').replace(/[^A-Za-z0-9ÁÉÍÓÚÑáéíóúñ]+/g, '-')}.png`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   } catch (err) {
     console.error(err);
+    alert('No se pudo generar el pase: ' + (err.message || err));
   }
 };
+
+// Atajos para cada tipo de pase (los usan el portal y Administración)
+const paseEgresado = (egr, escudo) => descargarPase({
+  nombre: egr.nombre_completo,
+  subtitulo: [`DNI: ${egr.dni}`, textoCurso(egr)].filter(Boolean).join(' · '),
+  rol: 'EGRESADO/A', valor: valorQREgresado(egr), color: COLOR_PASE.egresado,
+  acceso: ACCESO_TEXTO.egresados, escudo, archivo: `Egresado-${egr.nombre_completo}`,
+});
+const paseGrupo = (egr, integrantes, escudo) => descargarPase({
+  nombre: egr.nombre_completo,
+  subtitulo: [`Grupo familiar · ${integrantes.length} persona(s)`, textoCurso(egr)].filter(Boolean).join(' · '),
+  rol: 'GRUPO FAMILIAR', valor: valorQRGrupo(egr), color: colorFamiliaDe(egr),
+  acceso: accesoFamiliaDe(egr), integrantes, escudo, archivo: `Grupo-Familiar-${egr.nombre_completo}`,
+});
+const paseInvitado = (inv, egr, escudo) => descargarPase({
+  nombre: inv.nombre_completo,
+  subtitulo: `Invitado/a de ${egr?.nombre_completo || 'egresado/a'}`,
+  rol: 'INVITADO INDIVIDUAL', valor: inv.numero_entrada, color: colorFamiliaDe(egr),
+  acceso: accesoFamiliaDe(egr), movilidad: tieneMovilidad(inv), escudo, archivo: `Invitado-${inv.nombre_completo}`,
+});
+const paseDocente = (doc, escudo) => descargarPase({
+  nombre: doc.nombre_completo, subtitulo: `DNI: ${doc.dni}`,
+  rol: 'DOCENTE', valor: valorQRDocente(doc), color: COLOR_PASE.docente,
+  acceso: ACCESO_TEXTO.abajo, escudo, archivo: `Docente-${doc.nombre_completo}`,
+});
+const paseVip = (vip, escudo) => descargarPase({
+  nombre: vip.nombre_completo, subtitulo: vip.dni ? `DNI: ${vip.dni}` : 'Autoridad / Invitado especial',
+  rol: 'INVITADO VIP', valor: valorQRVip(vip), color: COLOR_PASE.vip,
+  acceso: ACCESO_TEXTO.abajo, movilidad: tieneMovilidad(vip), escudo, archivo: `VIP-${vip.nombre_completo}`,
+});
 
 const CONFIG_INGRESO = {
   egresado: {
@@ -1035,6 +1338,15 @@ const CONFIG_INGRESO = {
   },
 };
 
+// Acceso y color que corresponde mostrar en Puerta para cada tipo de persona
+const accesoPuertaDe = (tipo, fila, egresados) => {
+  if (tipo === 'egresado') return { texto: ACCESO_TEXTO.egresados, color: COLOR_PASE.egresado };
+  if (tipo === 'docente') return { texto: ACCESO_TEXTO.abajo, color: COLOR_PASE.docente };
+  if (tipo === 'vip') return { texto: ACCESO_TEXTO.abajo, color: COLOR_PASE.vip };
+  const egr = tipo === 'grupo' ? fila : (egresados || []).find((e) => e.id === fila?.egresado_id);
+  return { texto: accesoFamiliaDe(egr), color: colorFamiliaDe(egr) };
+};
+
 // Busca en los datos que ya tiene cargados el dispositivo
 const localizarCodigo = (code, esQrEgresado, datos) => {
   const { egresados: egrs, invitados: invs, docentes: docs, especiales: vips } = datos;
@@ -1044,7 +1356,7 @@ const localizarCodigo = (code, esQrEgresado, datos) => {
   if (inv) return { tipo: 'invitado', fila: inv };
   const doc = docs.find((d) => d.dni && (String(d.dni) === code || code.includes(String(d.dni))));
   if (doc) return { tipo: 'docente', fila: doc };
-  const vip = vips.find((v) => (v.dni && (String(v.dni) === code || code.includes(String(v.dni)))) || (code.length >= 5 && String(v.nombre_completo || '').toUpperCase().includes(code)));
+  const vip = vips.find((v) => (v.dni && (String(v.dni) === code || code.includes(String(v.dni)))) || (code.length >= 5 && sinTildes(v.nombre_completo).toUpperCase().includes(sinTildes(code))));
   if (vip) return { tipo: 'vip', fila: vip };
   const e2 = egr();
   if (e2) return { tipo: 'egresado', fila: e2 };
@@ -1180,7 +1492,8 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
         return;
       }
 
-      const esQrEgresado = raw.toUpperCase().includes('ESRN005-EGRESADO');
+      const esQrGrupo = raw.toUpperCase().includes('ESRN005-GRUPO');
+      const esQrEgresado = esQrGrupo || raw.toUpperCase().includes('ESRN005-EGRESADO');
       let code = raw.toUpperCase();
       if (code.includes('ESRN005-')) {
         const partes = code.split('-');
@@ -1202,8 +1515,59 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
         return;
       }
 
-      const c = CONFIG_INGRESO[hallado.tipo];
       const f = hallado.fila;
+      const egrsLocal = datosRef.current.egresados;
+
+      // QR del GRUPO FAMILIAR: registra a todos los invitados del egresado marcados "en grupo"
+      if (esQrGrupo) {
+        if (hallado.tipo !== 'egresado') {
+          setResultadoIngreso({ tipo: 'error', titulo: '❌ GRUPO NO ENCONTRADO', nombre: raw, detalle: 'No se encontró al egresado de este grupo. Usá la búsqueda manual.' });
+          avisar('❌ Grupo no encontrado. Usá la búsqueda manual.', 'error');
+          logPuerta('NO_ENCONTRADO', `QR de grupo: ${raw.slice(0, 60)}`);
+          return;
+        }
+        const acceso = accesoPuertaDe('grupo', f, egrsLocal);
+        const nombreGrupo = `Grupo familiar de ${f.nombre_completo}`;
+        if (f.activo === false) {
+          setResultadoIngreso({ tipo: 'warning', titulo: '⛔ EL EGRESADO DIO DE BAJA SU ASISTENCIA', nombre: nombreGrupo, detalle: 'Al darse de baja se liberaron también las plazas de su grupo. Consultar con coordinación antes de dejarlos pasar.', acceso });
+          avisar(`⛔ ${nombreGrupo}: el egresado figura como "No asiste". Consultar con coordinación.`, 'warning');
+          logPuerta('BLOQUEADO_NO_ASISTE', `grupo de ${f.nombre_completo} (DNI ${f.dni || 'S/D'})`);
+          return;
+        }
+        const { data: dg, error: eg } = await supabase.from('invitados').select('id, nombre_completo, asistio, movilidad_reducida').eq('egresado_id', f.id).eq('es_grupal', true);
+        if (eg) throw eg;
+        const grupales = dg || [];
+        if (grupales.length === 0) {
+          setResultadoIngreso({ tipo: 'warning', titulo: '⚠️ GRUPO SIN INTEGRANTES', nombre: nombreGrupo, detalle: 'Este egresado no tiene invitados marcados "en grupo". Buscá a cada invitado en la búsqueda manual.', acceso });
+          avisar(`⚠️ ${nombreGrupo} no tiene integrantes cargados.`, 'warning');
+          logPuerta('NO_ENCONTRADO', `grupo de ${f.nombre_completo} sin integrantes`);
+          return;
+        }
+        const nuevos = [];
+        for (const g of grupales) {
+          if (g.asistio) continue;
+          const okG = await marcarIngreso('invitados', g.id, { hora_ingreso: new Date().toISOString() });
+          if (okG) nuevos.push(g.id);
+        }
+        recargarRef.current();
+        const lista = grupales.map((g) => ({ nombre: g.nombre_completo, movilidad: g.movilidad_reducida === true, nuevo: nuevos.includes(g.id) }));
+        const conMovilidad = grupales.filter((g) => g.movilidad_reducida === true).length;
+        if (nuevos.length > 0) {
+          const faltaban = nuevos.length < grupales.length;
+          setResultadoIngreso({ tipo: faltaban ? 'warning' : 'success', titulo: faltaban ? `✓ INGRESAN ${nuevos.length} DE ${grupales.length} (los demás ya habían ingresado)` : `✓ INGRESO GRUPO FAMILIAR (${nuevos.length})`, nombre: nombreGrupo, detalle: textoCurso(f), acceso, lista, movilidad: conMovilidad > 0 });
+          avisar(`✓ INGRESO PERMITIDO: ${nombreGrupo} (${nuevos.length} persona/s)`, faltaban ? 'warning' : undefined);
+          logPuerta('INGRESO_GRUPAL', `grupo de ${f.nombre_completo}: ${grupales.filter((g) => nuevos.includes(g.id)).map((g) => g.nombre_completo).join(', ')}`);
+        } else {
+          setResultadoIngreso({ tipo: 'error', titulo: '¡ALERTA DUPLICADO! EL GRUPO YA INGRESÓ', nombre: nombreGrupo, detalle: `Los ${grupales.length} integrantes ya figuraban como presentes.`, acceso, lista });
+          avisar(`⚠️ ¡ALERTA DUPLICADO! ${nombreGrupo} ya ingresó.`, 'error');
+          logPuerta('DUPLICADO', `grupo de ${f.nombre_completo} ya había ingresado`);
+        }
+        return;
+      }
+
+      const c = CONFIG_INGRESO[hallado.tipo];
+      const acceso = accesoPuertaDe(hallado.tipo, f, egrsLocal);
+      const movilidad = f.movilidad_reducida === true;
 
       if (hallado.tipo !== 'invitado' && f.activo === false) {
         setResultadoIngreso({ tipo: 'warning', titulo: '⛔ FIGURA COMO "NO ASISTE"', nombre: f.nombre_completo, detalle: 'Dio de baja su asistencia. Consultar con coordinación antes de dejarlo pasar.' });
@@ -1211,48 +1575,28 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
         logPuerta('BLOQUEADO_NO_ASISTE', `${ETIQUETA_TIPO[hallado.tipo]} ${f.nombre_completo} (DNI ${f.dni || 'S/D'})`);
         return;
       }
-      // El QR del egresado es el pase de todo el grupo: registra al egresado y a sus invitados marcados como "grupales"
-      if (hallado.tipo === 'egresado') {
-        const okEgr = await marcarIngreso('egresados', f.id);
-        let grupales = [];
-        let avisoGrupo = '';
-        {
-          const { data: dg, error: eg } = await supabase.from('invitados').select('id, nombre_completo, asistio').eq('egresado_id', f.id).eq('es_grupal', true);
-          if (eg) avisoGrupo = ` · ⚠️ No se pudo consultar el grupo (${eg.message})`;
-          else grupales = dg || [];
-        }
-        const nuevos = [];
-        for (const g of grupales) {
-          if (g.asistio) continue;
-          const okG = await marcarIngreso('invitados', g.id, { hora_ingreso: new Date().toISOString() });
-          if (okG) nuevos.push(g.nombre_completo);
-        }
-        recargarRef.current();
-        const detalleBase = `DNI: ${f.dni}`;
-        if (okEgr || nuevos.length > 0) {
-          const titulo = okEgr ? (nuevos.length ? `✓ INGRESO GRUPAL: EGRESADO + ${nuevos.length}` : '✓ INGRESO PERMITIDO (EGRESADO)') : '⚠️ EGRESADO YA HABÍA INGRESADO';
-          const detalle = detalleBase + (nuevos.length ? ` · Acompañantes: ${nuevos.join(', ')}` : '') + (!okEgr ? ` · Se registraron ${nuevos.length} acompañante(s) que faltaban` : '') + avisoGrupo;
-          setResultadoIngreso({ tipo: okEgr ? 'success' : 'warning', titulo, nombre: f.nombre_completo, detalle });
-          avisar(`${okEgr ? '✓ INGRESO PERMITIDO' : '⚠️ El egresado ya había ingresado'}: ${f.nombre_completo}${nuevos.length ? ` + ${nuevos.length} acompañante(s)` : ''}`, okEgr ? undefined : 'warning');
-          logPuerta(nuevos.length ? 'INGRESO_GRUPAL' : 'INGRESO', `egresado ${f.nombre_completo} (DNI ${f.dni || 'S/D'})${nuevos.length ? ' + ' + nuevos.join(', ') : ''}`);
-        } else {
-          setResultadoIngreso({ tipo: 'warning', titulo: '⚠️ EGRESADO YA INGRESÓ', nombre: f.nombre_completo, detalle: detalleBase + (grupales.length ? ` · Su grupo (${grupales.length} acompañante(s)) ya había ingresado` : '') + avisoGrupo });
-          avisar(`⚠️ ¡EGRESADO YA INGRESÓ! ${f.nombre_completo}`, 'warning');
-          logPuerta('DUPLICADO', `egresado ${f.nombre_completo} (DNI ${f.dni || 'S/D'}) ya había ingresado`);
-        }
+      // Invitado individual de un egresado que se dio de baja: su plaza quedó liberada
+      const anfitrion = hallado.tipo === 'invitado' ? egrsLocal.find((e) => e.id === f.egresado_id) : null;
+      if (hallado.tipo === 'invitado' && anfitrion && anfitrion.activo === false) {
+        setResultadoIngreso({ tipo: 'warning', titulo: '⛔ SU EGRESADO DIO DE BAJA LA ASISTENCIA', nombre: f.nombre_completo, detalle: `Invitado/a de ${anfitrion.nombre_completo}. Al darse de baja se liberaron las plazas de su grupo. Consultar con coordinación.`, acceso });
+        avisar(`⛔ ${f.nombre_completo}: su egresado figura como "No asiste". Consultar con coordinación.`, 'warning');
+        logPuerta('BLOQUEADO_NO_ASISTE', `familiar ${f.nombre_completo} (egresado ${anfitrion.nombre_completo} dado de baja)`);
         return;
       }
+      const detalleExtra = hallado.tipo === 'invitado'
+        ? `${f.dni ? `DNI: ${f.dni} · ` : ''}Invitado/a de ${anfitrion ? anfitrion.nombre_completo : 'egresado/a'}${esGrupal(f) ? ' · (figura en el grupo familiar)' : ''}`
+        : hallado.tipo === 'egresado' ? [`DNI: ${f.dni}`, textoCurso(f)].filter(Boolean).join(' · ') : c.detalle(f);
 
       const ok = await marcarIngreso(c.tabla, f.id, c.extra ? c.extra() : {});
       recargarRef.current(); // refresca la lista en segundo plano, sin demorar el siguiente escaneo
 
       if (ok) {
-        setResultadoIngreso({ tipo: 'success', titulo: c.okTitulo, nombre: f.nombre_completo, detalle: c.detalle(f) });
+        setResultadoIngreso({ tipo: 'success', titulo: c.okTitulo, nombre: f.nombre_completo, detalle: detalleExtra, acceso, movilidad });
         avisar(`✓ INGRESO PERMITIDO: ${f.nombre_completo}`);
         logPuerta('INGRESO', `${ETIQUETA_TIPO[hallado.tipo]} ${f.nombre_completo} (DNI ${f.dni || 'S/D'})`);
       } else {
         logPuerta('DUPLICADO', `${ETIQUETA_TIPO[hallado.tipo]} ${f.nombre_completo} (DNI ${f.dni || 'S/D'}) ya había ingresado`);
-        setResultadoIngreso({ tipo: c.dupTipo, titulo: c.dupTitulo, nombre: f.nombre_completo, detalle: c.dupDetalle ? c.dupDetalle(f) : c.detalle(f) });
+        setResultadoIngreso({ tipo: c.dupTipo, titulo: c.dupTitulo, nombre: f.nombre_completo, detalle: c.dupDetalle ? c.dupDetalle(f) : detalleExtra, acceso, movilidad });
         avisar(c.dupToast(f), c.dupTipo === 'error' ? 'error' : 'warning');
       }
     } catch (err) {
@@ -1349,7 +1693,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
 
   return (
     <div className="max-w-xl mx-auto space-y-4">
-      <div className="bg-slate-900 text-white rounded-2xl p-6 space-y-4 shadow-xl text-center">
+      <div className="bg-slate-900 text-white rounded-2xl p-4 sm:p-6 space-y-4 shadow-xl text-center">
         <div>
           <h2 className="font-extrabold text-2xl text-white">Control de Puerta</h2>
           <p className="text-xs text-slate-300 mt-1">Utilizá la cámara trasera para escanear los pases QR al ingresar</p>
@@ -1358,15 +1702,15 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
         <button
           type="button"
           onClick={() => { escaneandoCamara ? apagarCamara() : iniciarCamara(); }}
-          className={`w-full py-6 px-6 rounded-2xl font-extrabold text-lg flex items-center justify-center gap-3 shadow-2xl transition-all cursor-pointer ${
-            escaneandoCamara ? 'bg-rose-700 hover:bg-rose-800 text-white animate-pulse' : 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white scale-[1.02]'
+          className={`w-full py-5 px-4 rounded-2xl font-extrabold text-base sm:text-lg flex items-center justify-center gap-3 shadow-2xl transition-all cursor-pointer ${
+            escaneandoCamara ? 'bg-rose-700 hover:bg-rose-800 text-white animate-pulse' : 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white'
           }`}
         >
           {escaneandoCamara ? <><CameraOff className="w-8 h-8" /> Apagar Cámara</> : <><Camera className="w-8 h-8" /> 📷 ESCANEAR CÓDIGO QR</>}
         </button>
 
         {resultadoIngreso && (
-          <div className={`p-5 rounded-2xl border-4 text-left space-y-2 shadow-2xl transition-all animate-bounce ${
+          <div className={`p-4 sm:p-5 rounded-2xl border-4 text-left space-y-2 shadow-2xl transition-all ${
             resultadoIngreso.tipo === 'success' ? 'bg-emerald-50 border-emerald-500 text-emerald-900' :
             resultadoIngreso.tipo === 'warning' ? 'bg-amber-50 border-amber-500 text-amber-900' : 'bg-rose-50 border-rose-500 text-rose-900'
           }`}>
@@ -1375,7 +1719,20 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
               <button onClick={() => setResultadoIngreso(null)} className="text-slate-500 hover:text-slate-800 font-bold px-2 py-0.5 rounded bg-white border text-xs">✕ Cerrar</button>
             </div>
             <p className="font-black text-xl leading-tight">{resultadoIngreso.nombre}</p>
-            <p className="text-xs font-semibold opacity-90">{resultadoIngreso.detalle}</p>
+            {resultadoIngreso.detalle && <p className="text-xs font-semibold opacity-90">{resultadoIngreso.detalle}</p>}
+            {resultadoIngreso.movilidad && (
+              <p className="inline-block px-3 py-1 rounded-lg bg-amber-200 text-amber-900 text-sm font-black">♿ MOVILIDAD REDUCIDA{resultadoIngreso.lista ? ' (en el grupo)' : ''}</p>
+            )}
+            {resultadoIngreso.acceso && (
+              <p className="px-3 py-2 rounded-xl text-white text-sm font-black text-center" style={{ backgroundColor: resultadoIngreso.acceso.color }}>📍 {resultadoIngreso.acceso.texto}</p>
+            )}
+            {resultadoIngreso.lista && (
+              <ul className="text-sm space-y-0.5 bg-white/70 rounded-lg p-2">
+                {resultadoIngreso.lista.map((p, i) => (
+                  <li key={i} className={`font-semibold ${p.nuevo === false ? 'opacity-50' : ''}`}>• {p.nombre}{p.movilidad ? ' ♿' : ''}{p.nuevo === false ? ' (ya había ingresado)' : ''}</li>
+                ))}
+              </ul>
+            )}
           </div>
         )}
 
@@ -1431,7 +1788,9 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
             <div className="p-4 rounded-xl bg-slate-50 border flex items-center justify-between gap-3">
               <div>
                 <p className="font-bold text-slate-900">{egrSel.nombre_completo}</p>
-                <p className="text-xs text-slate-500">DNI Egresado: {egrSel.dni}</p>
+                <p className="text-xs text-slate-500">DNI Egresado: {egrSel.dni}{textoCurso(egrSel) ? ` · ${textoCurso(egrSel)}` : ''}</p>
+                <p className="text-[11px] font-bold mt-0.5" style={{ color: colorFamiliaDe(egrSel) }}>Familia: {accesoFamiliaDe(egrSel)}</p>
+                {egrSel.activo === false && <p className="text-[11px] font-bold text-rose-700">NO ASISTE (plazas liberadas)</p>}
               </div>
               <button onClick={() => alternarAsistencia('egresados', egrSel)} className={`px-3.5 py-1.5 rounded-xl text-xs font-bold shadow-xs cursor-pointer ${egrSel.asistio ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-800'}`}>
                 {egrSel.asistio ? '✓ Egresado presente' : 'Marcar ingreso del egresado'}
@@ -1442,8 +1801,8 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
               {invitados.filter((i) => i.egresado_id === egresadoSeleccionado.id).map((inv) => (
                 <div key={inv.id} className="p-3 rounded-xl border flex items-center justify-between">
                   <div>
-                    <p className="font-bold text-sm">{inv.nombre_completo}</p>
-                    <p className="text-xs text-slate-500">DNI: {inv.dni} · <strong>{inv.numero_entrada}</strong></p>
+                    <p className="font-bold text-sm">{inv.nombre_completo}{tieneMovilidad(inv) ? ' ♿' : ''}</p>
+                    <p className="text-xs text-slate-500">DNI: {inv.dni} · <strong>{inv.numero_entrada}</strong> · {esGrupal(inv) ? 'En grupo' : 'Individual'}</p>
                   </div>
                   <button onClick={() => alternarAsistencia('invitados', inv)} className={`px-3.5 py-1.5 rounded-xl text-xs font-bold shadow-xs ${inv.asistio ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-800'}`}>
                     {inv.asistio ? '✓ Asistió' : 'Marcar Ingreso'}
@@ -1480,8 +1839,8 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
               return (
                 <div key={inv.id} className="p-3 rounded-xl border flex items-center justify-between gap-2">
                   <div>
-                    <span className="text-[10px] font-bold uppercase text-amber-600">Familiar</span>
-                    <p className="font-bold text-sm">{inv.nombre_completo}</p>
+                    <span className="text-[10px] font-bold uppercase text-amber-600">Familiar{esGrupal(inv) ? ' · en grupo' : ''}</span>
+                    <p className="font-bold text-sm">{inv.nombre_completo}{tieneMovilidad(inv) ? ' ♿' : ''}</p>
                     <p className="text-xs text-slate-500">DNI: {inv.dni || 'S/D'}{anfitrion ? ` · Invitado de ${anfitrion.nombre_completo}` : ''}</p>
                   </div>
                   <button onClick={() => alternarAsistencia('invitados', inv)} className={`px-3.5 py-1.5 rounded-xl text-xs font-bold shadow-xs shrink-0 ${inv.asistio ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-800'}`}>
@@ -1494,7 +1853,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
               <div key={vip.id} className="p-3 rounded-xl border flex items-center justify-between gap-2">
                 <div>
                   <span className="text-[10px] font-bold uppercase text-rose-600">VIP / Autoridad</span>
-                  <p className="font-bold text-sm">{vip.nombre_completo}</p>
+                  <p className="font-bold text-sm">{vip.nombre_completo}{tieneMovilidad(vip) ? ' ♿' : ''}</p>
                   <p className="text-xs text-slate-500">DNI: {vip.dni || 'S/D'}</p>
                 </div>
                 <button onClick={() => alternarAsistencia('invitados_especiales', vip)} className={`px-3.5 py-1.5 rounded-xl text-xs font-bold shadow-xs shrink-0 ${vip.asistio ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-800'}`}>
@@ -1512,7 +1871,7 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
   );
 }
 
-function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, config, egresados, invitados, docentes, especiales, solicitudes, usuariosSistema, logsSistema, totalEgresados, totalDocentes, totalDocentesConButaca, totalDocentesSinButaca, totalEspeciales, totalCuposFamiliares, totalOcupado, vacantesLibres, recargar, notify, reiniciarAsistenciasGeneral, borrarInvitadosEgresados, registrarLog }) {
+function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActivo, perfilStaff, config, egresados, invitados, docentes, especiales, solicitudes, usuariosSistema, logsSistema, totalEgresados, totalDocentes, totalDocentesConButaca, totalDocentesSinButaca, totalEspeciales, totalCuposFamiliares, totalOcupado, vacantesLibres, recargar, notify, reiniciarAsistenciasGeneral, borrarInvitadosEgresados, registrarLog }) {
   const [tab, setTab] = useState('egresados');
   const [filtroEgresado, setFiltroEgresado] = useState('');
   const [filtroDocente, setFiltroDocente] = useState('');
@@ -1547,6 +1906,14 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
   const [editDni, setEditDni] = useState('');
   const [editCelular, setEditCelular] = useState('');
   const [editCupo, setEditCupo] = useState(4);
+  const [editOrientacion, setEditOrientacion] = useState('');
+  const [editDivision, setEditDivision] = useState('');
+  const [nuevoEgOrientacion, setNuevoEgOrientacion] = useState('');
+  const [nuevoVipMovilidad, setNuevoVipMovilidad] = useState(false);
+  const [editVipMovilidad, setEditVipMovilidad] = useState(false);
+  const [cantAprobar, setCantAprobar] = useState({});
+  const [subiendoEscudo, setSubiendoEscudo] = useState(false);
+  const fileEscudoRef = useRef(null);
   const [guardandoEdicion, setGuardandoEdicion] = useState(false);
 
   const [editDocNombre, setEditDocNombre] = useState('');
@@ -1590,7 +1957,52 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
 
   const [modalCierreParcialAbierto, setModalCierreParcialAbierto] = useState(false);
 
-  const descargarTarjetaAdmin1080x1920 = (nombreQR, subtituloQR, textoRolQR, valorQR) => descargarTarjetaQR(nombreQR, subtituloQR, textoRolQR, valorQR);
+  // Escudo institucional: se achica a 300 px y se guarda en la base (configuracion.escudo) como imagen PNG
+  const subirEscudo = async (ev) => {
+    const archivo = ev.target.files && ev.target.files[0];
+    ev.target.value = '';
+    if (!archivo) return;
+    if (!/^image\//.test(archivo.type)) { notify('El archivo tiene que ser una imagen (PNG o JPG).', 'error'); return; }
+    setSubiendoEscudo(true);
+    try {
+      const dataUrlOriginal = await new Promise((resolve, reject) => {
+        const lector = new FileReader();
+        lector.onload = () => resolve(lector.result);
+        lector.onerror = () => reject(new Error('No se pudo leer el archivo'));
+        lector.readAsDataURL(archivo);
+      });
+      const img = await cargarImagen(dataUrlOriginal);
+      if (!img) throw new Error('No se pudo abrir la imagen');
+      const escala = Math.min(1, 300 / Math.max(img.width, img.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.width * escala);
+      canvas.height = Math.round(img.height * escala);
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      const escudo = canvas.toDataURL('image/png');
+      const resultado = config.id
+        ? await supabase.from('configuracion').update({ escudo }).eq('id', config.id)
+        : await supabase.from('configuracion').insert({ estado_etapa: config.estado_etapa || 'abierta', cupo_base: cupoBaseDe(config), escudo });
+      if (resultado.error) throw resultado.error;
+      await registrarLog('CONFIGURACION', 'Escudo', 'Se cargó el escudo institucional.');
+      await recargar();
+      notify('Escudo institucional guardado. Ya aparece en la página principal y en los pases.');
+    } catch (err) {
+      const faltaColumna = /escudo/i.test(err.message || '') || err.code === 'PGRST204' || err.code === '42703';
+      notify(faltaColumna ? 'Falta crear la columna "escudo" en la tabla configuracion (Supabase). Ejecutá el SQL y volvé a intentar.' : 'No se pudo guardar el escudo: ' + err.message, 'error');
+    } finally {
+      setSubiendoEscudo(false);
+    }
+  };
+
+  const quitarEscudo = async () => {
+    if (!config.id || !config.escudo) return;
+    if (!window.confirm('¿Quitar el escudo institucional? Deja de aparecer en la página principal y en los pases nuevos.')) return;
+    const { error } = await supabase.from('configuracion').update({ escudo: null }).eq('id', config.id);
+    if (error) { notify('No se pudo quitar el escudo: ' + error.message, 'error'); return; }
+    await registrarLog('CONFIGURACION', 'Escudo', 'Se quitó el escudo institucional.');
+    await recargar();
+    notify('Escudo quitado.');
+  };
 
   // Protección: no se puede dejar al sistema sin administradores activos
   const quedaOtroAdmin = (u) => usuariosSistema.some((x) => x.id !== u.id && String(x.rol || '').toLowerCase() === 'admin' && x.activo !== false);
@@ -1979,10 +2391,10 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
   const exportarInvitadosCSV = () => {
     const porId = {};
     egresados.forEach((e) => { porId[e.id] = e; });
-    const filas = [['N° entrada', 'DNI invitado', 'Nombre invitado', 'Invitado de', 'DNI egresado', 'Presente']];
+    const filas = [['N° entrada', 'DNI invitado', 'Nombre invitado', 'Invitado de', 'DNI egresado', 'División', 'Modalidad', 'Movilidad reducida', 'Acceso', 'Presente']];
     invitados.forEach((i) => {
       const anf = porId[i.egresado_id];
-      filas.push([i.numero_entrada || '', i.dni || '', i.nombre_completo || '', anf?.nombre_completo || '', anf?.dni || '', i.asistio ? 'SI' : 'NO']);
+      filas.push([i.numero_entrada || '', i.dni || '', i.nombre_completo || '', anf?.nombre_completo || '', anf?.dni || '', anf?.division || '', esGrupal(i) ? 'En grupo' : 'Individual', tieneMovilidad(i) ? 'SI' : '', accesoFamiliaDe(anf), i.asistio ? 'SI' : 'NO']);
     });
     descargarCSV('invitados-de-egresados-esrn5.csv', filas);
   };
@@ -2074,12 +2486,14 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
         dni: sanitizeDNI(nuevoEgDni),
         nombre_completo: nuevoEgNombre.trim().toUpperCase(),
         cupo_asignado: cupoBaseDe(config),
+        ...(nuevoEgOrientacion ? { orientacion: nuevoEgOrientacion } : {}),
         activo: true
       });
       if (errIns) throw errIns;
       await registrarLog('AGREGAR', 'Egresados', `Se agregó al egresado ${nuevoEgNombre.trim().toUpperCase()}`);
       setNuevoEgNombre('');
       setNuevoEgDni('');
+      setNuevoEgOrientacion('');
       setModalAgregarEgresado(false);
       await recargar();
       notify('Egresado agregado con éxito.');
@@ -2116,17 +2530,19 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
       const { error: errIns } = await supabase.from('invitados_especiales').insert({
         dni: nuevoVipDni ? sanitizeDNI(nuevoVipDni) : null,
         nombre_completo: nuevoVipNombre.trim().toUpperCase(),
+        ...(nuevoVipMovilidad ? { movilidad_reducida: true } : {}),
         activo: true
       });
       if (errIns) throw errIns;
       await registrarLog('AGREGAR', 'VIP', `Se agregó al VIP ${nuevoVipNombre.trim().toUpperCase()}`);
       setNuevoVipNombre('');
       setNuevoVipDni('');
+      setNuevoVipMovilidad(false);
       setModalAgregarVip(false);
       await recargar();
       notify('Invitado VIP agregado con éxito.');
     } catch (err) {
-      notify('Error al agregar VIP: ' + err.message, 'error');
+      notify(/movilidad_reducida/i.test(err.message || '') ? 'Falta crear la columna "movilidad_reducida" en invitados_especiales (Supabase). Ejecutá el SQL y volvé a intentar.' : 'Error al agregar VIP: ' + err.message, 'error');
     }
   };
 
@@ -2136,6 +2552,8 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
     setEditDni(e.dni || '');
     setEditCelular(e.celular || '');
     setEditCupo(cupoDe(e, config));
+    setEditOrientacion(tipoOrientacion(e) === 'cn' ? 'CIENCIAS NATURALES' : tipoOrientacion(e) === 'edu' ? 'EDUCACION' : '');
+    setEditDivision(e.division || '');
   };
 
   const guardarEdicionEgresado = async (e) => {
@@ -2147,7 +2565,9 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
         nombre_completo: editNombre.trim().toUpperCase(),
         dni: sanitizeDNI(editDni),
         celular: editCelular.trim(),
-        cupo_asignado: Number(editCupo)
+        cupo_asignado: Number(editCupo),
+        orientacion: editOrientacion || null,
+        division: editDivision.trim() || null
       }).eq('id', modalEditarEgr.id);
       if (errEgr) throw errEgr;
       await registrarLog('EDITAR', 'Egresados', `Se editó el egresado ${editNombre.trim().toUpperCase()}`);
@@ -2195,6 +2615,7 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
     setModalEditarVip(v);
     setEditVipNombre(v.nombre_completo || '');
     setEditVipDni(v.dni || '');
+    setEditVipMovilidad(tieneMovilidad(v));
   };
 
   const guardarEdicionVip = async (e) => {
@@ -2202,43 +2623,64 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
     if (!modalEditarVip) return;
     setGuardandoVip(true);
     try {
-      await supabase.from('invitados_especiales').update({
+      const cambiosVip = {
         nombre_completo: editVipNombre.trim().toUpperCase(),
         dni: editVipDni ? sanitizeDNI(editVipDni) : null
-      }).eq('id', modalEditarVip.id);
+      };
+      if (editVipMovilidad !== tieneMovilidad(modalEditarVip)) cambiosVip.movilidad_reducida = editVipMovilidad;
+      const { error: errVip } = await supabase.from('invitados_especiales').update(cambiosVip).eq('id', modalEditarVip.id);
+      if (errVip) throw errVip;
       await registrarLog('EDITAR', 'VIP', `Se editó el VIP ${editVipNombre.trim().toUpperCase()}`);
       setModalEditarVip(null);
       await recargar();
       notify('Invitado VIP actualizado correctamente.');
     } catch (err) {
-      notify('Error al actualizar VIP: ' + err.message, 'error');
+      notify(/movilidad_reducida/i.test(err.message || '') ? 'Falta crear la columna "movilidad_reducida" en invitados_especiales (Supabase). Ejecutá el SQL y volvé a intentar.' : 'Error al actualizar VIP: ' + err.message, 'error');
     } finally {
       setGuardandoVip(false);
     }
   };
 
+  // Aprobar total o parcial (se elige cuántas) o rechazar. En cualquier caso la solicitud queda cerrada.
   const resolverSolicitud = async (sol, aprobar) => {
+    const pedidas = Number(sol.cantidad_solicitada) || 0;
+    const cantidad = aprobar ? Number(cantAprobar[sol.id] ?? pedidas) : 0;
+    if (aprobar && (!Number.isInteger(cantidad) || cantidad < 1 || cantidad > pedidas)) {
+      notify(`Elegí cuántas butacas aprobar (de 1 a ${pedidas}).`, 'error');
+      return;
+    }
+    const egr = egresados.find((e) => e.id === sol.egresado_id);
+    const aviso = aprobar
+      ? `¿Aprobar ${cantidad} de ${pedidas} butaca(s) para ${sol.egresado_nombre}?\n\nSe suman ${cantidad} al cupo del egresado y la solicitud queda cerrada.`
+      : `¿Rechazar la solicitud de ${sol.egresado_nombre}?\n\nLa solicitud queda cerrada: el egresado no puede volver a pedir.`;
+    if (!window.confirm(aviso)) return;
     try {
       const nuevoEstado = aprobar ? 'aprobada' : 'rechazada';
-
-      if (aprobar) {
-        const egr = egresados.find((e) => e.id === sol.egresado_id);
-        if (egr) {
-          const cupoActual = cupoDe(egr, config);
-          const nuevoCupo = cupoActual + Number(sol.cantidad_solicitada);
-          const { error: errCupo } = await supabase.from('egresados').update({ cupo_asignado: nuevoCupo }).eq('id', egr.id);
-          if (errCupo) throw errCupo;
+      // Primero se cierra la solicitud (solo si sigue pendiente), así no se suma el cupo dos veces
+      const { data: cerrada, error: errEstado } = await supabase.from('solicitudes_butacas')
+        .update({ estado: nuevoEstado, cantidad_aprobada: cantidad })
+        .eq('id', sol.id).eq('estado', 'pendiente').select('id');
+      if (errEstado) throw errEstado;
+      if (!cerrada || cerrada.length === 0) {
+        await recargar();
+        notify('Esta solicitud ya había sido resuelta (por otra persona o en otra pestaña).', 'warning');
+        return;
+      }
+      if (aprobar && egr) {
+        const nuevoCupo = cupoDe(egr, config) + cantidad;
+        const { error: errCupo } = await supabase.from('egresados').update({ cupo_asignado: nuevoCupo }).eq('id', egr.id);
+        if (errCupo) {
+          await recargar();
+          notify(`La solicitud quedó aprobada, pero NO se pudo sumar el cupo (${errCupo.message}). Sumá ${cantidad} a mano desde "Editar" del egresado.`, 'error');
+          return;
         }
       }
-
-      const { error: errEstado } = await supabase.from('solicitudes_butacas').update({ estado: nuevoEstado }).eq('id', sol.id);
-      if (errEstado) throw errEstado;
-
-      await registrarLog('SOLICITUD', 'Butacas', `Se ${nuevoEstado} la solicitud de butacas para ${sol.egresado_nombre}`);
+      await registrarLog('SOLICITUD', 'Butacas', aprobar ? `Se aprobaron ${cantidad} de ${pedidas} butaca(s) extra para ${sol.egresado_nombre}` : `Se rechazó la solicitud de butacas de ${sol.egresado_nombre}`);
       await recargar();
-      notify(`Solicitud ${nuevoEstado} con éxito.`);
+      notify(aprobar ? `Solicitud aprobada: +${cantidad} butaca(s).` : 'Solicitud rechazada.');
     } catch (err) {
-      notify('Error al procesar solicitud: ' + err.message, 'error');
+      const faltaColumna = /cantidad_aprobada/i.test(err.message || '');
+      notify(faltaColumna ? 'Falta crear la columna "cantidad_aprobada" en solicitudes_butacas (Supabase). Ejecutá el SQL y volvé a intentar.' : 'Error al procesar solicitud: ' + err.message, 'error');
     }
   };
 
@@ -2400,11 +2842,11 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
 
       const hojaEgresados = egresados.map((e) => {
         const susInv = invitados.filter((i) => i.egresado_id === e.id);
-        return { DNI: e.dni, 'Nombre completo': e.nombre_completo, Estado: e.activo === false ? 'NO ASISTE' : 'Asiste', Presente: si(e.asistio), 'Cupo asignado': e.cupo_asignado ?? '', 'Invitados cargados': susInv.length, 'Invitados presentes': susInv.filter((i) => i.asistio).length };
+        return { DNI: e.dni, 'Nombre completo': e.nombre_completo, 'División': e.division || '', 'Orientación': e.orientacion || '', Estado: e.activo === false ? 'NO ASISTE' : 'Asiste', Presente: si(e.asistio), 'Cupo asignado': e.cupo_asignado ?? '', 'Invitados cargados': susInv.length, 'Invitados presentes': susInv.filter((i) => i.asistio).length };
       });
-      const hojaFamiliares = invitados.map((i) => ({ 'N° entrada': i.numero_entrada || '', DNI: i.dni || '', 'Nombre completo': i.nombre_completo, 'Invitado de': porId[i.egresado_id]?.nombre_completo || '', Presente: si(i.asistio), 'Hora de ingreso': i.asistio ? hora(i.hora_ingreso) : '' }));
+      const hojaFamiliares = invitados.map((i) => ({ 'N° entrada': i.numero_entrada || '', DNI: i.dni || '', 'Nombre completo': i.nombre_completo, 'Invitado de': porId[i.egresado_id]?.nombre_completo || '', Modalidad: esGrupal(i) ? 'En grupo' : 'Individual', 'Movilidad reducida': tieneMovilidad(i) ? 'SI' : '', Acceso: accesoFamiliaDe(porId[i.egresado_id]), Presente: si(i.asistio), 'Hora de ingreso': i.asistio ? hora(i.hora_ingreso) : '' }));
       const hojaDocentes = docentes.map((d) => ({ DNI: d.dni, 'Nombre completo': d.nombre_completo, Estado: d.activo === false ? 'NO ASISTE' : 'Asiste', 'Ocupa butaca': d.ocupa_butaca === false ? 'NO' : 'SI', Presente: si(d.asistio) }));
-      const hojaVip = especiales.map((v) => ({ DNI: v.dni || '', 'Nombre e institución': v.nombre_completo, Estado: v.activo === false ? 'NO ASISTE' : 'Asiste', Presente: si(v.asistio) }));
+      const hojaVip = especiales.map((v) => ({ DNI: v.dni || '', 'Nombre e institución': v.nombre_completo, 'Movilidad reducida': tieneMovilidad(v) ? 'SI' : '', Estado: v.activo === false ? 'NO ASISTE' : 'Asiste', Presente: si(v.asistio) }));
 
       const resumen = [
         { Concepto: 'Egresados presentes', Cantidad: egresadosPresentesCount, 'De un total de': totalEgresados },
@@ -2452,7 +2894,7 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
         <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Egresados</p><p className="text-2xl font-extrabold">{totalEgresados}</p></div>
         <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Docentes</p><p className="text-2xl font-extrabold">{totalDocentes}</p><p className="text-[10px] text-slate-500 mt-0.5">{totalDocentesConButaca} con butaca · {totalDocentesSinButaca} sin</p></div>
         <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Especiales / VIP</p><p className="text-2xl font-extrabold">{totalEspeciales}</p></div>
-        <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Cupos Familiares</p><p className="text-2xl font-extrabold">{totalCuposFamiliares}</p></div>
+        <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Plazas Familiares</p><p className="text-2xl font-extrabold">{totalCuposFamiliares}</p>{(config.estado_etapa || 'abierta') !== 'abierta' && <p className="text-[10px] text-slate-500 mt-0.5">cargadas + extras aprobadas</p>}</div>
         <div className={`col-span-2 sm:col-span-1 p-4 rounded-2xl border ${vacantesLibres < 0 ? 'bg-rose-50 text-rose-700' : vacantesLibres <= 25 ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'}`}>
           <p className="text-xs font-semibold">Vacantes Libres (525 máx)</p><p className="text-2xl font-extrabold">{vacantesLibres}</p>
           {vacantesLibres < 0 && <p className="text-[10px] font-bold mt-0.5">Cupos asignados por encima del aforo</p>}
@@ -2463,8 +2905,13 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
       <div className="bg-white p-4 rounded-2xl border flex flex-wrap items-center justify-between gap-4">
         <div>
           <p className="text-xs font-bold uppercase text-slate-500">Etapa Global de Carga</p>
+          <p className="text-[11px] text-slate-500 mt-0.5">
+            {(config.estado_etapa || 'abierta') === 'abierta' && 'Los egresados pueden cargar y modificar invitados. Cada uno ocupa su cupo completo.'}
+            {config.estado_etapa === 'cierre_parcial' && 'Solo editan los egresados con plazas extra aprobadas. Al resto se le cuentan solo los invitados cargados: los cupos sin usar quedan libres.'}
+            {config.estado_etapa === 'cierre_definitivo' && 'Nadie puede modificar invitados. El aforo cuenta solo los invitados cargados.'}
+          </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button onClick={() => cambiarEtapaGlobalDirecto('abierta')} className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${config.estado_etapa === 'abierta' ? 'bg-[#6B1D2F] text-white shadow' : 'bg-slate-100 text-slate-700'}`}>Abierta</button>
           <button onClick={() => cambiarEtapaGlobalConAdvertencia('cierre_parcial')} className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${config.estado_etapa === 'cierre_parcial' ? 'bg-amber-600 text-white shadow' : 'bg-slate-100 text-slate-700'}`}>Cierre Parcial</button>
           <button onClick={() => cambiarEtapaGlobalDirecto('cierre_definitivo')} className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${config.estado_etapa === 'cierre_definitivo' ? 'bg-rose-600 text-white shadow' : 'bg-slate-100 text-slate-700'}`}>Definitivo</button>
@@ -2482,9 +2929,11 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
               Al activar la etapa de <b>Cierre Parcial</b>, ocurrirán los siguientes cambios operativos en el sistema:
             </p>
             <ul className="list-disc pl-5 text-xs text-slate-600 space-y-1.5">
-              <li>Los egresados ya <b>no podrán modificar ni editar</b> el padrón de sus invitados base ya cargados.</li>
-              <li>Se habilitará de manera exclusiva la gestión y aprobación de <b>butacas extra/plus</b> desde la bandeja de solicitudes.</li>
+              <li>Los egresados <b>sin plazas extra aprobadas</b> ya no podrán cargar ni modificar invitados.</li>
+              <li>A esos egresados se les cuentan en el aforo <b>solo los invitados que cargaron</b>: los cupos que no usaron <b>quedan libres</b> para reasignar (por ejemplo, aprobando solicitudes de butacas extra).</li>
+              <li>Los egresados <b>con plazas extra aprobadas</b> pueden seguir entrando al portal para completar sus invitados.</li>
               {whatsappActivo && <li>Podrás notificar por WhatsApp a los alumnos beneficiados para que vuelvan a ingresar al portal y completen sus cupos adicionales.</li>}
+              <li>Si volvés a la etapa <b>Abierta</b>, todo vuelve a como estaba (no se borra nada).</li>
             </ul>
             <div className="flex gap-3 pt-3 border-t">
               <button onClick={() => setModalCierreParcialAbierto(false)} className="flex-1 py-2.5 bg-slate-100 text-slate-700 rounded-xl text-xs font-bold cursor-pointer">Cancelar</button>
@@ -2502,6 +2951,7 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
         <button onClick={() => setTab('solicitudes')} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === 'solicitudes' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Solicitudes Butacas ({solicitudes.length})</button>
         <button onClick={() => setTab('reportes')} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === 'reportes' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Acreditación en Vivo</button>
         <button onClick={() => setTab('aforo')} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === 'aforo' ? 'bg-indigo-700 text-white shadow' : 'bg-white border'}`}>⚙️ Aforo y Sala</button>
+        <button onClick={abrirResumenPapel} className="px-4 py-2 rounded-xl text-xs font-bold cursor-pointer bg-indigo-700 hover:bg-indigo-800 text-white flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" /> Resumen Papel</button>
         {perfilStaff?.rol === 'admin' && (
           <button onClick={() => setTab('usuarios')} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === 'usuarios' ? 'bg-emerald-600 text-white' : 'bg-white border'}`}>Usuarios del Sistema ({usuariosSistema.length})</button>
         )}
@@ -2542,7 +2992,12 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
                       <span className="font-semibold">{e.nombre_completo}</span> <span className="text-xs text-slate-500">({e.dni})</span> {e.activo === false && <span className="px-2 py-0.5 bg-rose-100 text-rose-700 rounded-full text-[10px] font-bold">NO ASISTE</span>}
                       {!whatsappActivo ? null : numeroWp ? <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full text-[10px] font-bold">📱 Con WhatsApp</span> : <span className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded-full text-[10px]">Sin Celular</span>}
                     </div>
-                    <p className="text-xs text-slate-400">Invitados cargados: <b>{misInvitados.length} / {e.cupo_asignado}</b></p>
+                    <p className="text-xs text-slate-400">
+                      {textoCurso(e) ? <span className="font-semibold" style={{ color: colorFamiliaDe(e) }}>{textoCurso(e)} · </span> : <span className="font-semibold text-rose-600">Sin orientación · </span>}
+                      Invitados cargados: <b>{misInvitados.length} / {e.cupo_asignado}</b>
+                      {misInvitados.some(tieneMovilidad) && <span className="ml-1">· ♿ {misInvitados.filter(tieneMovilidad).length}</span>}
+                      {tieneExtraAprobada(e, solicitudes) && <span className="ml-1 font-bold text-emerald-700">· Extra aprobada</span>}
+                    </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <button onClick={() => abrirModalEditar(e)} className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"><Edit2 className="w-3.5 h-3.5" /> Editar y Descargar QR</button>
@@ -2589,6 +3044,13 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
                   className="w-full px-3 py-2 bg-white border rounded-xl text-sm font-mono outline-none focus:border-[#6B1D2F]"
                 />
               </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Orientación</label>
+                <select value={nuevoEgOrientacion} onChange={(e) => setNuevoEgOrientacion(e.target.value)} className="w-full px-3 py-2 bg-white border rounded-xl text-sm">
+                  <option value="">(sin cargar)</option>
+                  {ORIENTACIONES.map((o) => <option key={o.valor} value={o.valor}>{o.etiqueta}</option>)}
+                </select>
+              </div>
               <div className="flex gap-2 pt-3 border-t">
                 <button type="button" onClick={() => setModalAgregarEgresado(false)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold cursor-pointer">Cancelar</button>
                 <button type="submit" className="flex-1 py-2.5 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold shadow cursor-pointer">Guardar</button>
@@ -2610,13 +3072,26 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
             </div>
 
             <form onSubmit={guardarEdicionEgresado} className="p-5 space-y-3.5 max-h-[80vh] overflow-y-auto">
-              <div className="p-3 bg-slate-50 border rounded-xl flex items-center justify-between">
+              <div className="p-3 bg-slate-50 border rounded-xl flex items-center justify-between gap-2">
                 <div>
-                  <p className="font-bold text-sm text-slate-900">QR Personal del Egresado</p>
-                  <p className="text-[11px] text-slate-500">Descargar pase institucional</p>
+                  <p className="font-bold text-sm text-slate-900">QR del Egresado</p>
+                  <p className="text-[11px] text-slate-500">Solo el egresado · {ACCESO_TEXTO.egresados.toLowerCase()}</p>
                 </div>
-                <button type="button" onClick={() => descargarTarjetaAdmin1080x1920(modalEditarEgr.nombre_completo, `DNI: ${modalEditarEgr.dni}`, 'EGRESADO', `ESRN005-EGRESADO-${modalEditarEgr.dni}-${sinTildes(modalEditarEgr.nombre_completo)}`)} className="px-3.5 py-2 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"><Download className="w-4 h-4" /> Descargar QR</button>
+                <button type="button" onClick={() => paseEgresado(modalEditarEgr, config.escudo)} className="px-3.5 py-2 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shrink-0"><Download className="w-4 h-4" /> Descargar QR</button>
               </div>
+              {(() => {
+                const grupo = invitados.filter((i) => i.egresado_id === modalEditarEgr.id && esGrupal(i));
+                if (grupo.length === 0) return null;
+                return (
+                  <div className="p-3 border-2 rounded-xl flex items-center justify-between gap-2" style={{ borderColor: colorFamiliaDe(modalEditarEgr) }}>
+                    <div>
+                      <p className="font-bold text-sm" style={{ color: colorFamiliaDe(modalEditarEgr) }}>QR del Grupo Familiar ({grupo.length})</p>
+                      <p className="text-[11px] text-slate-500">{grupo.map((g) => g.nombre_completo + (tieneMovilidad(g) ? ' ♿' : '')).join(', ')}</p>
+                    </div>
+                    <button type="button" onClick={() => paseGrupo(modalEditarEgr, grupo, config.escudo)} className="px-3.5 py-2 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shrink-0" style={{ backgroundColor: colorFamiliaDe(modalEditarEgr) }}><Download className="w-4 h-4" /> Descargar QR</button>
+                  </div>
+                );
+              })()}
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">Nombre y Apellido</label>
@@ -2630,6 +3105,20 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
                 <label className="block text-xs font-bold text-slate-700 mb-1">Celular{whatsappActivo ? ' / WhatsApp' : ''} {whatsappActivo ? <span className="text-rose-600">* Obligatorio</span> : <span className="text-slate-500">(opcional)</span>}</label>
                 <input type="text" required={whatsappActivo} value={editCelular} onChange={(e) => setEditCelular(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm" />
               </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Orientación</label>
+                  <select value={editOrientacion} onChange={(e) => setEditOrientacion(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm bg-white">
+                    <option value="">(sin cargar)</option>
+                    {ORIENTACIONES.map((o) => <option key={o.valor} value={o.valor}>{o.etiqueta}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">División</label>
+                  <input type="text" placeholder="Ej: 5° 1ª TT" value={editDivision} onChange={(e) => setEditDivision(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm" />
+                </div>
+              </div>
+              <p className="text-[11px] text-slate-500 -mt-1">Familia: {accesoFamiliaDe({ orientacion: editOrientacion }).toLowerCase()}</p>
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">Cupo Asignado</label>
                 <input type="number" min="0" max="10" required value={editCupo} onChange={(e) => setEditCupo(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm" />
@@ -2641,20 +3130,19 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
                   {invitados.filter((i) => i.egresado_id === modalEditarEgr.id).map((inv, i) => (
                     <div key={inv.id} className="flex justify-between items-center bg-white p-2.5 rounded-lg border gap-2">
                       <div>
-                        <p className="font-bold text-slate-900"><b>#{i+1}</b> {inv.nombre_completo}</p>
+                        <p className="font-bold text-slate-900"><b>#{i+1}</b> {inv.nombre_completo}{tieneMovilidad(inv) ? ' ♿' : ''}</p>
                         <p className="text-[11px] text-slate-500">DNI: {inv.dni} · <span className="font-mono">{inv.numero_entrada}</span></p>
                       </div>
-                      {inv.es_grupal === false ? (
-                        <button type="button" onClick={() => descargarTarjetaQR(inv.nombre_completo, `Invitado de ${modalEditarEgr.nombre_completo}`, 'ACCESO INDIVIDUAL', inv.numero_entrada)} className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-bold flex items-center gap-1"><Download className="w-3.5 h-3.5" /> Descargar QR</button>
+                      {!esGrupal(inv) ? (
+                        <button type="button" onClick={() => paseInvitado(inv, modalEditarEgr, config.escudo)} className="px-3 py-1.5 text-white rounded-lg text-xs font-bold flex items-center gap-1 shrink-0" style={{ backgroundColor: colorFamiliaDe(modalEditarEgr) }}><Download className="w-3.5 h-3.5" /> QR individual</button>
                       ) : (
-                        <span className="text-[11px] font-bold text-amber-700 text-right">Grupal · entra con el QR del egresado</span>
+                        <span className="text-[11px] font-bold text-amber-700 text-right">En grupo · entra con el QR del grupo</span>
                       )}
                     </div>
                   ))}
                 </div>
               </div>
 
-              <div className="hidden" ref={adminQrRef}><QRCodeSVG value="ESRN005-ADMIN-QR-DUMMY" size={300} level="H" includeMargin={true} /></div>
               <button type="button" onClick={() => alternarNoAsiste('egresados', modalEditarEgr, 'Egresados')} className={`w-full py-2 rounded-xl text-xs font-bold border cursor-pointer ${modalEditarEgr.activo === false ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100' : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'}`}>{modalEditarEgr.activo === false ? 'Reactivar (vuelve a ocupar plaza)' : 'Marcar No Asiste (libera la plaza)'}</button>
               <button type="button" onClick={() => eliminarEgresado(modalEditarEgr)} className="w-full py-2 bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"><Trash2 className="w-4 h-4" /> Eliminar egresado y sus invitados</button>
 
@@ -2695,6 +3183,8 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
                   <div key={i.id} className="py-2.5 flex flex-wrap justify-between items-center gap-2 text-sm">
                     <div>
                       <span className="font-semibold">{i.nombre_completo}</span> <span className="text-xs text-slate-500">({i.dni || 'S/D'})</span>
+                      <span className={`ml-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${esGrupal(i) ? 'bg-indigo-50 text-indigo-700' : 'bg-slate-100 text-slate-600'}`}>{esGrupal(i) ? 'En grupo' : 'Individual'}</span>
+                      {tieneMovilidad(i) && <span className="ml-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">♿ Movilidad reducida</span>}
                       <p className="text-xs text-slate-400">Invitado de <b>{anfitrion ? anfitrion.nombre_completo : 'egresado eliminado'}</b>{i.numero_entrada ? ` · Entrada ${i.numero_entrada}` : ''}</p>
                     </div>
                     <span className={`px-2.5 py-1 rounded-lg text-[11px] font-bold ${i.asistio ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'}`}>{i.asistio ? '✓ Presente' : 'Pendiente'}</span>
@@ -2811,7 +3301,7 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
                 <div>
                   <p className="font-bold text-sm text-slate-900">QR Oficial del Docente</p>
                 </div>
-                <button type="button" onClick={() => descargarTarjetaAdmin1080x1920(modalEditarDoc.nombre_completo, `DNI: ${modalEditarDoc.dni}`, 'DOCENTE', `ESRN005-DOCENTE-${modalEditarDoc.dni}-${sinTildes(modalEditarDoc.nombre_completo)}`)} className="px-3.5 py-2 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold"><Download className="w-4 h-4" /> Descargar QR</button>
+                <button type="button" onClick={() => paseDocente(modalEditarDoc, config.escudo)} className="px-3.5 py-2 bg-slate-700 text-white rounded-xl text-xs font-bold"><Download className="w-4 h-4" /> Descargar QR</button>
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">Nombre y Apellido</label>
@@ -2821,7 +3311,6 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
                 <label className="block text-xs font-bold text-slate-700 mb-1">DNI</label>
                 <input type="text" required maxLength={8} value={editDocDni} onChange={(e) => setEditDocDni(sanitizeDNI(e.target.value))} className="w-full px-3 py-2 border rounded-xl text-sm font-mono" />
               </div>
-              <div className="hidden" ref={adminQrRef}><QRCodeSVG value="ESRN005-ADMIN-QR-DUMMY" size={300} level="H" includeMargin={true} /></div>
               <label className="flex items-center justify-between gap-3 p-3 rounded-xl border bg-slate-50 cursor-pointer">
                 <span className="text-xs"><b className="text-slate-800">Ocupa butaca</b><br /><span className="text-slate-500">Si se apaga, el docente asiste y escanea su QR pero no cuenta en las 525 butacas.</span></span>
                 <input type="checkbox" checked={editDocButaca} onChange={(e) => setEditDocButaca(e.target.checked)} className="w-5 h-5 accent-emerald-600 shrink-0" />
@@ -2861,7 +3350,7 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
             {vipsFiltrados.length === 0 && <p className="text-center text-slate-400 text-sm py-6">No se encontraron invitados VIP.</p>}
             {vipsFiltrados.map((v) => (
               <div key={v.id} className="py-2.5 flex justify-between items-center text-sm">
-                <div><span className="font-semibold">{v.nombre_completo}</span> {v.activo === false && <span className="px-2 py-0.5 bg-rose-100 text-rose-700 rounded-full text-[10px] font-bold">NO ASISTE</span>}</div>
+                <div><span className="font-semibold">{v.nombre_completo}</span> {tieneMovilidad(v) && <span className="px-2 py-0.5 bg-amber-100 text-amber-800 rounded-full text-[10px] font-bold">♿ Movilidad reducida</span>} {v.activo === false && <span className="px-2 py-0.5 bg-rose-100 text-rose-700 rounded-full text-[10px] font-bold">NO ASISTE</span>}</div>
                 <button onClick={() => abrirModalEditarVip(v)} className="px-2.5 py-1 bg-amber-50 text-amber-700 border rounded-lg text-xs font-bold"><Edit2 className="w-3 h-3" /> Editar y Descargar QR</button>
               </div>
             ))}
@@ -2901,6 +3390,10 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
                   className="w-full px-3 py-2 bg-white border rounded-xl text-sm font-mono outline-none focus:border-amber-600"
                 />
               </div>
+              <label className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
+                <input type="checkbox" checked={nuevoVipMovilidad} onChange={(e) => setNuevoVipMovilidad(e.target.checked)} className="w-4 h-4 accent-amber-600" />
+                ♿ Tiene movilidad reducida
+              </label>
               <div className="flex gap-2 pt-3 border-t">
                 <button type="button" onClick={() => setModalAgregarVip(false)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold cursor-pointer">Cancelar</button>
                 <button type="submit" className="flex-1 py-2.5 bg-amber-600 text-white rounded-xl text-xs font-bold shadow cursor-pointer">Guardar</button>
@@ -2922,7 +3415,7 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
                 <div>
                   <p className="font-bold text-sm text-slate-900">QR Oficial VIP</p>
                 </div>
-                <button type="button" onClick={() => descargarTarjetaAdmin1080x1920(modalEditarVip.nombre_completo, modalEditarVip.dni ? `DNI: ${modalEditarVip.dni}` : 'Autoridad', 'INVITADO VIP', `ESRN005-VIP-${modalEditarVip.dni || ''}-${sinTildes(modalEditarVip.nombre_completo)}`)} className="px-3.5 py-2 bg-amber-600 text-white rounded-xl text-xs font-bold"><Download className="w-4 h-4" /> Descargar QR</button>
+                <button type="button" onClick={() => paseVip({ ...modalEditarVip, movilidad_reducida: editVipMovilidad }, config.escudo)} className="px-3.5 py-2 bg-amber-600 text-white rounded-xl text-xs font-bold"><Download className="w-4 h-4" /> Descargar QR</button>
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">Nombre / Institución</label>
@@ -2932,7 +3425,10 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
                 <label className="block text-xs font-bold text-slate-700 mb-1">DNI (Opcional)</label>
                 <input type="text" maxLength={8} value={editVipDni} onChange={(e) => setEditVipDni(sanitizeDNI(e.target.value))} className="w-full px-3 py-2 border rounded-xl text-sm font-mono" />
               </div>
-              <div className="hidden" ref={adminQrRef}><QRCodeSVG value="ESRN005-ADMIN-QR-DUMMY" size={300} level="H" includeMargin={true} /></div>
+              <label className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
+                <input type="checkbox" checked={editVipMovilidad} onChange={(e) => setEditVipMovilidad(e.target.checked)} className="w-4 h-4 accent-amber-600" />
+                ♿ Tiene movilidad reducida
+              </label>
               <button type="button" onClick={() => alternarNoAsiste('invitados_especiales', modalEditarVip, 'VIP')} className={`w-full py-2 rounded-xl text-xs font-bold border cursor-pointer ${modalEditarVip.activo === false ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100' : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'}`}>{modalEditarVip.activo === false ? 'Reactivar (vuelve a ocupar plaza)' : 'Marcar No Asiste (libera la plaza)'}</button>
               <button type="button" onClick={() => eliminarVip(modalEditarVip)} className="w-full py-2 bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"><Trash2 className="w-4 h-4" /> Eliminar invitado VIP</button>
               <div className="flex gap-2 pt-3 border-t">
@@ -2950,7 +3446,7 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
           <div className="flex justify-between items-center border-b pb-3">
             <div>
               <h3 className="font-bold text-base text-slate-900">Bandeja de Solicitudes de Butacas Extra (Plus)</h3>
-              <p className="text-xs text-slate-500">Aprobación o rechazo de cupos adicionales solicitados por los egresados.</p>
+              <p className="text-xs text-slate-500">Cada egresado puede pedir una sola vez. Se puede aprobar todo, una parte o rechazar; en todos los casos la solicitud queda cerrada. Vacantes libres hoy: <b>{vacantesLibres}</b>.</p>
             </div>
             <span className="px-3 py-1 bg-indigo-50 text-indigo-700 rounded-full font-bold text-xs">{solicitudes.length} solicitudes</span>
           </div>
@@ -2961,8 +3457,11 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
             ) : (
               solicitudes.map((s) => {
                 const numeroWp = s.egresado_celular ? s.egresado_celular.replace(/\D/g, '') : '';
-                const linkWpAprobada = `https://wa.me/549${numeroWp}?text=Hola%20${encodeURIComponent(s.egresado_nombre)},%20tu%20solicitud%20de%20+${s.cantidad_solicitada}%20butaca(s)%20fue%20APROBADA.%20Por%20favor%20volvé%20a%20ingresar%20al%20portal%20con%20tu%20DNI.`;
-                const linkWpRechazada = `https://wa.me/549${numeroWp}?text=Hola%20${encodeURIComponent(s.egresado_nombre)},%20tu%20solicitud%20de%20butacas%20extra%20fue%20rechazada%20por%20superar%20el%20aforo%20disponible.`;
+                const estadoSol = String(s.estado || '').toLowerCase();
+                const aprobadas = Number(s.cantidad_aprobada ?? s.cantidad_solicitada) || 0;
+                const textoAprob = aprobadas < Number(s.cantidad_solicitada) ? `${aprobadas} de las ${s.cantidad_solicitada} butacas que pediste` : `${aprobadas} butaca(s) extra`;
+                const linkWpAprobada = `https://wa.me/549${numeroWp}?text=${encodeURIComponent(`Hola ${s.egresado_nombre}, tu solicitud fue APROBADA: te asignamos ${textoAprob}. Volvé a ingresar al portal con tu DNI para cargar a tus invitados y descargar los pases. ESRN N° 005`)}`;
+                const linkWpRechazada = `https://wa.me/549${numeroWp}?text=${encodeURIComponent(`Hola ${s.egresado_nombre}, lamentablemente tu solicitud de butacas extra no pudo aprobarse por falta de lugar en la sala. ESRN N° 005`)}`;
 
                 return (
                   <div key={s.id} className="p-4 border rounded-xl flex flex-wrap justify-between items-center gap-3 bg-slate-50">
@@ -2970,20 +3469,27 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-sm text-slate-900">{s.egresado_nombre}</span>
                         <span className="text-xs text-slate-500">(DNI: {s.egresado_dni})</span>
-                        <span className="px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded font-bold text-xs">+{s.cantidad_solicitada} lugares</span>
+                        <span className="px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded font-bold text-xs">Pide +{s.cantidad_solicitada}</span>
                       </div>
                       <p className="text-xs text-slate-600"><b>Motivo/Observación:</b> {s.observacion || 'Sin observación'}</p>
                       <p className="text-[11px] text-slate-400 font-mono">Solicitado el: {new Date(s.created_at).toLocaleString()}</p>
                     </div>
 
                     <div className="flex items-center gap-2">
-                      {s.estado === 'pendiente' ? (
+                      {estadoSol === 'pendiente' ? (
                         <>
+                          <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
+                            Aprobar
+                            <select value={cantAprobar[s.id] ?? s.cantidad_solicitada} onChange={(e) => setCantAprobar((prev) => ({ ...prev, [s.id]: Number(e.target.value) }))} className="px-2 py-1.5 border rounded-lg bg-white text-xs font-bold">
+                              {Array.from({ length: Math.max(1, Number(s.cantidad_solicitada) || 1) }, (_, k) => k + 1).map((k) => <option key={k} value={k}>{k}</option>)}
+                            </select>
+                            de {s.cantidad_solicitada}
+                          </label>
                           <button
                             onClick={() => resolverSolicitud(s, true)}
                             className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer"
                           >
-                            ✓ Aprobar y Sumar Cupo
+                            ✓ Aprobar y sumar cupo
                           </button>
                           <button
                             onClick={() => resolverSolicitud(s, false)}
@@ -2994,12 +3500,12 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
                         </>
                       ) : (
                         <div className="flex items-center gap-2">
-                          <span className={`px-3 py-1 rounded-lg text-xs font-bold uppercase ${s.estado === 'aprobada' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
-                            {s.estado}
+                          <span className={`px-3 py-1 rounded-lg text-xs font-bold uppercase ${estadoSol === 'aprobada' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                            {estadoSol === 'aprobada' ? `Aprobada: ${aprobadas} de ${s.cantidad_solicitada}` : s.estado}
                           </span>
                           {whatsappActivo && numeroWp && (
                             <a
-                              href={s.estado === 'aprobada' ? linkWpAprobada : linkWpRechazada}
+                              href={estadoSol === 'aprobada' ? linkWpAprobada : linkWpRechazada}
                               target="_blank"
                               rel="noreferrer"
                               className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-xs"
@@ -3252,6 +3758,15 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
               {vipPortalActivo ? '● Activado' : '○ Desactivado'}
             </button>
           </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold uppercase text-slate-500">Escudo</span>
+            {config.escudo && <img src={config.escudo} alt="Escudo" className="w-9 h-9 object-contain bg-white border rounded-lg p-0.5" />}
+            <input ref={fileEscudoRef} type="file" accept="image/png,image/jpeg,image/webp" onChange={subirEscudo} className="hidden" />
+            <button onClick={() => fileEscudoRef.current?.click()} disabled={subiendoEscudo} className="px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer bg-slate-700 hover:bg-slate-800 text-white disabled:opacity-60">
+              {subiendoEscudo ? 'Subiendo...' : config.escudo ? 'Cambiar escudo' : 'Subir escudo'}
+            </button>
+            {config.escudo && <button onClick={quitarEscudo} className="px-2.5 py-2 rounded-xl text-xs font-bold cursor-pointer bg-slate-100 hover:bg-slate-200 text-slate-600">Quitar</button>}
+          </div>
           <button
             onClick={() => { setModalLogs(true); recargar(); }}
             className="px-4 py-2.5 text-sm font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-md flex items-center gap-2 cursor-pointer"
@@ -3324,17 +3839,55 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
   );
 }
 
-function ReporteResumenPapel({ egresados, invitados, docentes, especiales }) {
-  const egresadosOrdenados = [...egresados].sort((a, b) => (a.nombre_completo || '').localeCompare(b.nombre_completo || ''));
+function ReporteResumenPapel({ egresados, invitados, docentes, especiales, config, volver }) {
+  const egresadosOrdenados = [...egresados].sort((a, b) => (a.division || '').localeCompare(b.division || '') || (a.nombre_completo || '').localeCompare(b.nombre_completo || ''));
+  const porId = {};
+  egresados.forEach((e) => { porId[e.id] = e; });
+  const conMovilidad = [
+    ...invitados.filter(tieneMovilidad).map((i) => ({ id: 'i' + i.id, nombre: i.nombre_completo, dni: i.dni, tipo: `Familiar de ${porId[i.egresado_id]?.nombre_completo || '—'}${esGrupal(i) ? ' (en grupo)' : ''}`, acceso: accesoFamiliaDe(porId[i.egresado_id]) })),
+    ...especiales.filter(tieneMovilidad).map((v) => ({ id: 'v' + v.id, nombre: v.nombre_completo, dni: v.dni, tipo: 'VIP / Autoridad', acceso: ACCESO_TEXTO.abajo })),
+  ];
 
   return (
-    <div className="max-w-4xl mx-auto bg-white p-8 rounded-2xl shadow-sm border space-y-8 print:shadow-none print:border-none print:p-0 print:m-0">
-      <div className="flex justify-between items-center border-b pb-4 print:pb-2">
-        <div>
-          <h2 className="text-xl font-bold text-[#6B1D2F]">ESRN N° 005 — Cipolletti</h2>
-          <p className="text-xs text-slate-500">Acto de Colación 2026 · Resumen General para Control en Papel</p>
+    <div className="max-w-4xl mx-auto bg-white p-4 sm:p-8 rounded-2xl shadow-sm border space-y-8 print:shadow-none print:border-none print:p-0 print:m-0">
+      <div className="flex flex-wrap justify-between items-center gap-3 border-b pb-4 print:pb-2">
+        <div className="flex items-center gap-3">
+          {config?.escudo && <img src={config.escudo} alt="Escudo" className="w-12 h-12 object-contain" />}
+          <div>
+            <h2 className="text-xl font-bold text-[#6B1D2F]">ESRN N° 005 — Cipolletti</h2>
+            <p className="text-xs text-slate-500">Acto de Colación 2026 · Resumen General para Control en Papel</p>
+          </div>
         </div>
-        <button onClick={() => window.print()} className="px-4 py-2 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold flex items-center gap-2 cursor-pointer print:hidden"><Printer className="w-4 h-4" /> Imprimir Documento</button>
+        <div className="flex gap-2 print:hidden">
+          {volver && <button onClick={volver} className="px-4 py-2 bg-white border rounded-xl text-xs font-bold cursor-pointer">← Volver a Administración</button>}
+          <button onClick={() => window.print()} className="px-4 py-2 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold flex items-center gap-2 cursor-pointer"><Printer className="w-4 h-4" /> Imprimir Documento</button>
+        </div>
+      </div>
+
+      <div className="space-y-2 text-xs">
+        <h3 className="font-bold text-sm text-[#6B1D2F] uppercase tracking-wide">Accesos a la sala</h3>
+        <ul className="list-disc pl-5 space-y-0.5">
+          <li><b>Egresados:</b> {ACCESO_TEXTO.egresados.toLowerCase()}.</li>
+          <li><b>Familiares de Ciencias Naturales (TM):</b> {ACCESO_TEXTO.abajo.toLowerCase()}.</li>
+          <li><b>Familiares de Educación (TT):</b> {ACCESO_TEXTO.arriba.toLowerCase()}.</li>
+          <li><b>Docentes y VIP:</b> {ACCESO_TEXTO.abajo.toLowerCase()}.</li>
+        </ul>
+      </div>
+
+      <div className="space-y-3">
+        <h3 className="font-bold text-sm text-[#6B1D2F] uppercase tracking-wide">♿ Personas con movilidad reducida ({conMovilidad.length})</h3>
+        {conMovilidad.length === 0 ? (
+          <p className="text-xs text-slate-400 italic">No hay personas marcadas con movilidad reducida.</p>
+        ) : (
+          <table className="w-full text-left border-collapse text-xs">
+            <thead><tr className="bg-amber-50 border-b"><th className="p-2 border">Nombre</th><th className="p-2 border">DNI</th><th className="p-2 border">Quién es</th><th className="p-2 border">Acceso</th></tr></thead>
+            <tbody>
+              {conMovilidad.map((p) => (
+                <tr key={p.id}><td className="p-2 border font-medium">♿ {p.nombre}</td><td className="p-2 border font-mono">{p.dni || 'S/D'}</td><td className="p-2 border">{p.tipo}</td><td className="p-2 border">{p.acceso}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
 
       <div className="space-y-3">
@@ -3347,6 +3900,7 @@ function ReporteResumenPapel({ egresados, invitados, docentes, especiales }) {
                 <th className="p-2 border">Invitado / Familiar</th>
                 <th className="p-2 border">DNI Invitado</th>
                 <th className="p-2 border text-center">Modalidad</th>
+                <th className="p-2 border text-center">Mov. reducida</th>
                 <th className="p-2 border text-center">Firma Ingreso</th>
               </tr>
             </thead>
@@ -3356,17 +3910,22 @@ function ReporteResumenPapel({ egresados, invitados, docentes, especiales }) {
                 return (
                   <React.Fragment key={egr.id}>
                     <tr className="bg-slate-50 font-bold">
-                      <td className="p-2 border align-top" colSpan={5}>🎓 {egr.nombre_completo} (DNI: {egr.dni}) · Cel: {egr.celular || 'S/N'}</td>
+                      <td className="p-2 border align-top" colSpan={6}>
+                        🎓 {egr.nombre_completo} (DNI: {egr.dni}){textoCurso(egr) ? ` · ${textoCurso(egr)}` : ''} · Cel: {egr.celular || 'S/N'}
+                        {egr.activo === false ? ' · NO ASISTE' : ''}
+                        <span className="block font-normal text-[11px] text-slate-600">Familia: {accesoFamiliaDe(egr).toLowerCase()}</span>
+                      </td>
                     </tr>
                     {misInv.length === 0 ? (
-                      <tr><td className="p-2 border text-slate-400 italic" colSpan={5}>Sin invitados cargados</td></tr>
+                      <tr><td className="p-2 border text-slate-400 italic" colSpan={6}>Sin invitados cargados</td></tr>
                     ) : (
                       misInv.map((inv, idx) => (
                         <tr key={inv.id} className="hover:bg-slate-50/50">
                           <td className="p-2 border text-slate-400 pl-6">↳ Cupo #{idx + 1}</td>
                           <td className="p-2 border font-medium">{inv.nombre_completo}</td>
                           <td className="p-2 border font-mono">{inv.dni}</td>
-                          <td className="p-2 border text-center"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800">{inv.es_grupal !== false ? 'Grupal' : 'Individual'}</span></td>
+                          <td className="p-2 border text-center"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800">{esGrupal(inv) ? 'En grupo' : 'Individual'}</span></td>
+                          <td className="p-2 border text-center font-bold">{tieneMovilidad(inv) ? '♿ SÍ' : ''}</td>
                           <td className="p-2 border text-center w-28">______</td>
                         </tr>
                       ))
@@ -3394,10 +3953,10 @@ function ReporteResumenPapel({ egresados, invitados, docentes, especiales }) {
       <div className="space-y-3 pt-6">
         <h3 className="font-bold text-sm text-[#6B1D2F] uppercase tracking-wide">3. Padrón de Invitados VIP / Autoridades</h3>
         <table className="w-full text-left border-collapse text-xs">
-          <thead><tr className="bg-slate-100 border-b"><th className="p-2 border">Nombre / Institución</th><th className="p-2 border">DNI</th><th className="p-2 border text-center">Firma</th></tr></thead>
+          <thead><tr className="bg-slate-100 border-b"><th className="p-2 border">Nombre / Institución</th><th className="p-2 border">DNI</th><th className="p-2 border text-center">Mov. reducida</th><th className="p-2 border text-center">Firma</th></tr></thead>
           <tbody>
             {especiales.map((v) => (
-              <tr key={v.id}><td className="p-2 border font-medium">⭐ {v.nombre_completo}</td><td className="p-2 border font-mono">{v.dni || 'S/D'}</td><td className="p-2 border text-center">______</td></tr>
+              <tr key={v.id}><td className="p-2 border font-medium">⭐ {v.nombre_completo}</td><td className="p-2 border font-mono">{v.dni || 'S/D'}</td><td className="p-2 border text-center font-bold">{tieneMovilidad(v) ? '♿ SÍ' : ''}</td><td className="p-2 border text-center">______</td></tr>
             ))}
           </tbody>
         </table>
