@@ -268,6 +268,14 @@ export default function App() {
 
   const cargarDatosGlobales = async () => {
     try {
+      // Sin sesión (portal público) solo se trae la configuración: los padrones no viajan al navegador
+      const { data: { session: sesionActual } } = await supabase.auth.getSession();
+      if (!sesionActual) {
+        const { data: cfg } = await supabase.from('configuracion').select('*').limit(1).maybeSingle();
+        if (cfg) setConfig({ ...cfg, filas: cfg.filas || 15, butacas_por_fila: cfg.butacas_por_fila || 35 });
+        setEgresados([]); setInvitados([]); setDocentes([]); setEspeciales([]); setSolicitudes([]); setUsuariosSistema([]); setLogsSistema([]);
+        return;
+      }
       const [resCfg, resEgr, resInv, resDoc, resEsp, resSol, resUsr, resLog] = await Promise.all([
         supabase.from('configuracion').select('*').limit(1).maybeSingle(),
         supabase.from('egresados').select('*').order('nombre_completo', { ascending: true }),
@@ -302,6 +310,7 @@ export default function App() {
     await supabase.auth.signOut();
     setPerfilStaff(null);
     setVista('portal');
+    cargarDatosGlobales(); // sin sesión solo queda la configuración en memoria
   };
 
   const reiniciarAsistenciasGeneral = async () => {
@@ -330,7 +339,8 @@ export default function App() {
     const resp = window.prompt("Para confirmar el borrado de todos los invitados, escribí BORRAR en mayúsculas:");
     if (resp !== 'BORRAR') return;
     try {
-      await supabase.from('invitados').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      const { error } = await supabase.from('invitados').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      if (error) throw error;
       await registrarLog('BORRADO_INVITADOS', 'Administración', 'Se borraron todos los invitados egresados.');
       await cargarDatosGlobales();
       notify('Invitados egresados borrados correctamente.');
@@ -462,7 +472,7 @@ export default function App() {
         ) : vista === 'reporte_papel' && session && puedeAdministrar ? (
           <ReporteResumenPapel egresados={egresados} invitados={invitados} docentes={docentes} especiales={especiales} config={config} volver={() => setVista('admin')} />
         ) : (
-          <PortalPrincipalDNI vipPortalActivo={vipPortalActivo} whatsappActivo={whatsappActivo} config={config} egresados={egresados} invitados={invitados} docentes={docentes} especiales={especiales} solicitudes={solicitudes} recargar={cargarDatosGlobales} notify={notify} />
+          <PortalPrincipalDNI vipPortalActivo={vipPortalActivo} whatsappActivo={whatsappActivo} config={config} notify={notify} />
         )}
       </main>
 
@@ -496,7 +506,11 @@ function LoginStaff({ onSuccess, notify }) {
       notify('Sesión iniciada correctamente');
       onSuccess();
     } catch (err) {
-      notify(err.message || 'Credenciales inválidas', 'error');
+      const m = String(err?.message || '');
+      notify(/invalid login credentials/i.test(m) ? 'Email o contraseña incorrectos.'
+        : /email not confirmed/i.test(m) ? 'El email todavía no está confirmado. Consultá con el administrador.'
+        : /failed to fetch|network/i.test(m) ? 'No hay conexión. Revisá tu internet y volvé a intentar.'
+        : (m || 'No se pudo iniciar sesión.'), 'error');
     } finally {
       setLoading(false);
     }
@@ -535,7 +549,16 @@ function LoginStaff({ onSuccess, notify }) {
   );
 }
 
-function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, egresados, invitados, docentes, especiales, solicitudes, recargar, notify }) {
+// Portal público: todo pasa por funciones de la base (RPC). El navegador NO descarga los padrones:
+// solo recibe los datos de la persona cuyo DNI se ingresó.
+const mensajeErrorRPC = (err) => {
+  const m = String(err?.message || err || 'error desconocido');
+  if (/could not find the function|PGRST202|404/i.test(m)) return 'El portal no está disponible en este momento (falta configurar la base). Avisale a la escuela.';
+  if (/failed to fetch|network/i.test(m)) return 'No hay conexión. Revisá tu internet y volvé a intentar.';
+  return m;
+};
+
+function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, notify }) {
   const [dni, setDni] = useState('');
   const [tipoUsuario, setTipoUsuario] = useState('egresado');
   useEffect(() => {
@@ -543,6 +566,9 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, egresados
     if (!vipPortalActivo && tipoUsuario === 'vip') { setTipoUsuario('egresado'); setDatosPersona(null); setError(''); }
   }, [vipPortalActivo, tipoUsuario]);
   const [datosPersona, setDatosPersona] = useState(null);
+  const [misInvitadosGuardados, setMisInvitadosGuardados] = useState([]);
+  const [misSolicitudes, setMisSolicitudes] = useState([]);
+  const [buscando, setBuscando] = useState(false);
   const [error, setError] = useState('');
   const [celular, setCelular] = useState('');
   const [filasInvitados, setFilasInvitados] = useState([]);
@@ -554,20 +580,9 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, egresados
   const [avisoSolicitud, setAvisoSolicitud] = useState(false);
   const qrRef = useRef(null);
 
-  useEffect(() => {
-    if (datosPersona && tipoUsuario === 'egresado') {
-      const actualizado = egresados.find((e) => e.id === datosPersona.id);
-      if (actualizado) {
-        setDatosPersona(actualizado);
-        prepararFilasInvitados(actualizado);
-      }
-    }
-  }, [egresados, invitados, solicitudes, config.estado_etapa]);
-
-  const prepararFilasInvitados = (egr) => {
-    const misInv = invitados.filter((i) => i.egresado_id === egr.id);
+  const prepararFilasInvitados = (egr, misInv, sols) => {
     // Fuera de la etapa de carga solo se muestran los invitados ya cargados (los cupos sin usar quedan liberados)
-    const habilitado = puedeEditarInvitados(egr, { config, solicitudes });
+    const habilitado = puedeEditarInvitados(egr, { config, solicitudes: sols });
     const cupo = habilitado ? Math.max(cupoDe(egr, config), misInv.length) : misInv.length;
     const arr = [];
     for (let idx = 0; idx < cupo; idx++) {
@@ -586,12 +601,25 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, egresados
       }
     }
     setFilasInvitados(arr);
-    if (misInv.length > 0) {
-      setEditando(false);
-    } else {
-      setEditando(true);
-    }
+    setEditando(misInv.length === 0 && habilitado);
   };
+
+  // Carga en pantalla lo que devuelve la base para un egresado (persona + invitados + solicitudes)
+  const aplicarDatosEgresado = (data) => {
+    const persona = data.persona;
+    const invs = Array.isArray(data.invitados) ? data.invitados : [];
+    const sols = Array.isArray(data.solicitudes) ? data.solicitudes : [];
+    setDatosPersona(persona);
+    setMisInvitadosGuardados(invs);
+    setMisSolicitudes(sols);
+    if (persona?.celular) setCelular(persona.celular);
+    prepararFilasInvitados(persona, invs, sols);
+  };
+
+  // Si en Administración cambian la etapa mientras el egresado está en pantalla, se reacomodan los cupos
+  useEffect(() => {
+    if (datosPersona && tipoUsuario === 'egresado') prepararFilasInvitados(datosPersona, misInvitadosGuardados, misSolicitudes);
+  }, [config.estado_etapa]);
 
   const buscarPorDNI = async (e) => {
     e.preventDefault();
@@ -603,35 +631,31 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, egresados
       setError('Ingresá un DNI válido de 7 u 8 dígitos.');
       return;
     }
-
     if (tipoUsuario === 'vip' && !vipPortalActivo) {
       setError('El acceso de invitados VIP por este portal no está habilitado.');
       return;
     }
 
-    let encontrado = null;
-    if (tipoUsuario === 'egresado') {
-      encontrado = egresados.find((x) => sanitizeDNI(x.dni) === limpio);
-    } else if (tipoUsuario === 'docente') {
-      encontrado = docentes.find((x) => sanitizeDNI(x.dni) === limpio || String(x.dni || '').trim() === dni.trim());
-    } else {
-      encontrado = especiales.find((x) => sanitizeDNI(x.dni) === limpio || String(x.dni || '').trim() === dni.trim() || String(obtenerNombreReal(x)).toUpperCase().includes(dni.toUpperCase()));
-    }
-
-    if (!encontrado) {
-      setError(`No se encontró ningún registro con ese DNI en ${tipoUsuario.toUpperCase()}.`);
-      return;
-    }
-
-    if (encontrado.activo === false) {
-      setError('Figurás como que no asistirás al acto. Si cambiaste de opinión, comunicate con la escuela.');
-      return;
-    }
-
-    setDatosPersona(encontrado);
-    if (tipoUsuario === 'egresado') {
-      if (encontrado.celular) setCelular(encontrado.celular);
-      prepararFilasInvitados(encontrado);
+    setBuscando(true);
+    try {
+      const { data, error: errRpc } = await supabase.rpc('portal_consultar', { p_tipo: tipoUsuario, p_dni: limpio });
+      if (errRpc) throw errRpc;
+      if (!data || !data.encontrado) {
+        setError(data?.motivo === 'vip_desactivado'
+          ? 'El acceso de invitados VIP por este portal no está habilitado.'
+          : `No se encontró ningún registro con ese DNI en ${tipoUsuario.toUpperCase()}.`);
+        return;
+      }
+      if (data.persona?.activo === false) {
+        setError('Figurás como que no asistirás al acto. Si cambiaste de opinión, comunicate con la escuela.');
+        return;
+      }
+      if (tipoUsuario === 'egresado') aplicarDatosEgresado(data);
+      else setDatosPersona(data.persona);
+    } catch (err) {
+      setError(mensajeErrorRPC(err));
+    } finally {
+      setBuscando(false);
     }
   };
 
@@ -641,7 +665,7 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, egresados
   };
 
   const guardarInvitados = async () => {
-    if (!puedeEditarInvitados(datosPersona, { config, solicitudes })) {
+    if (!puedeEditarInvitados(datosPersona, { config, solicitudes: misSolicitudes })) {
       notify('La carga de invitados está cerrada. Si necesitás un cambio, comunicate con la escuela.', 'error');
       return;
     }
@@ -650,7 +674,7 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, egresados
       return;
     }
 
-    // Validación previa: cada invitado necesita nombre Y DNI (o ambos vacíos); no puede haber DNI repetidos
+    // Validación previa (la base vuelve a controlar todo): nombre Y DNI juntos, sin DNI repetidos
     const dnisVistos = new Set();
     for (let i = 0; i < filasInvitados.length; i++) {
       const nombre = (filasInvitados[i].nombre_completo || '').trim();
@@ -668,59 +692,20 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, egresados
       }
     }
 
-    const verificar = (r) => {
-      if (r && r.error) throw r.error;
-      return r;
-    };
-
     setGuardando(true);
     try {
-      verificar(await supabase.from('egresados').update({ celular }).eq('id', datosPersona.id));
-
-      for (let i = 0; i < filasInvitados.length; i++) {
-        const fila = filasInvitados[i];
-        const nombreLimpio = fila.nombre_completo.trim();
-        const dniLimpio = sanitizeDNI(fila.dni);
-
-        if (nombreLimpio && dniLimpio) {
-          if (fila.id) {
-            verificar(await supabase.from('invitados').update({
-              nombre_completo: nombreLimpio.toUpperCase(),
-              dni: dniLimpio,
-              es_grupal: fila.es_grupal === true,
-              movilidad_reducida: fila.movilidad_reducida === true
-            }).eq('id', fila.id));
-          } else {
-            const numEntrada = `ENT-${datosPersona.dni.slice(-4)}-${i + 1}-${Math.floor(100 + Math.random() * 900)}`;
-            verificar(await supabase.from('invitados').insert({
-              egresado_id: datosPersona.id,
-              nombre_completo: nombreLimpio.toUpperCase(),
-              dni: dniLimpio,
-              numero_entrada: numEntrada,
-              es_grupal: fila.es_grupal === true,
-              movilidad_reducida: fila.movilidad_reducida === true,
-              asistio: false
-            }));
-          }
-        } else if (!nombreLimpio && !dniLimpio && fila.id) {
-          verificar(await supabase.from('invitados').delete().eq('id', fila.id));
-        }
-      }
-      await recargar();
+      // Se manda todo junto: la base guarda todo o nada
+      const payload = filasInvitados
+        .filter((f) => f.id || (f.nombre_completo || '').trim() || (f.dni || '').trim())
+        .map((f) => ({ id: f.id || null, nombre_completo: (f.nombre_completo || '').trim(), dni: sanitizeDNI(f.dni || ''), es_grupal: f.es_grupal === true, movilidad_reducida: f.movilidad_reducida === true }));
+      const { data, error: errRpc } = await supabase.rpc('portal_guardar_invitados', { p_dni: sanitizeDNI(datosPersona.dni || dni), p_celular: celular, p_invitados: payload });
+      if (errRpc) throw errRpc;
+      aplicarDatosEgresado(data);
       setEditando(false);
       notify('Invitados y datos guardados correctamente.');
     } catch (err) {
       console.error(err);
-      const m = String(err?.message || 'error desconocido');
-      const pista = /movilidad_reducida/i.test(m)
-        ? 'Falta crear la columna "movilidad_reducida" en Supabase (avisale a la escuela). '
-        : /duplicate key|unique/i.test(m)
-        ? 'Hay un DNI o un número de entrada que ya existe en la base (un invitado con ese DNI ya está cargado). '
-        : /check constraint/i.test(m)
-          ? 'Algún dato no cumple las reglas de la base. '
-          : '';
-      await recargar();
-      notify(`No se pudieron guardar los invitados. ${pista}Detalle: ${m}`, 'error');
+      notify(`No se pudieron guardar los invitados. ${mensajeErrorRPC(err)}`, 'error');
     } finally {
       setGuardando(false);
     }
@@ -741,33 +726,23 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, egresados
     setAvisoSolicitud(true);
   };
 
-  // Paso 2: confirmado el aviso, se envía (una sola solicitud por egresado)
+  // Paso 2: confirmado el aviso, se envía (la base controla que sea una sola por egresado)
   const enviarSolicitudExtra = async () => {
     setAvisoSolicitud(false);
     setEnviandoSol(true);
     try {
-      const { data: previas, error: errPrev } = await supabase.from('solicitudes_butacas').select('id').eq('egresado_id', datosPersona.id).limit(1);
-      if (errPrev) throw errPrev;
-      if (previas && previas.length > 0) {
-        await recargar();
-        notify('Ya enviaste una solicitud de butacas extra. Solo se puede pedir una vez.', 'error');
-        return;
-      }
-      const { error: errSol } = await supabase.from('solicitudes_butacas').insert({
-        egresado_id: datosPersona.id,
-        egresado_nombre: datosPersona.nombre_completo,
-        egresado_dni: datosPersona.dni,
-        egresado_celular: (celular || datosPersona.celular || '').trim() || null,
-        cantidad_solicitada: Number(cantExtra),
-        observacion: obsExtra.trim(),
-        estado: 'pendiente',
+      const { data, error: errRpc } = await supabase.rpc('portal_solicitar_extra', {
+        p_dni: sanitizeDNI(datosPersona.dni || dni),
+        p_cantidad: Number(cantExtra),
+        p_observacion: obsExtra.trim(),
+        p_celular: (celular || datosPersona.celular || '').trim(),
       });
-      if (errSol) throw errSol;
+      if (errRpc) throw errRpc;
       setObsExtra('');
-      await recargar();
+      aplicarDatosEgresado(data);
       notify('Solicitud de butacas extra enviada.');
     } catch (err) {
-      notify('Error: ' + err.message, 'error');
+      notify('Error: ' + mensajeErrorRPC(err), 'error');
     } finally {
       setEnviandoSol(false);
     }
@@ -778,10 +753,8 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, egresados
       ? '¿Estás seguro de que no asistirás?\n\nSe liberará tu butaca y también las de tus invitados: tus pases y los de tu grupo dejarán de servir para ingresar.'
       : '¿Estás seguro de que no asistirás? Esto liberará tu plaza.';
     if (!window.confirm(aviso)) return;
-    let tabla = tipoUsuario === 'egresado' ? 'egresados' : tipoUsuario === 'docente' ? 'docentes' : 'invitados_especiales';
-    const { error } = await supabase.from(tabla).update({ activo: false }).eq('id', datosPersona.id);
-    if (error) { notify('No se pudo registrar: ' + error.message, 'error'); return; }
-    await recargar();
+    const { error: errRpc } = await supabase.rpc('portal_no_asistire', { p_tipo: tipoUsuario, p_dni: sanitizeDNI(datosPersona.dni || dni) });
+    if (errRpc) { notify('No se pudo registrar: ' + mensajeErrorRPC(errRpc), 'error'); return; }
     notify('Has marcado que no asistirás. ¡Gracias!');
     setDatosPersona(null);
     setDni('');
@@ -791,11 +764,9 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, egresados
   const personaPase = datosPersona ? { ...datosPersona, dni: datosPersona.dni || dni, nombre_completo: nombreMostrado } : null;
   const valorQRPrincipal = !personaPase ? '' : tipoUsuario === 'egresado' ? valorQREgresado(personaPase) : tipoUsuario === 'docente' ? valorQRDocente(personaPase) : valorQRVip(personaPase);
   const textoRolTarjeta = tipoUsuario === 'egresado' ? 'EGRESADO' : tipoUsuario === 'docente' ? 'DOCENTE' : 'INVITADO VIP';
-  const misSolicitudes = tipoUsuario === 'egresado' && datosPersona ? solicitudes.filter((s) => s.egresado_id === datosPersona.id) : [];
-  const miSolicitud = misSolicitudes[0] || null;
+  const miSolicitud = tipoUsuario === 'egresado' && datosPersona ? (misSolicitudes[0] || null) : null;
   const etapaCarga = config.estado_etapa || 'abierta';
-  const cargaHabilitada = tipoUsuario === 'egresado' && datosPersona ? puedeEditarInvitados(datosPersona, { config, solicitudes }) : false;
-  const misInvitadosGuardados = tipoUsuario === 'egresado' && datosPersona ? invitados.filter((i) => i.egresado_id === datosPersona.id) : [];
+  const cargaHabilitada = tipoUsuario === 'egresado' && datosPersona ? puedeEditarInvitados(datosPersona, { config, solicitudes: misSolicitudes }) : false;
   const miGrupo = misInvitadosGuardados.filter(esGrupal);
   const hayGuardados = misInvitadosGuardados.length > 0;
   const descargarMiPase = () => {
@@ -834,8 +805,8 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, egresados
               <input type="text" maxLength={8} value={dni} onChange={(e) => setDni(sanitizeDNI(e.target.value))} placeholder="Ej: 40123456" className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-[#6B1D2F]" required />
             </div>
             {error && <p className="text-sm text-red-600">{error}</p>}
-            <button type="submit" className="w-full py-2.5 bg-[#6B1D2F] text-white rounded-lg hover:bg-opacity-90 font-medium shadow">
-              Continuar
+            <button type="submit" disabled={buscando} className="w-full py-2.5 bg-[#6B1D2F] text-white rounded-lg hover:bg-opacity-90 font-medium shadow disabled:opacity-60">
+              {buscando ? 'Buscando...' : 'Continuar'}
             </button>
           </form>
         ) : (
@@ -984,7 +955,7 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, egresados
                 {cargaHabilitada && (editando ? (
                   <div className="flex gap-2">
                     {hayGuardados && (
-                      <button type="button" onClick={() => prepararFilasInvitados(datosPersona)} disabled={guardando} className="px-4 py-2.5 bg-white border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold cursor-pointer">Cancelar</button>
+                      <button type="button" onClick={() => prepararFilasInvitados(datosPersona, misInvitadosGuardados, misSolicitudes)} disabled={guardando} className="px-4 py-2.5 bg-white border border-slate-300 text-slate-700 rounded-lg text-sm font-semibold cursor-pointer">Cancelar</button>
                     )}
                     <button onClick={guardarInvitados} disabled={guardando} className="flex-1 py-2.5 bg-[#6B1D2F] text-white rounded-lg text-sm font-bold hover:bg-opacity-95 shadow cursor-pointer">
                       {guardando ? 'Guardando...' : 'Guardar y Generar QR'}
@@ -1564,6 +1535,10 @@ function ModuloPuerta({ config, egresados, invitados, docentes, especiales, reca
   const alternarAsistencia = async (tabla, item) => {
     try {
       if (!item.asistio) {
+        // Aviso si figura como "No asiste" (o si es invitado de un egresado dado de baja)
+        const anf = tabla === 'invitados' ? egresados.find((e) => e.id === item.egresado_id) : null;
+        const dadoDeBaja = tabla === 'invitados' ? anf?.activo === false : item.activo === false;
+        if (dadoDeBaja && !window.confirm(`${item.nombre_completo} ${tabla === 'invitados' ? `es invitado/a de ${anf.nombre_completo}, que dio de baja su asistencia` : 'figura como "No asiste"'}.\n\n¿Registrar el ingreso igual? (solo si coordinación lo autorizó)`)) return;
         const extra = tabla === 'invitados' ? { hora_ingreso: new Date().toISOString() } : {};
         const ok = await marcarIngreso(tabla, item.id, extra);
         const tipoManual = { egresados: 'egresado', invitados: 'familiar', docentes: 'docente', invitados_especiales: 'VIP' }[tabla] || tabla;
@@ -1576,10 +1551,11 @@ function ModuloPuerta({ config, egresados, invitados, docentes, especiales, reca
       } else {
         if (!window.confirm(`¿Quitar el ingreso de ${item.nombre_completo}?`)) return;
         const limpiarHora = TABLAS_HORA_REAL.includes(tabla) && !tablasSinHoraReal.has(tabla);
-        let { error } = await supabase.from(tabla).update(limpiarHora ? { asistio: false, hora_ingreso_real: null } : { asistio: false }).eq('id', item.id);
+        const base = tabla === 'invitados' ? { asistio: false, hora_ingreso: null } : { asistio: false };
+        let { error } = await supabase.from(tabla).update(limpiarHora ? { ...base, hora_ingreso_real: null } : base).eq('id', item.id);
         if (error && limpiarHora && esErrorColumna(error, 'hora_ingreso_real')) {
           tablasSinHoraReal.add(tabla);
-          ({ error } = await supabase.from(tabla).update({ asistio: false }).eq('id', item.id));
+          ({ error } = await supabase.from(tabla).update(base).eq('id', item.id));
         }
         if (error) throw error;
         logPuerta('QUITAR_INGRESO', `${item.nombre_completo} (DNI ${item.dni || 'S/D'})`);
@@ -1587,6 +1563,23 @@ function ModuloPuerta({ config, egresados, invitados, docentes, especiales, reca
       await recargar();
     } catch (err) {
       notify('No se pudo guardar: ' + err.message, 'error');
+    }
+  };
+
+  // Búsqueda manual: registra a todos los invitados "en grupo" que falten (por si el QR del grupo no se puede leer)
+  const marcarGrupoManual = async (egr, pendientes) => {
+    if (egr.activo === false && !window.confirm(`${egr.nombre_completo} dio de baja su asistencia (sus plazas se liberaron).\n\n¿Registrar el ingreso de su grupo igual? (solo si coordinación lo autorizó)`)) return;
+    if (!window.confirm(`¿Registrar el ingreso de ${pendientes.length} integrante(s) del grupo de ${egr.nombre_completo}?\n\n${pendientes.map((p) => '• ' + p.nombre_completo).join('\n')}`)) return;
+    try {
+      const nuevos = [];
+      for (const g of pendientes) {
+        if (await marcarIngreso('invitados', g.id, { hora_ingreso: new Date().toISOString() })) nuevos.push(g.nombre_completo);
+      }
+      logPuerta('INGRESO_GRUPAL', `Manual: grupo de ${egr.nombre_completo}: ${nuevos.join(', ') || '(ya habían ingresado)'}`);
+      notify(nuevos.length ? `✓ Ingresaron ${nuevos.length} integrante(s) del grupo.` : 'Ya figuraban todos como presentes.', nuevos.length ? undefined : 'warning');
+      await recargar();
+    } catch (err) {
+      notify('No se pudo registrar el grupo: ' + err.message, 'error');
     }
   };
 
@@ -1924,6 +1917,15 @@ function ModuloPuerta({ config, egresados, invitados, docentes, especiales, reca
                 {egrSel.asistio ? '✓ Egresado presente' : 'Marcar ingreso del egresado'}
               </button>
             </div>
+            {(() => {
+              const grupoPend = invitados.filter((i) => i.egresado_id === egresadoSeleccionado.id && esGrupal(i) && !i.asistio);
+              if (grupoPend.length === 0) return null;
+              return (
+                <button onClick={() => marcarGrupoManual(egrSel, grupoPend)} className="w-full py-2.5 rounded-xl text-xs font-bold text-white shadow cursor-pointer" style={{ backgroundColor: colorFamiliaDe(egrSel) }}>
+                  Marcar ingreso de todo el grupo familiar ({grupoPend.length} pendiente{grupoPend.length === 1 ? '' : 's'})
+                </button>
+              );
+            })()}
             <div className="space-y-2">
               <p className="text-xs font-bold uppercase text-slate-500">Familiares Habilitados:</p>
               {invitados.filter((i) => i.egresado_id === egresadoSeleccionado.id).map((inv) => (
@@ -2179,6 +2181,11 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
   };
 
   // Invitados que superan el cupo: se conservan primero los que ya ingresaron y luego los cargados antes
+  // Butacas extra aprobadas a un egresado (0 si no tiene)
+  const extraAprobadaDe = (e) => solicitudes
+    .filter((s) => s.egresado_id === e.id && String(s.estado || '').toLowerCase() === 'aprobada')
+    .reduce((acc, s) => acc + (Number(s.cantidad_aprobada ?? s.cantidad_solicitada) || 0), 0);
+
   const planRecorte = (cupoDeEgr) => {
     const aEliminar = [];
     const detalle = [];
@@ -2226,9 +2233,11 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
     }
     const afectados = egresados.filter((e) => e.activo !== false);
     if (afectados.length === 0) { notify('No hay egresados activos.', 'error'); return; }
-    const conMas = afectados.filter((e) => invitados.filter((i) => i.egresado_id === e.id).length > n);
-    let msg = `¿Asignar ${n} invitado(s) a cada uno de los ${afectados.length} egresados activos?\n\nEsto REEMPLAZA el cupo actual de cada egresado, incluidas las butacas extra que ya se hayan aprobado.`;
-    const plan = recortarSobrantes ? planRecorte(() => n) : null;
+    const cupoNuevo = (e) => n + extraAprobadaDe(e);
+    const conExtra = afectados.filter((e) => extraAprobadaDe(e) > 0).length;
+    const conMas = afectados.filter((e) => invitados.filter((i) => i.egresado_id === e.id).length > cupoNuevo(e));
+    let msg = `¿Asignar ${n} invitado(s) a cada uno de los ${afectados.length} egresados activos?\n\nEsto REEMPLAZA el cupo actual de cada egresado.${conExtra ? ` A los ${conExtra} egresado(s) con butacas extra aprobadas se les suman esas extras (no se pierden).` : ''}`;
+    const plan = recortarSobrantes ? planRecorte(cupoNuevo) : null;
     if (plan && plan.aEliminar.length > 0) {
       msg += `\n\nSe van a ELIMINAR ${plan.aEliminar.length} invitado(s) ya cargados de ${plan.egresadosAfectados} egresado(s) que superan el cupo de ${n} (se conservan los que ya ingresaron). No se puede deshacer.`;
     } else if (conMas.length > 0) {
@@ -2238,8 +2247,13 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
     setAplicandoCupo(true);
     try {
       const ids = afectados.map((e) => e.id);
-      for (let k = 0; k < ids.length; k += 40) {
-        const { error } = await supabase.from('egresados').update({ cupo_asignado: n }).in('id', ids.slice(k, k + 40));
+      const sinExtra = afectados.filter((e) => extraAprobadaDe(e) === 0).map((e) => e.id);
+      for (let k = 0; k < sinExtra.length; k += 40) {
+        const { error } = await supabase.from('egresados').update({ cupo_asignado: n }).in('id', sinExtra.slice(k, k + 40));
+        if (error) throw error;
+      }
+      for (const e of afectados.filter((x) => extraAprobadaDe(x) > 0)) {
+        const { error } = await supabase.from('egresados').update({ cupo_asignado: cupoNuevo(e) }).eq('id', e.id);
         if (error) throw error;
       }
       if (config.id) {
@@ -2260,8 +2274,14 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
 
   const exportarLogsCSV = async () => {
     try {
-      const { data, error } = await supabase.from('logs_sistema').select('*').order('created_at', { ascending: true }).limit(10000);
-      if (error) throw error;
+      // Supabase entrega como máximo 1000 filas por consulta: se pide de a 1000 hasta traer todo
+      const data = [];
+      for (let desde = 0; desde < 50000; desde += 1000) {
+        const { data: parte, error } = await supabase.from('logs_sistema').select('*').order('created_at', { ascending: true }).range(desde, desde + 999);
+        if (error) throw error;
+        data.push(...(parte || []));
+        if (!parte || parte.length < 1000) break;
+      }
       const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
       const filas = [['fecha_hora_local', 'fecha_hora_iso', 'usuario', 'modulo', 'accion', 'detalle'].join(',')];
       (data || []).forEach((l) => {
@@ -2345,7 +2365,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
                     Con {n} por egresado: {ocupacion} de {CAPACIDAD} butacas ({vac < 0 ? `faltan ${-vac}` : `sobran ${vac}`}).
                   </p>
                 )}
-                <p className="text-[11px] text-slate-400">Aplicar reemplaza el cupo de cada egresado activo (incluidas butacas extra ya aprobadas) y también actualiza el cupo base para los egresados nuevos. Los invitados ya cargados no se borran.</p>
+                <p className="text-[11px] text-slate-400">Aplicar reemplaza el cupo de cada egresado activo (a quienes tienen butacas extra aprobadas se les suman) y también actualiza el cupo base para los egresados nuevos. Los invitados ya cargados solo se borran si está tildada la opción de recortar.</p>
               </div>
             );
   };
@@ -2397,36 +2417,24 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
   };
 
   const exportarCSV = (tipo) => {
-    let contenidoCSV = "data:text/csv;charset=utf-8,";
-    let nombreArchivo = "";
-
+    const est = (x) => (x.activo === false ? 'NO ASISTE' : 'Asiste');
+    const si = (v) => (v ? 'SI' : 'NO');
+    let filas = [];
+    let nombreArchivo = '';
     if (tipo === 'egresados') {
-      contenidoCSV += "DNI,Nombre Completo,Celular,Cupo Asignado,Asistio\n";
-      egresados.forEach(e => {
-        contenidoCSV += `"${e.dni}","${e.nombre_completo}","${e.celular || ''}",${e.cupo_asignado},${e.asistio ? 'SI' : 'NO'}\n`;
-      });
-      nombreArchivo = "padron-egresados-esrn5.csv";
+      filas = [['DNI', 'Nombre Completo', 'División', 'Orientación', 'Celular', 'Cupo Asignado', 'Invitados cargados', 'Estado', 'Asistió']];
+      egresados.forEach((e) => filas.push([e.dni, e.nombre_completo, e.division || '', e.orientacion || '', e.celular || '', cupoDe(e, config), invitados.filter((i) => i.egresado_id === e.id).length, est(e), si(e.asistio)]));
+      nombreArchivo = 'padron-egresados-esrn5.csv';
     } else if (tipo === 'docentes') {
-      contenidoCSV += "DNI,Nombre Completo,Asistio\n";
-      docentes.forEach(d => {
-        contenidoCSV += `"${d.dni}","${d.nombre_completo}",${d.asistio ? 'SI' : 'NO'}\n`;
-      });
-      nombreArchivo = "padron-docentes-esrn5.csv";
+      filas = [['DNI', 'Nombre Completo', 'Ocupa butaca', 'Estado', 'Asistió']];
+      docentes.forEach((d) => filas.push([d.dni, d.nombre_completo, d.ocupa_butaca === false ? 'NO' : 'SI', est(d), si(d.asistio)]));
+      nombreArchivo = 'padron-docentes-esrn5.csv';
     } else if (tipo === 'vip') {
-      contenidoCSV += "DNI,Nombre e Institucion,Asistio\n";
-      especiales.forEach(v => {
-        contenidoCSV += `"${v.dni || 'S/D'}","${v.nombre_completo}",${v.asistio ? 'SI' : 'NO'}\n`;
-      });
-      nombreArchivo = "padron-vip-esrn5.csv";
+      filas = [['DNI', 'Nombre e Institución', 'Movilidad reducida', 'Estado', 'Asistió']];
+      especiales.forEach((v) => filas.push([v.dni || 'S/D', v.nombre_completo, tieneMovilidad(v) ? 'SI' : '', est(v), si(v.asistio)]));
+      nombreArchivo = 'padron-vip-esrn5.csv';
     }
-
-    const encodedUri = encodeURI(contenidoCSV);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", nombreArchivo);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    descargarCSV(nombreArchivo, filas);
     notify(`Exportado ${nombreArchivo} con éxito.`);
   };
 
@@ -2608,11 +2616,11 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
 
   const cambiarEtapaGlobalDirecto = async (nuevaEtapa) => {
     setModalCierreParcialAbierto(false);
-    if (config.id) {
-      await supabase.from('configuracion').update({ estado_etapa: nuevaEtapa }).eq('id', config.id);
-    } else {
-      await supabase.from('configuracion').insert({ estado_etapa: nuevaEtapa, cupo_base: CUPO_BASE_DEFECTO });
-    }
+    if (nuevaEtapa === 'cierre_definitivo' && config.estado_etapa !== 'cierre_definitivo' && !window.confirm('¿Pasar a Cierre Definitivo?\n\nNadie va a poder cargar ni modificar invitados (ni con plazas extra aprobadas) y no se reciben más solicitudes. El aforo cuenta solo los invitados cargados.')) return;
+    const { error: errEtapa } = config.id
+      ? await supabase.from('configuracion').update({ estado_etapa: nuevaEtapa }).eq('id', config.id)
+      : await supabase.from('configuracion').insert({ estado_etapa: nuevaEtapa, cupo_base: cupoBaseDe(config) });
+    if (errEtapa) { notify('No se pudo cambiar la etapa: ' + errEtapa.message, 'error'); return; }
     await registrarLog('CAMBIO_ETAPA', 'Configuración', `Se cambió la etapa global a: ${nuevaEtapa.toUpperCase()}`);
     await recargar();
     notify(`Etapa actualizada a: ${nuevaEtapa.toUpperCase()}`);
@@ -2650,8 +2658,16 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
     }
   };
 
+  // ¿Ya hay alguien con ese DNI en la lista? (para no duplicar personas)
+  const dniRepetido = (lista, dni, idPropio = null) => {
+    const d = sanitizeDNI(dni);
+    return d ? lista.find((x) => x.id !== idPropio && sanitizeDNI(x.dni) === d) : null;
+  };
+
   const agregarEgresadoManual = async (e) => {
     e.preventDefault();
+    const rep = dniRepetido(egresados, nuevoEgDni);
+    if (rep) { notify(`Ya existe un egresado con el DNI ${sanitizeDNI(nuevoEgDni)}: ${rep.nombre_completo}.`, 'error'); return; }
     try {
       const { error: errIns } = await supabase.from('egresados').insert({
         dni: sanitizeDNI(nuevoEgDni),
@@ -2675,6 +2691,8 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
 
   const agregarDocenteManual = async (e) => {
     e.preventDefault();
+    const rep = dniRepetido(docentes, nuevoDocDni);
+    if (rep) { notify(`Ya existe un docente con el DNI ${sanitizeDNI(nuevoDocDni)}: ${rep.nombre_completo}.`, 'error'); return; }
     try {
       const { error: errIns } = await supabase.from('docentes').insert({
         dni: sanitizeDNI(nuevoDocDni),
@@ -2697,6 +2715,8 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
 
   const agregarVipManual = async (e) => {
     e.preventDefault();
+    const rep = nuevoVipDni ? dniRepetido(especiales, nuevoVipDni) : null;
+    if (rep) { notify(`Ya existe un VIP con el DNI ${sanitizeDNI(nuevoVipDni)}: ${rep.nombre_completo}.`, 'error'); return; }
     try {
       const { error: errIns } = await supabase.from('invitados_especiales').insert({
         dni: nuevoVipDni ? sanitizeDNI(nuevoVipDni) : null,
@@ -2730,6 +2750,8 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
   const guardarEdicionEgresado = async (e) => {
     e.preventDefault();
     if (!modalEditarEgr) return;
+    const rep = dniRepetido(egresados, editDni, modalEditarEgr.id);
+    if (rep) { notify(`Ya existe otro egresado con el DNI ${sanitizeDNI(editDni)}: ${rep.nombre_completo}.`, 'error'); return; }
     setGuardandoEdicion(true);
     try {
       const { error: errEgr } = await supabase.from('egresados').update({
@@ -2762,6 +2784,8 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
   const guardarEdicionDocente = async (e) => {
     e.preventDefault();
     if (!modalEditarDoc) return;
+    const rep = dniRepetido(docentes, editDocDni, modalEditarDoc.id);
+    if (rep) { notify(`Ya existe otro docente con el DNI ${sanitizeDNI(editDocDni)}: ${rep.nombre_completo}.`, 'error'); return; }
     setGuardandoDocente(true);
     try {
       const cambios = {
@@ -2792,6 +2816,8 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
   const guardarEdicionVip = async (e) => {
     e.preventDefault();
     if (!modalEditarVip) return;
+    const rep = editVipDni ? dniRepetido(especiales, editVipDni, modalEditarVip.id) : null;
+    if (rep) { notify(`Ya existe otro VIP con el DNI ${sanitizeDNI(editVipDni)}: ${rep.nombre_completo}.`, 'error'); return; }
     setGuardandoVip(true);
     try {
       const cambiosVip = {
@@ -2859,9 +2885,14 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
     const resp = window.prompt("Para confirmar el vaciado total, escribí VACIAR en mayúsculas:");
     if (resp !== 'VACIAR') return;
     try {
-      await supabase.from('invitados').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-      await supabase.from('egresados').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-      await registrarLog('VACIAR', 'Egresados', 'Se vació todo el padrón de egresados e invitados.');
+      const todos = (q) => q.neq('id', '00000000-0000-0000-0000-000000000000');
+      const r1 = await todos(supabase.from('invitados').delete());
+      if (r1.error) throw r1.error;
+      const r2 = await todos(supabase.from('solicitudes_butacas').delete());
+      if (r2.error) throw r2.error;
+      const r3 = await todos(supabase.from('egresados').delete());
+      if (r3.error) throw r3.error;
+      await registrarLog('VACIAR', 'Egresados', 'Se vació todo el padrón de egresados, sus invitados y sus solicitudes de butacas.');
       await recargar();
       notify('Padrón vaciado correctamente.');
     } catch (err) {
@@ -2919,10 +2950,12 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
 
   const eliminarEgresado = async (egr) => {
     if (!egr) return;
-    if (!window.confirm(`¿Eliminar a ${egr.nombre_completo} (DNI ${egr.dni}) y todos sus invitados cargados? Esta acción no se puede deshacer.`)) return;
+    if (!window.confirm(`¿Eliminar a ${egr.nombre_completo} (DNI ${egr.dni}), todos sus invitados cargados y su solicitud de butacas? Esta acción no se puede deshacer.`)) return;
     try {
       const { error: e1 } = await supabase.from('invitados').delete().eq('egresado_id', egr.id);
       if (e1) throw e1;
+      const { error: e1b } = await supabase.from('solicitudes_butacas').delete().eq('egresado_id', egr.id);
+      if (e1b) throw e1b;
       const { error: e2 } = await supabase.from('egresados').delete().eq('id', egr.id);
       if (e2) throw e2;
       await registrarLog('ELIMINAR', 'Egresados', `Se eliminó al egresado ${egr.nombre_completo} (DNI ${egr.dni})`);
@@ -3154,7 +3187,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
             {egresadosFiltrados.map((e) => {
               const misInvitados = invitados.filter((i) => i.egresado_id === e.id);
               const numeroWp = e.celular ? e.celular.replace(/\D/g, '') : '';
-              const linkWpAdicionales = numeroWp ? `https://wa.me/549${numeroWp}?text=Hola%20${encodeURIComponent(e.nombre_completo)},%20tu%20solicitud%20fue%20aprobada.%20Por%20favor%20volvé%20a%20ingresar%20al%20portal%20con%20tu%20DNI.` : '';
+              const linkWpAdicionales = numeroWp ? `https://wa.me/549${numeroWp}?text=${encodeURIComponent(`Hola ${e.nombre_completo}, te escribimos de la ESRN N° 005 por el Acto de Colación. Por favor ingresá al portal con tu DNI para revisar tus invitados y tus pases.`)}` : '';
 
               return (
                 <div key={e.id} className="py-3 flex flex-wrap justify-between items-center gap-3 text-sm">
@@ -3273,8 +3306,8 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
                 <input type="text" required maxLength={8} value={editDni} onChange={(e) => setEditDni(sanitizeDNI(e.target.value))} className="w-full px-3 py-2 border rounded-xl text-sm font-mono" />
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Celular{whatsappActivo ? ' / WhatsApp' : ''} {whatsappActivo ? <span className="text-rose-600">* Obligatorio</span> : <span className="text-slate-500">(opcional)</span>}</label>
-                <input type="text" required={whatsappActivo} value={editCelular} onChange={(e) => setEditCelular(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm" />
+                <label className="block text-xs font-bold text-slate-700 mb-1">Celular{whatsappActivo ? ' / WhatsApp' : ''} <span className="text-slate-500">(opcional; el egresado lo carga en el portal)</span></label>
+                <input type="text" value={editCelular} onChange={(e) => setEditCelular(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -3372,9 +3405,9 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
         <div className="bg-white rounded-2xl border p-5 space-y-4">
           <div className="flex flex-wrap justify-between items-center gap-2">
             <h3 className="font-bold">Padrón de Docentes ({docentes.length})</h3>
-            <div className="flex gap-2">
-              <button onClick={() => exportarCSV('docentes')} className="px-3.5 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold"><Download className="w-4 h-4" /> Exportar</button>
-              <button onClick={() => setModalAgregarDocente(true)} className="px-3.5 py-2 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold"><Plus className="w-4 h-4" /> Agregar Docente</button>
+            <div className="flex flex-wrap gap-2">
+              <button onClick={() => exportarCSV('docentes')} className="px-3.5 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"><Download className="w-4 h-4" /> Exportar</button>
+              <button onClick={() => setModalAgregarDocente(true)} className="px-3.5 py-2 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"><Plus className="w-4 h-4" /> Agregar Docente</button>
               <input ref={fileDocRef} type="file" accept=".csv,.txt" onChange={handleImportarCSVDocentes} className="hidden" />
               <button onClick={() => fileDocRef.current?.click()} title='El CSV puede traer una columna "Butaca" (SI/NO) o "Sin butaca" (SI/NO). Si no la trae, todos entran con butaca.' className="px-3 py-2 bg-indigo-50 text-indigo-700 border rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"><Upload className="w-4 h-4" /> Importar CSV</button>
               {perfilStaff?.rol === 'admin' && ultimaImportacion('Docentes') && (
@@ -3406,7 +3439,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
                 <div><span className="font-semibold">{d.nombre_completo}</span> <span className="text-xs text-slate-500">({d.dni})</span> {d.activo === false && <span className="px-2 py-0.5 bg-rose-100 text-rose-700 rounded-full text-[10px] font-bold">NO ASISTE</span>}</div>
                 <div className="flex items-center gap-2">
                   <button onClick={() => alternarButacaDocente(d)} title="Tocá para cambiar" className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border cursor-pointer ${d.ocupa_butaca === false ? 'bg-sky-50 text-sky-700 border-sky-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>{d.ocupa_butaca === false ? 'Sin butaca' : 'Con butaca'}</button>
-                <button onClick={() => abrirModalEditarDocente(d)} className="px-2.5 py-1 bg-amber-50 text-amber-700 border rounded-lg text-xs font-bold"><Edit2 className="w-3 h-3" /> Editar y Descargar QR</button>
+                <button onClick={() => abrirModalEditarDocente(d)} className="px-2.5 py-1 bg-amber-50 text-amber-700 border rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"><Edit2 className="w-3 h-3" /> Editar y Descargar QR</button>
                 </div>
               </div>
             ))}
@@ -3501,9 +3534,9 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
         <div className="bg-white rounded-2xl border p-5 space-y-4">
           <div className="flex flex-wrap justify-between items-center gap-2">
             <h3 className="font-bold">Padrón de Invitados VIP ({especiales.length})</h3>
-            <div className="flex gap-2">
-              <button onClick={() => exportarCSV('vip')} className="px-3.5 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold"><Download className="w-4 h-4" /> Exportar</button>
-              <button onClick={() => setModalAgregarVip(true)} className="px-3.5 py-2 bg-amber-600 text-white rounded-xl text-xs font-bold"><Plus className="w-4 h-4" /> Agregar VIP</button>
+            <div className="flex flex-wrap gap-2">
+              <button onClick={() => exportarCSV('vip')} className="px-3.5 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"><Download className="w-4 h-4" /> Exportar</button>
+              <button onClick={() => setModalAgregarVip(true)} className="px-3.5 py-2 bg-amber-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"><Plus className="w-4 h-4" /> Agregar VIP</button>
               <input ref={fileVipRef} type="file" accept=".csv,.txt" onChange={handleImportarCSVVips} className="hidden" />
               <button onClick={() => fileVipRef.current?.click()} className="px-3 py-2 bg-indigo-50 text-indigo-700 border rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"><Upload className="w-4 h-4" /> Importar CSV</button>
               {perfilStaff?.rol === 'admin' && ultimaImportacion('VIP') && (
@@ -3522,7 +3555,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
             {vipsFiltrados.map((v) => (
               <div key={v.id} className="py-2.5 flex justify-between items-center text-sm">
                 <div><span className="font-semibold">{v.nombre_completo}</span> {tieneMovilidad(v) && <span className="px-2 py-0.5 bg-amber-100 text-amber-800 rounded-full text-[10px] font-bold">♿ Movilidad reducida</span>} {v.activo === false && <span className="px-2 py-0.5 bg-rose-100 text-rose-700 rounded-full text-[10px] font-bold">NO ASISTE</span>}</div>
-                <button onClick={() => abrirModalEditarVip(v)} className="px-2.5 py-1 bg-amber-50 text-amber-700 border rounded-lg text-xs font-bold"><Edit2 className="w-3 h-3" /> Editar y Descargar QR</button>
+                <button onClick={() => abrirModalEditarVip(v)} className="px-2.5 py-1 bg-amber-50 text-amber-700 border rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"><Edit2 className="w-3 h-3" /> Editar y Descargar QR</button>
               </div>
             ))}
           </div>
