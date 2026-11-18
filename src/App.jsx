@@ -7,6 +7,7 @@ import {
   UserPlus, FileSpreadsheet, Check, ArrowRight, Building2, Phone, Edit2, Star, Key, Camera, CameraOff, Printer, FileText, RotateCcw, Grid, LayoutDashboard, History
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
+import { renderToStaticMarkup } from 'react-dom/server';
 
 // ============================================================================
 // CONFIGURACIÓN DE SUPABASE
@@ -605,93 +606,7 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, egresados
     return obj.nombre_completo || obj.nombre || obj.docente || obj.apellido_y_nombre || obj.profesor || obj.name || '';
   };
 
-  const descargarTarjeta1080x1920 = (nombreQR, subtituloQR, textoRolQR) => {
-    const svgElement = qrRef.current?.querySelector('svg');
-    if (!svgElement) {
-      alert('No se pudo generar la imagen del QR.');
-      return;
-    }
-
-    try {
-      const svgData = new XMLSerializer().serializeToString(svgElement);
-      const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
-      const URL = window.URL || window.webkitURL || window;
-      const blobURL = URL.createObjectURL(svgBlob);
-
-      const qrImage = new Image();
-      qrImage.onload = () => {
-        try {
-          const canvas = document.createElement('canvas');
-          canvas.width = 1080;
-          canvas.height = 1920;
-          const ctx = canvas.getContext('2d');
-
-          ctx.fillStyle = '#F3F4F6';
-          ctx.fillRect(0, 0, 1080, 1920);
-
-          ctx.fillStyle = '#6B1D2F';
-          ctx.fillRect(0, 0, 1080, 380);
-
-          ctx.fillStyle = '#FFFFFF';
-          ctx.font = 'bold 42px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.fillText('ESRN N° 005 — CIPOLLETTI', 540, 120);
-
-          ctx.fillStyle = '#FBCFE8';
-          ctx.font = '26px sans-serif';
-          ctx.fillText('Acto de Colación 2026 — Pase Oficial de Ingreso', 540, 180);
-
-          ctx.fillStyle = '#FFFFFF';
-          ctx.beginPath();
-          if (typeof ctx.roundRect === 'function') ctx.roundRect(120, 440, 840, 1280, 30);
-          else ctx.rect(120, 440, 840, 1280);
-          ctx.fill();
-          ctx.lineWidth = 3;
-          ctx.strokeStyle = '#E5E7EB';
-          ctx.stroke();
-
-          ctx.fillStyle = '#111827';
-          ctx.font = 'bold 44px sans-serif';
-          ctx.fillText(String(nombreQR).toUpperCase(), 540, 580);
-
-          ctx.fillStyle = '#4B5563';
-          ctx.font = '32px sans-serif';
-          ctx.fillText(subtituloQR, 540, 650);
-
-          ctx.fillStyle = '#6B1D2F';
-          ctx.font = 'bold 28px sans-serif';
-          ctx.fillText(textoRolQR, 540, 710);
-
-          ctx.drawImage(qrImage, 290, 780, 500, 500);
-
-          ctx.fillStyle = '#374151';
-          ctx.font = 'bold 30px sans-serif';
-          ctx.fillText('Pase Autorizado para Ingreso', 540, 1370);
-
-          ctx.fillStyle = '#6B7280';
-          ctx.font = '24px sans-serif';
-          ctx.fillText('Presentar en puerta (digital o impreso)', 540, 1430);
-
-          ctx.fillStyle = '#9CA3AF';
-          ctx.font = '24px sans-serif';
-          ctx.fillText('ESRN N° 005 — Cipolletti', 540, 1810);
-
-          const pngUrl = canvas.toDataURL('image/png');
-          const downloadLink = document.createElement('a');
-          downloadLink.href = pngUrl;
-          downloadLink.download = `Pase-Oficial-${nombreQR.replace(/\s+/g, '-')}.png`;
-          document.body.appendChild(downloadLink);
-          downloadLink.click();
-          document.body.removeChild(downloadLink);
-        } catch (canvasErr) {
-          console.error(canvasErr);
-        }
-      };
-      qrImage.src = blobURL;
-    } catch (err) {
-      console.error(err);
-    }
-  };
+  const descargarTarjeta1080x1920 = (nombreQR, subtituloQR, textoRolQR, valorQR) => descargarTarjetaQR(nombreQR, subtituloQR, textoRolQR, valorQR || valorQRPrincipal);
 
   const guardarInvitados = async () => {
     if (whatsappActivo && (!celular || celular.trim().length < 6)) {
@@ -807,7 +722,7 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, egresados
   };
 
   const nombreMostrado = obtenerNombreReal(datosPersona);
-  const valorQRPrincipal = datosPersona ? `ESRN005-${tipoUsuario.toUpperCase()}-${datosPersona.dni || dni}-${nombreMostrado}` : '';
+  const valorQRPrincipal = datosPersona ? `ESRN005-${tipoUsuario.toUpperCase()}-${datosPersona.dni || dni}-${sinTildes(nombreMostrado)}` : '';
   const textoRolTarjeta = tipoUsuario === 'egresado' ? 'EGRESADO' : tipoUsuario === 'docente' ? 'DOCENTE' : 'INVITADO VIP';
   const misSolicitudes = tipoUsuario === 'egresado' && datosPersona ? solicitudes.filter((s) => s.egresado_id === datosPersona.id) : [];
 
@@ -857,6 +772,9 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, egresados
               <button type="button" onClick={() => descargarTarjeta1080x1920(nombreMostrado, `DNI: ${datosPersona.dni || dni}`, textoRolTarjeta)} className="w-full py-2.5 bg-[#6B1D2F] hover:bg-opacity-90 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 shadow cursor-pointer">
                 <Download className="w-4 h-4" /> Descargar Mi QR Personal
               </button>
+              {tipoUsuario === 'egresado' && (
+                <p className="text-[11px] text-slate-500 text-center mt-2">Este QR es el <b>pase de todo tu grupo</b>: vos y tus invitados marcados como <b>grupales</b> ingresan juntos con este mismo código. Los invitados <b>individuales</b> tienen su propio QR.</p>
+              )}
             </div>
 
             <div className="hidden" ref={qrRef}>
@@ -902,13 +820,17 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, egresados
                       <div className="flex justify-between items-center">
                         <span className="text-xs font-bold text-[#6B1D2F]">Invitado #{idx + 1}</span>
                         {fila.guardado && fila.numero_entrada && (
-                          <button 
-                            type="button" 
-                            onClick={() => descargarTarjeta1080x1920(fila.nombre_completo, `Invitado de ${nombreMostrado}`, fila.es_grupal ? 'ACCESO GRUPAL' : 'ACCESO INDIVIDUAL')} 
-                            className="bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 shadow-xs cursor-pointer"
-                          >
-                            <Download className="w-3.5 h-3.5" /> QR
-                          </button>
+                          fila.es_grupal ? (
+                            <span className="text-[11px] font-bold text-slate-500 text-right">Entra con tu pase (grupal)</span>
+                          ) : (
+                            <button 
+                              type="button" 
+                              onClick={() => descargarTarjeta1080x1920(fila.nombre_completo, `Invitado de ${nombreMostrado}`, 'ACCESO INDIVIDUAL', fila.numero_entrada)} 
+                              className="bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 shadow-xs cursor-pointer"
+                            >
+                              <Download className="w-3.5 h-3.5" /> QR
+                            </button>
+                          )
                         )}
                       </div>
 
@@ -998,6 +920,100 @@ const coincideTexto = (campos, consulta) => {
     const valor = String(c || '');
     return normalizarTexto(valor).includes(q) || (digitos.length >= 3 && valor.replace(/\D/g, '').includes(digitos));
   });
+};
+
+// Las tildes dentro del QR hacen que algunos lectores no lo puedan leer; la Puerta identifica por DNI, no por nombre
+const sinTildes = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+// QR del valor indicado (sin depender de un QR oculto en pantalla)
+const svgQRComoTexto = (valor) =>
+  renderToStaticMarkup(<QRCodeSVG value={valor} size={300} level="H" includeMargin={true} />).replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" ');
+
+const descargarTarjetaQR = (nombreQR, subtituloQR, textoRolQR, valorQR) => {
+  if (!valorQR) {
+    alert('No se pudo generar la imagen del QR.');
+    return;
+  }
+
+  try {
+    const svgData = svgQRComoTexto(valorQR);
+    const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+    const URL = window.URL || window.webkitURL || window;
+    const blobURL = URL.createObjectURL(svgBlob);
+
+    const qrImage = new Image();
+    qrImage.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = 1080;
+        canvas.height = 1920;
+        const ctx = canvas.getContext('2d');
+
+        ctx.fillStyle = '#F3F4F6';
+        ctx.fillRect(0, 0, 1080, 1920);
+
+        ctx.fillStyle = '#6B1D2F';
+        ctx.fillRect(0, 0, 1080, 380);
+
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = 'bold 42px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('ESRN N° 005 — CIPOLLETTI', 540, 120);
+
+        ctx.fillStyle = '#FBCFE8';
+        ctx.font = '26px sans-serif';
+        ctx.fillText('Acto de Colación 2026 — Pase Oficial de Ingreso', 540, 180);
+
+        ctx.fillStyle = '#FFFFFF';
+        ctx.beginPath();
+        if (typeof ctx.roundRect === 'function') ctx.roundRect(120, 440, 840, 1280, 30);
+        else ctx.rect(120, 440, 840, 1280);
+        ctx.fill();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#E5E7EB';
+        ctx.stroke();
+
+        ctx.fillStyle = '#111827';
+        ctx.font = 'bold 44px sans-serif';
+        ctx.fillText(String(nombreQR).toUpperCase(), 540, 580);
+
+        ctx.fillStyle = '#4B5563';
+        ctx.font = '32px sans-serif';
+        ctx.fillText(subtituloQR, 540, 650);
+
+        ctx.fillStyle = '#6B1D2F';
+        ctx.font = 'bold 28px sans-serif';
+        ctx.fillText(textoRolQR, 540, 710);
+
+        ctx.drawImage(qrImage, 290, 780, 500, 500);
+
+        ctx.fillStyle = '#374151';
+        ctx.font = 'bold 30px sans-serif';
+        ctx.fillText('Pase Autorizado para Ingreso', 540, 1370);
+
+        ctx.fillStyle = '#6B7280';
+        ctx.font = '24px sans-serif';
+        ctx.fillText('Presentar en puerta (digital o impreso)', 540, 1430);
+
+        ctx.fillStyle = '#9CA3AF';
+        ctx.font = '24px sans-serif';
+        ctx.fillText('ESRN N° 005 — Cipolletti', 540, 1810);
+
+        const pngUrl = canvas.toDataURL('image/png');
+        const downloadLink = document.createElement('a');
+        downloadLink.href = pngUrl;
+        downloadLink.download = `Pase-Oficial-${nombreQR.replace(/\s+/g, '-')}.png`;
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        document.body.removeChild(downloadLink);
+      } catch (canvasErr) {
+        console.error(canvasErr);
+      }
+    };
+    qrImage.src = blobURL;
+  } catch (err) {
+    console.error(err);
+  }
 };
 
 const CONFIG_INGRESO = {
@@ -1156,13 +1172,24 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
     const avisar = (msg, tipo) => notifyRef.current(msg, tipo);
 
     try {
+      // Pases descargados con la versión anterior del sistema: el QR es el mismo para todos y no identifica a nadie
+      if (raw.toUpperCase().includes('ESRN005-ADMIN-QR-DUMMY')) {
+        setResultadoIngreso({ tipo: 'warning', titulo: '⚠️ PASE ANTIGUO (QR GENÉRICO)', nombre: 'Este QR no identifica a la persona', detalle: 'Es un pase bajado con una versión anterior del sistema. Buscá a la persona por nombre o DNI en la búsqueda manual y pedile que descargue su pase nuevo.' });
+        avisar('⚠️ Pase antiguo: el QR no identifica a la persona. Usá la búsqueda manual.', 'warning');
+        logPuerta('QR_GENERICO', 'Se escaneó un pase antiguo con código genérico');
+        return;
+      }
+
       const esQrEgresado = raw.toUpperCase().includes('ESRN005-EGRESADO');
       let code = raw.toUpperCase();
       if (code.includes('ESRN005-')) {
         const partes = code.split('-');
+        let halloDni = false;
         for (let p of partes) {
-          if (/^\d{7,8}$/.test(p)) { code = p; break; }
+          if (/^\d{7,8}$/.test(p)) { code = p; halloDni = true; break; }
         }
+        // QR de VIP sin DNI: se busca por el nombre que trae el código
+        if (!halloDni && code.startsWith('ESRN005-VIP-')) code = code.slice('ESRN005-VIP-'.length).replace(/^-+/, '').trim();
       }
 
       let hallado = localizarCodigo(code, esQrEgresado, datosRef.current);
@@ -1184,6 +1211,38 @@ function ModuloPuerta({ egresados, invitados, docentes, especiales, recargar, no
         logPuerta('BLOQUEADO_NO_ASISTE', `${ETIQUETA_TIPO[hallado.tipo]} ${f.nombre_completo} (DNI ${f.dni || 'S/D'})`);
         return;
       }
+      // El QR del egresado es el pase de todo el grupo: registra al egresado y a sus invitados marcados como "grupales"
+      if (hallado.tipo === 'egresado') {
+        const okEgr = await marcarIngreso('egresados', f.id);
+        let grupales = [];
+        let avisoGrupo = '';
+        {
+          const { data: dg, error: eg } = await supabase.from('invitados').select('id, nombre_completo, asistio').eq('egresado_id', f.id).eq('es_grupal', true);
+          if (eg) avisoGrupo = ` · ⚠️ No se pudo consultar el grupo (${eg.message})`;
+          else grupales = dg || [];
+        }
+        const nuevos = [];
+        for (const g of grupales) {
+          if (g.asistio) continue;
+          const okG = await marcarIngreso('invitados', g.id, { hora_ingreso: new Date().toISOString() });
+          if (okG) nuevos.push(g.nombre_completo);
+        }
+        recargarRef.current();
+        const detalleBase = `DNI: ${f.dni}`;
+        if (okEgr || nuevos.length > 0) {
+          const titulo = okEgr ? (nuevos.length ? `✓ INGRESO GRUPAL: EGRESADO + ${nuevos.length}` : '✓ INGRESO PERMITIDO (EGRESADO)') : '⚠️ EGRESADO YA HABÍA INGRESADO';
+          const detalle = detalleBase + (nuevos.length ? ` · Acompañantes: ${nuevos.join(', ')}` : '') + (!okEgr ? ` · Se registraron ${nuevos.length} acompañante(s) que faltaban` : '') + avisoGrupo;
+          setResultadoIngreso({ tipo: okEgr ? 'success' : 'warning', titulo, nombre: f.nombre_completo, detalle });
+          avisar(`${okEgr ? '✓ INGRESO PERMITIDO' : '⚠️ El egresado ya había ingresado'}: ${f.nombre_completo}${nuevos.length ? ` + ${nuevos.length} acompañante(s)` : ''}`, okEgr ? undefined : 'warning');
+          logPuerta(nuevos.length ? 'INGRESO_GRUPAL' : 'INGRESO', `egresado ${f.nombre_completo} (DNI ${f.dni || 'S/D'})${nuevos.length ? ' + ' + nuevos.join(', ') : ''}`);
+        } else {
+          setResultadoIngreso({ tipo: 'warning', titulo: '⚠️ EGRESADO YA INGRESÓ', nombre: f.nombre_completo, detalle: detalleBase + (grupales.length ? ` · Su grupo (${grupales.length} acompañante(s)) ya había ingresado` : '') + avisoGrupo });
+          avisar(`⚠️ ¡EGRESADO YA INGRESÓ! ${f.nombre_completo}`, 'warning');
+          logPuerta('DUPLICADO', `egresado ${f.nombre_completo} (DNI ${f.dni || 'S/D'}) ya había ingresado`);
+        }
+        return;
+      }
+
       const ok = await marcarIngreso(c.tabla, f.id, c.extra ? c.extra() : {});
       recargarRef.current(); // refresca la lista en segundo plano, sin demorar el siguiente escaneo
 
@@ -1531,93 +1590,7 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
 
   const [modalCierreParcialAbierto, setModalCierreParcialAbierto] = useState(false);
 
-  const descargarTarjetaAdmin1080x1920 = (nombreQR, subtituloQR, textoRolQR) => {
-    const svgElement = adminQrRef.current?.querySelector('svg');
-    if (!svgElement) {
-      alert('Generando componente QR...');
-      return;
-    }
-
-    try {
-      const svgData = new XMLSerializer().serializeToString(svgElement);
-      const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
-      const URL = window.URL || window.webkitURL || window;
-      const blobURL = URL.createObjectURL(svgBlob);
-
-      const qrImage = new Image();
-      qrImage.onload = () => {
-        try {
-          const canvas = document.createElement('canvas');
-          canvas.width = 1080;
-          canvas.height = 1920;
-          const ctx = canvas.getContext('2d');
-
-          ctx.fillStyle = '#F3F4F6';
-          ctx.fillRect(0, 0, 1080, 1920);
-
-          ctx.fillStyle = '#6B1D2F';
-          ctx.fillRect(0, 0, 1080, 380);
-
-          ctx.fillStyle = '#FFFFFF';
-          ctx.font = 'bold 42px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.fillText('ESRN N° 005 — CIPOLLETTI', 540, 120);
-
-          ctx.fillStyle = '#FBCFE8';
-          ctx.font = '26px sans-serif';
-          ctx.fillText('Acto de Colación 2026 — Pase Oficial de Ingreso', 540, 180);
-
-          ctx.fillStyle = '#FFFFFF';
-          ctx.beginPath();
-          if (typeof ctx.roundRect === 'function') ctx.roundRect(120, 440, 840, 1280, 30);
-          else ctx.rect(120, 440, 840, 1280);
-          ctx.fill();
-          ctx.lineWidth = 3;
-          ctx.strokeStyle = '#E5E7EB';
-          ctx.stroke();
-
-          ctx.fillStyle = '#111827';
-          ctx.font = 'bold 44px sans-serif';
-          ctx.fillText(String(nombreQR).toUpperCase(), 540, 580);
-
-          ctx.fillStyle = '#4B5563';
-          ctx.font = '32px sans-serif';
-          ctx.fillText(subtituloQR, 540, 650);
-
-          ctx.fillStyle = '#6B1D2F';
-          ctx.font = 'bold 28px sans-serif';
-          ctx.fillText(textoRolQR, 540, 710);
-
-          ctx.drawImage(qrImage, 290, 780, 500, 500);
-
-          ctx.fillStyle = '#374151';
-          ctx.font = 'bold 30px sans-serif';
-          ctx.fillText('Pase Autorizado para Ingreso', 540, 1370);
-
-          ctx.fillStyle = '#6B7280';
-          ctx.font = '24px sans-serif';
-          ctx.fillText('Presentar en puerta (digital o impreso)', 540, 1430);
-
-          ctx.fillStyle = '#9CA3AF';
-          ctx.font = '24px sans-serif';
-          ctx.fillText('ESRN N° 005 — Cipolletti', 540, 1810);
-
-          const pngUrl = canvas.toDataURL('image/png');
-          const downloadLink = document.createElement('a');
-          downloadLink.href = pngUrl;
-          downloadLink.download = `Pase-Oficial-${nombreQR.replace(/\s+/g, '-')}.png`;
-          document.body.appendChild(downloadLink);
-          downloadLink.click();
-          document.body.removeChild(downloadLink);
-        } catch (canvasErr) {
-          console.error(canvasErr);
-        }
-      };
-      qrImage.src = blobURL;
-    } catch (err) {
-      console.error(err);
-    }
-  };
+  const descargarTarjetaAdmin1080x1920 = (nombreQR, subtituloQR, textoRolQR, valorQR) => descargarTarjetaQR(nombreQR, subtituloQR, textoRolQR, valorQR);
 
   // Protección: no se puede dejar al sistema sin administradores activos
   const quedaOtroAdmin = (u) => usuariosSistema.some((x) => x.id !== u.id && String(x.rol || '').toLowerCase() === 'admin' && x.activo !== false);
@@ -2642,7 +2615,7 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
                   <p className="font-bold text-sm text-slate-900">QR Personal del Egresado</p>
                   <p className="text-[11px] text-slate-500">Descargar pase institucional</p>
                 </div>
-                <button type="button" onClick={() => descargarTarjetaAdmin1080x1920(modalEditarEgr.nombre_completo, `DNI: ${modalEditarEgr.dni}`, 'EGRESADO')} className="px-3.5 py-2 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"><Download className="w-4 h-4" /> Descargar QR</button>
+                <button type="button" onClick={() => descargarTarjetaAdmin1080x1920(modalEditarEgr.nombre_completo, `DNI: ${modalEditarEgr.dni}`, 'EGRESADO', `ESRN005-EGRESADO-${modalEditarEgr.dni}-${sinTildes(modalEditarEgr.nombre_completo)}`)} className="px-3.5 py-2 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"><Download className="w-4 h-4" /> Descargar QR</button>
               </div>
 
               <div>
@@ -2671,7 +2644,11 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
                         <p className="font-bold text-slate-900"><b>#{i+1}</b> {inv.nombre_completo}</p>
                         <p className="text-[11px] text-slate-500">DNI: {inv.dni} · <span className="font-mono">{inv.numero_entrada}</span></p>
                       </div>
-                      <button type="button" onClick={() => descargarTarjeta1080x1920(inv.nombre_completo, `Invitado de ${modalEditarEgr.nombre_completo}`, 'ACCESO GRUPAL')} className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-bold flex items-center gap-1"><Download className="w-3.5 h-3.5" /> Descargar QR</button>
+                      {inv.es_grupal === false ? (
+                        <button type="button" onClick={() => descargarTarjetaQR(inv.nombre_completo, `Invitado de ${modalEditarEgr.nombre_completo}`, 'ACCESO INDIVIDUAL', inv.numero_entrada)} className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-bold flex items-center gap-1"><Download className="w-3.5 h-3.5" /> Descargar QR</button>
+                      ) : (
+                        <span className="text-[11px] font-bold text-amber-700 text-right">Grupal · entra con el QR del egresado</span>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -2834,7 +2811,7 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
                 <div>
                   <p className="font-bold text-sm text-slate-900">QR Oficial del Docente</p>
                 </div>
-                <button type="button" onClick={() => descargarTarjetaAdmin1080x1920(modalEditarDoc.nombre_completo, `DNI: ${modalEditarDoc.dni}`, 'DOCENTE')} className="px-3.5 py-2 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold"><Download className="w-4 h-4" /> Descargar QR</button>
+                <button type="button" onClick={() => descargarTarjetaAdmin1080x1920(modalEditarDoc.nombre_completo, `DNI: ${modalEditarDoc.dni}`, 'DOCENTE', `ESRN005-DOCENTE-${modalEditarDoc.dni}-${sinTildes(modalEditarDoc.nombre_completo)}`)} className="px-3.5 py-2 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold"><Download className="w-4 h-4" /> Descargar QR</button>
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">Nombre y Apellido</label>
@@ -2945,7 +2922,7 @@ function PanelAdministracion({ vipPortalActivo, whatsappActivo, perfilStaff, con
                 <div>
                   <p className="font-bold text-sm text-slate-900">QR Oficial VIP</p>
                 </div>
-                <button type="button" onClick={() => descargarTarjetaAdmin1080x1920(modalEditarVip.nombre_completo, modalEditarVip.dni ? `DNI: ${modalEditarVip.dni}` : 'Autoridad', 'INVITADO VIP')} className="px-3.5 py-2 bg-amber-600 text-white rounded-xl text-xs font-bold"><Download className="w-4 h-4" /> Descargar QR</button>
+                <button type="button" onClick={() => descargarTarjetaAdmin1080x1920(modalEditarVip.nombre_completo, modalEditarVip.dni ? `DNI: ${modalEditarVip.dni}` : 'Autoridad', 'INVITADO VIP', `ESRN005-VIP-${modalEditarVip.dni || ''}-${sinTildes(modalEditarVip.nombre_completo)}`)} className="px-3.5 py-2 bg-amber-600 text-white rounded-xl text-xs font-bold"><Download className="w-4 h-4" /> Descargar QR</button>
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">Nombre / Institución</label>
