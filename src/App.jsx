@@ -167,6 +167,7 @@ export default function App() {
   const [session, setSession] = useState(null);
   const [perfilStaff, setPerfilStaff] = useState(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
+  const yaUbicadoRef = useRef(false);
 
   const [config, setConfig] = useState({ id: null, estado_etapa: 'abierta', cupo_base: CUPO_BASE_DEFECTO, filas: 15, butacas_por_fila: 35 });
   const whatsappActivo = config.whatsapp_activo !== false;
@@ -247,7 +248,11 @@ export default function App() {
       if (error) throw error;
       if (data && data.activo !== false) {
         // el rol se normaliza a minúsculas para que 'ADMIN' y 'admin' valgan igual
-        setPerfilStaff({ ...data, rol: String(data.rol || '').trim().toLowerCase() });
+        const rol = String(data.rol || '').trim().toLowerCase();
+        setPerfilStaff({ ...data, rol });
+        // Un celular de Puerta que vuelve a abrir la página con la sesión iniciada va directo a Puerta
+        if (rol !== 'admin' && rol !== 'coordinador' && !yaUbicadoRef.current) setVista((v) => (v === 'portal' ? 'puerta' : v));
+        yaUbicadoRef.current = true;
       } else {
         // sin fila en usuarios_sistema, o desactivado: no hay acceso
         setPerfilStaff(null);
