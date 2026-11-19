@@ -23,8 +23,9 @@ const createTempAuthClient = () =>
 
 const sanitizeDNI = (val) => String(val || '').replace(/\D/g, '').slice(0, 8);
 const CAPACIDAD_MAXIMA = 525;
+const CAPACIDAD_DEFINITIVA = 525; // número definitivo de butacas (decisión del 19/11/2026)
 const CUPO_BASE_DEFECTO = 4;
-const VERSION_APP = 'v21 · 19/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
+const VERSION_APP = 'v22 · 19/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
 const MSG_FALTA_COL_BUTACA = 'Falta crear la columna "ocupa_butaca" en la tabla docentes (Supabase). Ejecutá el SQL que te pasaron y volvé a intentar.';
 const esErrorColumnaButaca = (err) => /ocupa_butaca/i.test(err?.message || '') || err?.code === 'PGRST204' || err?.code === '42703';
 const aNumeroONulo = (v) => (v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
@@ -201,6 +202,7 @@ export default function App() {
   const [config, setConfig] = useState({ id: null, estado_etapa: 'abierta', cupo_base: CUPO_BASE_DEFECTO, filas: 15, butacas_por_fila: 35 });
   const whatsappActivo = config.whatsapp_activo !== false;
   const vipPortalActivo = config.portal_vip_activo !== false;
+  const videoActivo = config.video_activo === true;
   const [egresados, setEgresados] = useState([]);
   const [invitados, setInvitados] = useState([]);
   const [docentes, setDocentes] = useState([]);
@@ -529,7 +531,7 @@ export default function App() {
         ) : vista === 'reporte_papel' && session && puedeAdministrar ? (
           <ReporteResumenPapel egresados={egresados} invitados={invitados} docentes={docentes} especiales={especiales} config={config} volver={() => setVista('admin')} />
         ) : (
-          <PortalPrincipalDNI vipPortalActivo={vipPortalActivo} whatsappActivo={whatsappActivo} config={config} notify={notify} />
+          <PortalPrincipalDNI vipPortalActivo={vipPortalActivo} whatsappActivo={whatsappActivo} videoActivo={videoActivo} config={config} notify={notify} />
         )}
       </main>
 
@@ -635,7 +637,29 @@ const mensajeErrorRPC = (err) => {
   return m;
 };
 
-function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, notify }) {
+const VIDEO_TUTORIAL = '/tutorial.mp4';
+function ModalVideoTutorial({ cerrar }) {
+  const [fallo, setFallo] = useState(false);
+  useEffect(() => { const esc = (e) => { if (e.key === 'Escape') cerrar(); }; window.addEventListener('keydown', esc); return () => window.removeEventListener('keydown', esc); }, [cerrar]);
+  return (
+    <div className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-3" onClick={cerrar}>
+      <div className="w-full max-w-sm space-y-2" onClick={(e) => e.stopPropagation()}>
+        <div className="flex justify-between items-center text-white">
+          <p className="font-bold text-sm">▶ Cómo cargar a tus invitados</p>
+          <button type="button" onClick={cerrar} className="px-3 py-1.5 bg-white/15 hover:bg-white/25 rounded-lg text-xs font-bold cursor-pointer">✕ Cerrar</button>
+        </div>
+        {fallo ? (
+          <div className="bg-white rounded-xl p-5 text-center text-sm text-slate-700">El video no está disponible en este momento. Si tenés dudas, usá el botón verde de WhatsApp.</div>
+        ) : (
+          <video src={VIDEO_TUTORIAL} controls autoPlay playsInline preload="metadata" onError={() => setFallo(true)} className="w-full max-h-[80vh] rounded-xl bg-black" />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, config, notify }) {
+  const [verVideo, setVerVideo] = useState(false);
   const [dni, setDni] = useState('');
   const [tipoUsuario, setTipoUsuario] = useState('egresado');
   useEffect(() => {
@@ -878,6 +902,7 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, notify })
 
   return (
     <div className="max-w-md mx-auto space-y-4">
+      {verVideo && <ModalVideoTutorial cerrar={() => setVerVideo(false)} />}
       <div className="bg-gradient-to-r from-[#6B1D2F] to-[#8a253c] text-white rounded-xl shadow-md p-5 text-center">
         {escudoDe(config) && <img src={escudoDe(config)} alt="Escudo institucional" className="w-20 h-20 mx-auto mb-2 bg-white rounded-full object-contain p-1.5 shadow" />}
         <h2 className="text-xl font-bold mb-1">¡Bienvenidos al Acto de Colación 2026! 🎉</h2>
@@ -908,6 +933,9 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, notify })
             <button type="submit" disabled={buscando} className="w-full py-2.5 bg-[#6B1D2F] text-white rounded-lg hover:bg-opacity-90 font-medium shadow disabled:opacity-60">
               {buscando ? 'Buscando...' : 'Continuar'}
             </button>
+            {videoActivo && tipoUsuario === 'egresado' && (
+              <button type="button" onClick={() => setVerVideo(true)} className="w-full py-2.5 bg-white border-2 border-[#6B1D2F] text-[#6B1D2F] rounded-lg font-bold text-sm cursor-pointer">▶ Ver video: cómo cargar a tus invitados</button>
+            )}
           </form>
         ) : (
           <div className="space-y-4 text-left">
@@ -952,6 +980,9 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, notify })
 
             {tipoUsuario === 'egresado' && (
               <>
+                {videoActivo && (
+                  <button type="button" onClick={() => setVerVideo(true)} className="w-full py-2 bg-white border-2 border-[#6B1D2F] text-[#6B1D2F] rounded-lg font-bold text-xs cursor-pointer">▶ ¿Dudas? Mirá el video paso a paso</button>
+                )}
                 <div className="border-2 border-emerald-500 bg-emerald-50 p-4 rounded-xl space-y-2">
                   <label className="block text-xs font-bold text-emerald-900 uppercase">📱 Tu Celular{whatsappActivo ? ' / WhatsApp' : ''} {whatsappActivo ? <span className="text-rose-600">* Obligatorio</span> : <span className="text-slate-500">(opcional)</span>}</label>
                   <input 
@@ -1191,6 +1222,25 @@ const etiquetaOrientacion = (egr) => ({ cn: 'Cs. Naturales', edu: 'Educación' }
 const accesoFamiliaDe = (egr) => ({ cn: ACCESO_TEXTO.abajo, edu: ACCESO_TEXTO.arriba }[tipoOrientacion(egr)] || ACCESO_TEXTO.aConfirmar);
 const colorFamiliaDe = (egr) => COLOR_PASE[tipoOrientacion(egr)] || COLOR_PASE.familia;
 const textoCurso = (egr) => [egr?.division, etiquetaOrientacion(egr)].filter(Boolean).join(' · ');
+// Orden de los cursos: primero turno mañana (TM), después tarde (TT); dentro de cada turno, por sección
+const claveCurso = (div) => {
+  const d = String(div || '');
+  if (!d) return '9';
+  const t = /TT/i.test(d) ? 1 : /TM/i.test(d) ? 0 : 2;
+  const n = parseInt((d.match(/(\d+)\s*ª/) || [])[1] || '9', 10);
+  return `${t}-${String(n).padStart(2, '0')}-${d}`;
+};
+const SIN_CURSO = '__sin_curso__';
+const cursosDe = (egrs) => [...new Set((egrs || []).map((e) => e.division || ''))].sort((a, b) => claveCurso(a).localeCompare(claveCurso(b)));
+const coincideCurso = (egr, filtro) => !filtro || (filtro === SIN_CURSO ? !egr?.division : (egr?.division || '') === filtro);
+// Selector de curso reutilizable (Egresados, Invitados)
+const SelectorCurso = ({ egresados, valor, onChange }) => (
+  <select value={valor} onChange={(e) => onChange(e.target.value)} className="px-3 py-2 rounded-xl border text-sm bg-white outline-none focus:border-[#6B1D2F]" aria-label="Filtrar por curso">
+    <option value="">Todos los cursos</option>
+    {cursosDe(egresados).filter(Boolean).map((c) => <option key={c} value={c}>{c}</option>)}
+    {(egresados || []).some((e) => !e.division) && <option value={SIN_CURSO}>Sin curso</option>}
+  </select>
+);
 const esGrupal = (inv) => inv?.es_grupal === true;
 const tieneMovilidad = (p) => p?.movilidad_reducida === true;
 // Escudo que se usa en pantalla y en los pases: ninguno si está apagado el interruptor "Escudo"
@@ -1402,7 +1452,7 @@ const paseGrupo = (egr, integrantes, config) => descargarPase({
 });
 const paseInvitado = (inv, egr, config) => descargarPase({
   nombre: inv.nombre_completo,
-  subtitulo: `Invitado/a de ${egr?.nombre_completo || 'egresado/a'}`,
+  subtitulo: [`Invitado/a de ${egr?.nombre_completo || 'egresado/a'}`, textoCurso(egr)].filter(Boolean).join(' · '),
   rol: 'INVITADO INDIVIDUAL', valor: inv.numero_entrada, color: colorFamiliaDe(egr),
   acceso: accesoFamiliaDe(egr), ubicacion: ubicacionPara({ tipo: 'invitado', egr, movilidad: tieneMovilidad(inv) }, config),
   movilidad: tieneMovilidad(inv), escudo: escudoDe(config), archivo: `Invitado-${inv.nombre_completo}`,
@@ -1498,6 +1548,41 @@ const TABLAS_HORA_REAL = ['egresados', 'docentes', 'invitados_especiales'];
 const tablasSinHoraReal = new Set();
 const esErrorColumna = (err, columna) => new RegExp(columna, 'i').test(err?.message || '') || err?.code === 'PGRST204' || err?.code === '42703';
 
+// Sonido y vibración de la Puerta. El navegador genera los tonos (no hay archivos de audio).
+// Los celulares habilitan el sonido recién después del primer toque en la pantalla.
+let audioCtxPuerta = null;
+const prepararAudioPuerta = () => {
+  try {
+    if (!audioCtxPuerta) { const AC = window.AudioContext || window.webkitAudioContext; if (AC) audioCtxPuerta = new AC(); }
+    if (audioCtxPuerta && audioCtxPuerta.state === 'suspended') audioCtxPuerta.resume();
+  } catch (_) { /* sin audio */ }
+};
+const tonosPuerta = {
+  // [frecuencia Hz, duración s, pausa antes s]
+  success: [[1320, 0.13, 0]],
+  movilidad: [[1320, 0.12, 0], [1760, 0.14, 0.05]],
+  warning: [[880, 0.11, 0], [880, 0.11, 0.08]],
+  error: [[260, 0.5, 0]],
+};
+const vibracionPuerta = { success: [80], movilidad: [80, 60, 80], warning: [90, 70, 90], error: [400] };
+const sonarPuerta = (tipo) => {
+  try { if (navigator.vibrate) navigator.vibrate(vibracionPuerta[tipo] || [80]); } catch (_) { /* nada */ }
+  try {
+    prepararAudioPuerta();
+    const ctx = audioCtxPuerta;
+    if (!ctx) return;
+    let t = ctx.currentTime + 0.01;
+    (tonosPuerta[tipo] || tonosPuerta.success).forEach(([f, d, pausa]) => {
+      t += pausa;
+      const o = ctx.createOscillator(); const g = ctx.createGain();
+      o.type = tipo === 'error' ? 'sawtooth' : 'square'; o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.35, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+      o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + d + 0.02);
+      t += d;
+    });
+  } catch (_) { /* sin audio */ }
+};
+
 const CONFIG_INGRESO = {
   egresado: {
     tabla: 'egresados', okTitulo: '✓ INGRESO PERMITIDO (EGRESADO)', dupTipo: 'warning', dupTitulo: '⚠️ EGRESADO YA INGRESÓ',
@@ -1527,10 +1612,18 @@ const accesoPuertaDe = (tipo, fila, egresados) => {
 };
 
 // Busca en los datos que ya tiene cargados el dispositivo
-const localizarCodigo = (code, esQrEgresado, datos) => {
+const localizarCodigo = (code, esQrEgresado, datos, preferido = '', solo = false) => {
   const { egresados: egrs, invitados: invs, docentes: docs, especiales: vips } = datos;
   const egr = () => egrs.find((e) => e.dni && String(e.dni) === code);
   if (esQrEgresado) { const e = egr(); if (e) return { tipo: 'egresado', fila: e }; }
+  // Si el QR dice de qué tipo es (VIP o DOCENTE), se busca primero ahí: así una persona con el mismo DNI en dos padrones no se confunde
+  if (preferido === 'vip') {
+    const nom = sinTildes(code).toUpperCase();
+    const v = vips.find((x) => x.dni && String(x.dni) === code) || vips.find((x) => !x.dni && sinTildes(x.nombre_completo).toUpperCase() === nom);
+    if (v) return { tipo: 'vip', fila: v };
+  }
+  if (preferido === 'docente') { const d = docs.find((x) => x.dni && String(x.dni) === code); if (d) return { tipo: 'docente', fila: d }; }
+  if (solo) return null;
   const inv = invs.find((i) => String(i.numero_entrada || '').toUpperCase() === code || (i.dni && String(i.dni) === code));
   if (inv) return { tipo: 'invitado', fila: inv };
   const doc = docs.find((d) => d.dni && (String(d.dni) === code || code.includes(String(d.dni))));
@@ -1543,7 +1636,15 @@ const localizarCodigo = (code, esQrEgresado, datos) => {
 };
 
 // Si el código no está en la lista del dispositivo (por ejemplo, alguien cargado después de abrir la pantalla), se busca directo en la base
-const buscarCodigoEnBase = async (code, esQrEgresado) => {
+const buscarCodigoEnBase = async (code, esQrEgresado, preferido = '', solo = false) => {
+  // VIP sin DNI (el código es el nombre): se compara contra los VIP de la base
+  if (preferido === 'vip' && !/^\d{7,8}$/.test(code)) {
+    const { data, error } = await supabase.from('invitados_especiales').select('*');
+    if (error) throw error;
+    const nom = sinTildes(code).toUpperCase();
+    const v = (data || []).find((x) => sinTildes(x.nombre_completo || '').toUpperCase() === nom);
+    return v ? { tipo: 'vip', fila: v } : null;
+  }
   if (!/^[A-Z0-9-]{4,40}$/.test(code)) return null;
   const uno = async (tabla, col) => {
     const { data, error } = await supabase.from(tabla).select('*').eq(col, code).limit(1);
@@ -1551,6 +1652,9 @@ const buscarCodigoEnBase = async (code, esQrEgresado) => {
     return data && data[0] ? data[0] : null;
   };
   if (esQrEgresado) { const e = await uno('egresados', 'dni'); if (e) return { tipo: 'egresado', fila: e }; }
+  if (preferido === 'vip') { const v = await uno('invitados_especiales', 'dni'); if (v) return { tipo: 'vip', fila: v }; }
+  if (preferido === 'docente') { const d = await uno('docentes', 'dni'); if (d) return { tipo: 'docente', fila: d }; }
+  if (solo) return null;
   const inv = (await uno('invitados', 'numero_entrada')) || (await uno('invitados', 'dni'));
   if (inv) return { tipo: 'invitado', fila: inv };
   const doc = await uno('docentes', 'dni');
@@ -1567,6 +1671,23 @@ function ModuloPuerta({ config, egresados, invitados, docentes, especiales, reca
   const [egresadoSeleccionado, setEgresadoSeleccionado] = useState(null);
   const [escaneandoCamara, setEscaneandoCamara] = useState(false);
   const [resultadoIngreso, setResultadoIngreso] = useState(null);
+  const [sonidoActivo, setSonidoActivo] = useState(() => { try { return localStorage.getItem('puerta_sonido') !== 'off'; } catch (_) { return true; } });
+  useEffect(() => {
+    const habilitar = () => prepararAudioPuerta();
+    window.addEventListener('pointerdown', habilitar, { once: true });
+    window.addEventListener('keydown', habilitar, { once: true });
+    return () => { window.removeEventListener('pointerdown', habilitar); window.removeEventListener('keydown', habilitar); };
+  }, []);
+  useEffect(() => {
+    if (!resultadoIngreso || !sonidoActivo) return;
+    const t = resultadoIngreso.tipo;
+    sonarPuerta(t === 'success' ? (resultadoIngreso.movilidad ? 'movilidad' : 'success') : t === 'warning' ? 'warning' : 'error');
+  }, [resultadoIngreso]); // eslint-disable-line react-hooks/exhaustive-deps
+  const alternarSonido = () => {
+    const nuevo = !sonidoActivo; setSonidoActivo(nuevo);
+    try { localStorage.setItem('puerta_sonido', nuevo ? 'on' : 'off'); } catch (_) { /* nada */ }
+    if (nuevo) sonarPuerta('success');
+  };
   const [codigoManual, setCodigoManual] = useState('');
   const [modoFallback, setModoFallback] = useState(false);
   const html5Ref = useRef(null);
@@ -1720,7 +1841,10 @@ function ModuloPuerta({ config, egresados, invitados, docentes, especiales, reca
         if (!halloDni && code.startsWith('ESRN005-VIP-')) code = code.slice('ESRN005-VIP-'.length).replace(/^-+/, '').trim();
       }
 
-      let hallado = localizarCodigo(code, esQrEgresado, datosRef.current);
+      const preferido = raw.toUpperCase().includes('ESRN005-VIP-') ? 'vip' : raw.toUpperCase().includes('ESRN005-DOCENTE-') ? 'docente' : '';
+      let hallado = null;
+      if (preferido) hallado = localizarCodigo(code, false, datosRef.current, preferido, true) || await buscarCodigoEnBase(code, false, preferido, true);
+      if (!hallado) hallado = localizarCodigo(code, esQrEgresado, datosRef.current);
       if (!hallado) hallado = await buscarCodigoEnBase(code, esQrEgresado);
 
       if (!hallado) {
@@ -1804,7 +1928,7 @@ function ModuloPuerta({ config, egresados, invitados, docentes, especiales, reca
         return;
       }
       const detalleExtra = hallado.tipo === 'invitado'
-        ? `${f.dni ? `DNI: ${f.dni} · ` : ''}Invitado/a de ${anfitrion ? anfitrion.nombre_completo : 'egresado/a'}${esGrupal(f) ? ' · (figura en el grupo familiar)' : ''}`
+        ? `${f.dni ? `DNI: ${f.dni} · ` : ''}Invitado/a de ${anfitrion ? anfitrion.nombre_completo : 'egresado/a'}${anfitrion?.division ? ` (${anfitrion.division})` : ''}${esGrupal(f) ? ' · (figura en el grupo familiar)' : ''}`
         : hallado.tipo === 'egresado' ? [`DNI: ${f.dni}`, textoCurso(f)].filter(Boolean).join(' · ') : c.detalle(f);
 
       const ok = await marcarIngreso(c.tabla, f.id, c.extra ? c.extra() : {});
@@ -1915,6 +2039,11 @@ function ModuloPuerta({ config, egresados, invitados, docentes, especiales, reca
     <div className="max-w-xl mx-auto space-y-4">
       <div className="bg-slate-900 text-white rounded-2xl p-4 sm:p-6 space-y-4 shadow-xl text-center">
         <div>
+          <div className="flex justify-end">
+            <button type="button" onClick={alternarSonido} title={sonidoActivo ? 'Silenciar el bip' : 'Activar el bip'} className={`px-2.5 py-1.5 rounded-xl text-xs font-bold cursor-pointer ${sonidoActivo ? 'bg-emerald-600 text-white' : 'bg-slate-700 text-slate-300'}`}>
+              {sonidoActivo ? '🔊 Sonido activado' : '🔇 Sonido apagado'}
+            </button>
+          </div>
           <h2 className="font-extrabold text-2xl text-white">Control de Puerta</h2>
           <p className="text-xs text-slate-300 mt-1">Utilizá la cámara trasera para escanear los pases QR al ingresar</p>
         </div>
@@ -2118,6 +2247,8 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
   const [cupoMasivo, setCupoMasivo] = useState('');
   const [recortarSobrantes, setRecortarSobrantes] = useState(true);
   const [filtroInvitado, setFiltroInvitado] = useState('');
+  const [filtroCursoEgr, setFiltroCursoEgr] = useState('');
+  const [filtroCursoInv, setFiltroCursoInv] = useState('');
   const [aplicandoCupo, setAplicandoCupo] = useState(false);
 
   const [modalEditarEgr, setModalEditarEgr] = useState(null);
@@ -2512,6 +2643,22 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
             );
   };
 
+  const videoActivoAdm = config.video_activo === true;
+  const cambiarVideo = async () => {
+    const nuevo = !videoActivoAdm;
+    if (!window.confirm(nuevo ? '¿Mostrar el botón "Ver video" en el portal?\n\nAntes tiene que estar subido el archivo public/tutorial.mp4 en GitHub.' : '¿Ocultar el botón del video tutorial en el portal?')) return;
+    try {
+      const { error } = await supabase.from('configuracion').update({ video_activo: nuevo }).eq('id', config.id);
+      if (error) throw error;
+      await registrarLog('CONFIGURACION', 'Video tutorial', nuevo ? 'Se mostró el video tutorial en el portal.' : 'Se ocultó el video tutorial del portal.');
+      await recargar();
+      notify(nuevo ? 'Video tutorial visible en el portal.' : 'Video tutorial oculto.');
+    } catch (err) {
+      const faltaColumna = /video_activo/i.test(err.message || '') || err.code === 'PGRST204' || err.code === '42703';
+      notify(faltaColumna ? 'Falta crear la columna "video_activo" en configuracion (SQL de la v22).' : 'Error: ' + err.message, 'error');
+    }
+  };
+
   const cambiarPortalVip = async () => {
     const nuevo = !vipPortalActivo;
     const aviso = nuevo
@@ -2679,15 +2826,33 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
     }
   };
 
+  const reiniciarMarcasPortal = async () => {
+    const n = egresados.filter((e) => e.portal_ultimo_ingreso).length;
+    if (!window.confirm(`Se van a borrar las marcas de "entró al portal" de ${n} egresado(s): quedan todos como "No entró".\n\nNo se borran invitados, solicitudes ni el registro de actividad.\n\n¿Continuar?`)) return;
+    try {
+      const { error } = await supabase.from('egresados').update({ portal_primer_ingreso: null, portal_ultimo_ingreso: null, portal_ingresos: 0 }).not('portal_ultimo_ingreso', 'is', null);
+      if (error) throw error;
+      await registrarLog('REINICIAR', 'Portal', `Se reiniciaron las marcas de ingreso al portal (${n} egresados).`);
+      await recargar();
+      notify('Marcas de portal reiniciadas: todos figuran como "No entró".');
+    } catch (err) {
+      notify('No se pudieron reiniciar las marcas: ' + (err.message || err), 'error');
+    }
+  };
+
   const exportarInvitadosCSV = () => {
     const porId = {};
     egresados.forEach((e) => { porId[e.id] = e; });
     const filas = [['N° entrada', 'DNI invitado', 'Nombre invitado', 'Invitado de', 'DNI egresado', 'División', 'Modalidad', 'Movilidad reducida', 'Acceso', 'Presente']];
-    invitados.forEach((i) => {
+    const listaExp = invitados.filter((i) => coincideCurso(porId[i.egresado_id], filtroCursoInv) && (!filtroInvitado.trim() || coincideTexto([i.nombre_completo, i.dni, i.numero_entrada, porId[i.egresado_id]?.nombre_completo, porId[i.egresado_id]?.dni], filtroInvitado)));
+    listaExp.sort((a, b) => claveCurso(porId[a.egresado_id]?.division).localeCompare(claveCurso(porId[b.egresado_id]?.division)) || (porId[a.egresado_id]?.nombre_completo || '').localeCompare(porId[b.egresado_id]?.nombre_completo || ''));
+    listaExp.forEach((i) => {
       const anf = porId[i.egresado_id];
       filas.push([i.numero_entrada || '', i.dni || '', i.nombre_completo || '', anf?.nombre_completo || '', anf?.dni || '', anf?.division || '', esGrupal(i) ? 'En grupo' : 'Individual', tieneMovilidad(i) ? 'SI' : '', accesoFamiliaDe(anf), i.asistio ? 'SI' : 'NO']);
     });
-    descargarCSV('invitados-de-egresados-esrn5.csv', filas);
+    const sufijo = filtroCursoInv ? '-' + (filtroCursoInv === SIN_CURSO ? 'sin-curso' : filtroCursoInv.replace(/[^0-9A-Za-z]+/g, '')) : '';
+    descargarCSV(`invitados-de-egresados-esrn5${sufijo}.csv`, filas);
+    notify(`Exportados ${listaExp.length} invitado(s).`);
   };
 
   const guardarConfiguracionAforo = async (e) => {
@@ -3234,7 +3399,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
   const cantEntraronPortal = egresados.filter((e) => e.activo !== false && entroPortal(e)).length;
   const cantActivosEgr = egresados.filter((e) => e.activo !== false).length;
   const fechaCorta = (v) => { const d = new Date(v); return isNaN(d.getTime()) ? '' : d.toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); };
-  const egresadosFiltrados = egresados.filter((e) => coincideBusqueda(e, filtroEgresado)
+  const egresadosFiltrados = egresados.filter((e) => coincideBusqueda(e, filtroEgresado) && coincideCurso(e, filtroCursoEgr)
     && (filtroPortal === 'todos' || (filtroPortal === 'entraron' ? entroPortal(e) : (!entroPortal(e) && e.activo !== false))));
   const docentesFiltrados = docentes.filter((d) => coincideBusqueda(d, filtroDocente));
   const vipsFiltrados = especiales.filter((v) => coincideBusqueda(v, filtroVip));
@@ -3340,6 +3505,11 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
             <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
             <input type="text" placeholder="Buscar egresado por nombre o DNI..." value={filtroEgresado} onChange={(e) => setFiltroEgresado(e.target.value)} className="w-full pl-10 pr-4 py-2 rounded-xl border text-sm outline-none focus:border-[#6B1D2F]" />
           </div>
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <SelectorCurso egresados={egresados} valor={filtroCursoEgr} onChange={setFiltroCursoEgr} />
+            <span className="font-bold text-slate-500">Mostrando {egresadosFiltrados.length} de {egresados.length}</span>
+            {(filtroCursoEgr || filtroEgresado || filtroPortal !== 'todos') && <button onClick={() => { setFiltroCursoEgr(''); setFiltroEgresado(''); setFiltroPortal('todos'); }} className="px-2.5 py-1 bg-white border rounded-lg font-bold text-slate-600 cursor-pointer">Quitar filtros</button>}
+          </div>
 
           {hayDatoPortal && (
             <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -3347,6 +3517,9 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
               {[['todos', 'Todos'], ['entraron', '✔ Entraron'], ['sin_entrar', '✖ Todavía no entraron']].map(([v, t]) => (
                 <button key={v} onClick={() => setFiltroPortal(v)} className={`px-3 py-1 rounded-full border font-bold cursor-pointer ${filtroPortal === v ? 'bg-[#6B1D2F] text-white border-[#6B1D2F]' : 'bg-white text-slate-600'}`}>{t}</button>
               ))}
+              {perfilStaff?.rol === 'admin' && cantEntraronPortal + egresados.filter((e) => e.activo === false && entroPortal(e)).length > 0 && (
+                <button onClick={reiniciarMarcasPortal} className="ml-auto px-3 py-1 rounded-full border border-rose-200 bg-rose-50 text-rose-700 font-bold cursor-pointer">↺ Reiniciar marcas de portal</button>
+              )}
             </div>
           )}
 
@@ -3533,7 +3706,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
       {tab === 'invitados' && (() => {
         const porId = {};
         egresados.forEach((e) => { porId[e.id] = e; });
-        const lista = invitados.filter((i) => !filtroInvitado.trim() || coincideTexto([i.nombre_completo, i.dni, i.numero_entrada, porId[i.egresado_id]?.nombre_completo, porId[i.egresado_id]?.dni], filtroInvitado));
+        const lista = invitados.filter((i) => coincideCurso(porId[i.egresado_id], filtroCursoInv) && (!filtroInvitado.trim() || coincideTexto([i.nombre_completo, i.dni, i.numero_entrada, porId[i.egresado_id]?.nombre_completo, porId[i.egresado_id]?.dni], filtroInvitado)));
         const cuposAsignados = egresados.filter((e) => e.activo !== false).reduce((acc, e) => acc + cupoDe(e, config), 0);
         return (
           <div className="bg-white rounded-2xl border p-5 space-y-4">
@@ -3550,6 +3723,11 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
               <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
               <input type="text" placeholder="Buscar por invitado, DNI, número de entrada o egresado..." value={filtroInvitado} onChange={(e) => setFiltroInvitado(e.target.value)} className="w-full pl-10 pr-4 py-2 rounded-xl border text-sm outline-none focus:border-[#6B1D2F]" />
             </div>
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <SelectorCurso egresados={egresados} valor={filtroCursoInv} onChange={setFiltroCursoInv} />
+              <span className="font-bold text-slate-500">Mostrando {lista.length} de {invitados.length}{filtroCursoInv || filtroInvitado ? ' · Exportar baja solo estos' : ''}</span>
+              {(filtroCursoInv || filtroInvitado) && <button onClick={() => { setFiltroCursoInv(''); setFiltroInvitado(''); }} className="px-2.5 py-1 bg-white border rounded-lg font-bold text-slate-600 cursor-pointer">Quitar filtros</button>}
+            </div>
             <div className="max-h-[28rem] overflow-y-auto divide-y">
               {lista.length === 0 && <p className="text-center text-slate-400 text-sm py-6">No se encontraron invitados.</p>}
               {lista.slice(0, 500).map((i) => {
@@ -3560,7 +3738,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
                       <span className="font-semibold">{i.nombre_completo}</span> <span className="text-xs text-slate-500">({i.dni || 'S/D'})</span>
                       <span className={`ml-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${esGrupal(i) ? 'bg-indigo-50 text-indigo-700' : 'bg-slate-100 text-slate-600'}`}>{esGrupal(i) ? 'En grupo' : 'Individual'}</span>
                       {tieneMovilidad(i) && <span className="ml-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">♿ Movilidad reducida</span>}
-                      <p className="text-xs text-slate-400">Invitado de <b>{anfitrion ? anfitrion.nombre_completo : 'egresado eliminado'}</b>{i.numero_entrada ? ` · Entrada ${i.numero_entrada}` : ''}</p>
+                      <p className="text-xs text-slate-400">Invitado de <b>{anfitrion ? anfitrion.nombre_completo : 'egresado eliminado'}</b>{anfitrion?.division ? ` · ${anfitrion.division}` : ''}{i.numero_entrada ? ` · Entrada ${i.numero_entrada}` : ''}</p>
                     </div>
                     <span className={`px-2.5 py-1 rounded-lg text-[11px] font-bold ${i.asistio ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'}`}>{i.asistio ? '✓ Presente' : 'Pendiente'}</span>
                   </div>
@@ -3725,7 +3903,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
             {vipsFiltrados.length === 0 && <p className="text-center text-slate-400 text-sm py-6">No se encontraron invitados VIP.</p>}
             {vipsFiltrados.map((v) => (
               <div key={v.id} className="py-2.5 flex justify-between items-center text-sm">
-                <div><span className="font-semibold">{v.nombre_completo}</span> {tieneMovilidad(v) && <span className="px-2 py-0.5 bg-amber-100 text-amber-800 rounded-full text-[10px] font-bold">♿ Movilidad reducida</span>} {v.activo === false && <span className="px-2 py-0.5 bg-rose-100 text-rose-700 rounded-full text-[10px] font-bold">NO ASISTE</span>}</div>
+                <div><span className="font-semibold">{v.nombre_completo}</span> <span className="text-xs text-slate-500">({v.dni || 'sin DNI'})</span> {tieneMovilidad(v) && <span className="px-2 py-0.5 bg-amber-100 text-amber-800 rounded-full text-[10px] font-bold">♿ Movilidad reducida</span>} {v.activo === false && <span className="px-2 py-0.5 bg-rose-100 text-rose-700 rounded-full text-[10px] font-bold">NO ASISTE</span>}</div>
                 <button onClick={() => abrirModalEditarVip(v)} className="px-2.5 py-1 bg-amber-50 text-amber-700 border rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"><Edit2 className="w-3 h-3" /> Editar y Descargar QR</button>
               </div>
             ))}
@@ -3792,6 +3970,9 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
                 </div>
                 <button type="button" onClick={() => paseVip({ ...modalEditarVip, movilidad_reducida: editVipMovilidad }, config)} className="px-3.5 py-2 bg-amber-600 text-white rounded-xl text-xs font-bold"><Download className="w-4 h-4" /> Descargar QR</button>
               </div>
+              {(editVipDni !== (modalEditarVip.dni || '') || (!modalEditarVip.dni && editVipNombre.trim().toUpperCase() !== (modalEditarVip.nombre_completo || ''))) && (
+                <p className="text-[11px] font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2">⚠️ Al cambiar {editVipDni !== (modalEditarVip.dni || '') ? 'el DNI' : 'el nombre (este VIP no tiene DNI)'}, el pase que ya se le envió deja de servir: después de guardar, descargá el QR de nuevo y mandáselo.</p>
+              )}
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">Nombre / Institución</label>
                 <input type="text" required value={editVipNombre} onChange={(e) => setEditVipNombre(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm" />
@@ -4019,6 +4200,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
                   <label className="block text-xs font-bold text-slate-700 mb-1">Capacidad a usar</label>
                   <input type="number" min="50" max="2000" value={salaEdit.capacidad} onChange={(e) => editarSala({ capacidad: e.target.value })} className="w-32 px-3 py-2 border rounded-xl text-sm bg-white" />
                 </div>
+                <button type="button" onClick={() => editarSala({ capacidad: CAPACIDAD_DEFINITIVA })} className="px-3 py-2 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold cursor-pointer">Usar {CAPACIDAD_DEFINITIVA} (definitivo)</button>
                 <button type="button" onClick={() => editarSala({ capacidad: BUTACAS_CROQUIS })} className="px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-bold cursor-pointer">Usar {BUTACAS_CROQUIS} (todo el croquis)</button>
                 <button type="button" onClick={() => editarSala({ capacidad: BUTACAS_CROQUIS - BUTACAS_CORTESIA })} className="px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-bold cursor-pointer">Usar {BUTACAS_CROQUIS - BUTACAS_CORTESIA} (sin fila de cortesía)</button>
               </div>
@@ -4270,6 +4452,13 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
             </button>
           </div>
           <div className="flex items-center gap-2">
+            <span className="text-xs font-bold uppercase text-slate-500">Video tutorial</span>
+            <button onClick={cambiarVideo} className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${videoActivoAdm ? 'bg-[#6B1D2F] hover:opacity-90 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}`}>
+              {videoActivoAdm ? '● Visible' : '○ Oculto'}
+            </button>
+            {videoActivoAdm && <a href={VIDEO_TUTORIAL} target="_blank" rel="noreferrer" className="text-xs font-bold text-[#6B1D2F] underline">probar</a>}
+          </div>
+          <div className="flex items-center gap-2">
             <span className="text-xs font-bold uppercase text-slate-500">Portal VIP</span>
             <button onClick={cambiarPortalVip} className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${vipPortalActivo ? 'bg-amber-600 hover:bg-amber-700 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}`}>
               {vipPortalActivo ? '● Activado' : '○ Desactivado'}
@@ -4363,7 +4552,10 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
 }
 
 function ReporteResumenPapel({ egresados, invitados, docentes, especiales, config, volver }) {
-  const egresadosOrdenados = [...egresados].sort((a, b) => (a.division || '').localeCompare(b.division || '') || (a.nombre_completo || '').localeCompare(b.nombre_completo || ''));
+  const [soloCurso, setSoloCurso] = useState('');
+  const egresadosOrdenados = [...egresados].sort((a, b) => claveCurso(a.division).localeCompare(claveCurso(b.division)) || (a.nombre_completo || '').localeCompare(b.nombre_completo || ''));
+  const cursos = cursosDe(egresados).filter((c) => !soloCurso || (soloCurso === SIN_CURSO ? !c : c === soloCurso));
+  const verTodo = !soloCurso;
   const porId = {};
   egresados.forEach((e) => { porId[e.id] = e; });
   const conMovilidad = [
@@ -4381,12 +4573,15 @@ function ReporteResumenPapel({ egresados, invitados, docentes, especiales, confi
             <p className="text-xs text-slate-500">Acto de Colación 2026 · Resumen General para Control en Papel</p>
           </div>
         </div>
-        <div className="flex gap-2 print:hidden">
+        <div className="flex flex-wrap gap-2 print:hidden">
           {volver && <button onClick={volver} className="px-4 py-2 bg-white border rounded-xl text-xs font-bold cursor-pointer">← Volver a Administración</button>}
+          <SelectorCurso egresados={egresados} valor={soloCurso} onChange={setSoloCurso} />
           <button onClick={() => window.print()} className="px-4 py-2 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold flex items-center gap-2 cursor-pointer"><Printer className="w-4 h-4" /> Imprimir Documento</button>
         </div>
       </div>
 
+      {!verTodo && <p className="text-xs font-bold text-slate-600 print:hidden">Vista de un solo curso: se imprime solo su padrón (sin accesos generales, docentes ni VIP). Elegí "Todos los cursos" para el resumen completo.</p>}
+      {verTodo && <>
       <div className="space-y-2 text-xs">
         <h3 className="font-bold text-sm text-[#6B1D2F] uppercase tracking-wide">Accesos a la sala</h3>
         <ul className="list-disc pl-5 space-y-0.5">
@@ -4429,55 +4624,68 @@ function ReporteResumenPapel({ egresados, invitados, docentes, especiales, confi
         )}
       </div>
 
-      <div className="space-y-3">
-        <h3 className="font-bold text-sm text-[#6B1D2F] uppercase tracking-wide">1. Padrón de Egresados y Grupo Familiar</h3>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse text-xs">
-            <thead>
-              <tr className="bg-slate-100 border-b border-slate-300">
-                <th className="p-2 border">Egresado / DNI</th>
-                <th className="p-2 border">Invitado / Familiar</th>
-                <th className="p-2 border">DNI Invitado</th>
-                <th className="p-2 border text-center">Modalidad</th>
-                <th className="p-2 border text-center">Mov. reducida</th>
-                <th className="p-2 border text-center">Firma Ingreso</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {egresadosOrdenados.map((egr) => {
-                const misInv = invitados.filter(i => i.egresado_id === egr.id);
-                return (
-                  <React.Fragment key={egr.id}>
-                    <tr className="bg-slate-50 font-bold">
-                      <td className="p-2 border align-top" colSpan={6}>
-                        🎓 {egr.nombre_completo} (DNI: {egr.dni}){textoCurso(egr) ? ` · ${textoCurso(egr)}` : ''} · Cel: {egr.celular || 'S/N'}
-                        {egr.activo === false ? ' · NO ASISTE' : ''}
-                        <span className="block font-normal text-[11px] text-slate-600">Familia: {accesoFamiliaDe(egr).toLowerCase()}</span>
-                      </td>
-                    </tr>
-                    {misInv.length === 0 ? (
-                      <tr><td className="p-2 border text-slate-400 italic" colSpan={6}>Sin invitados cargados</td></tr>
-                    ) : (
-                      misInv.map((inv, idx) => (
-                        <tr key={inv.id} className="hover:bg-slate-50/50">
-                          <td className="p-2 border text-slate-400 pl-6">↳ Cupo #{idx + 1}</td>
-                          <td className="p-2 border font-medium">{inv.nombre_completo}</td>
-                          <td className="p-2 border font-mono">{inv.dni}</td>
-                          <td className="p-2 border text-center"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800">{esGrupal(inv) ? 'En grupo' : 'Individual'}</span></td>
-                          <td className="p-2 border text-center font-bold">{tieneMovilidad(inv) ? '♿ SÍ' : ''}</td>
-                          <td className="p-2 border text-center w-28">______</td>
-                        </tr>
-                      ))
-                    )}
-                  </React.Fragment>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      </>}
 
-      <div className="space-y-3 pt-6">
+      {cursos.map((curso, nCurso) => {
+        const delCurso = egresadosOrdenados.filter((e) => (e.division || '') === curso);
+        const invCurso = invitados.filter((i) => delCurso.some((e) => e.id === i.egresado_id));
+        const ej = delCurso[0];
+        return (
+          <div key={curso || 'sin'} className="space-y-3" style={verTodo || nCurso > 0 ? { breakBefore: 'page', pageBreakBefore: 'always' } : undefined}>
+            <div className="border-2 rounded-xl p-3" style={{ borderColor: colorFamiliaDe(ej) }}>
+              <h3 className="font-extrabold text-base" style={{ color: colorFamiliaDe(ej) }}>{verTodo ? `1.${nCurso + 1} · ` : ''}{curso || 'Sin curso cargado'}{ej && etiquetaOrientacion(ej) ? ` · ${etiquetaOrientacion(ej)}` : ''}</h3>
+              <p className="text-xs text-slate-700"><b>{delCurso.length}</b> egresados ({delCurso.filter((e) => e.activo === false).length} no asisten) · <b>{invCurso.length}</b> invitados cargados ({invCurso.filter(esGrupal).length} en grupo, {invCurso.filter((i) => !esGrupal(i)).length} individuales{invCurso.some(tieneMovilidad) ? `, ${invCurso.filter(tieneMovilidad).length} con movilidad reducida` : ''})</p>
+              <p className="text-xs text-slate-700">Egresados: {ACCESO_TEXTO.egresados.toLowerCase()} · Familias: {accesoFamiliaDe(ej).toLowerCase()}</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-slate-100 border-b border-slate-300">
+                    <th className="p-2 border">Egresado / DNI</th>
+                    <th className="p-2 border">Invitado / Familiar</th>
+                    <th className="p-2 border">DNI Invitado</th>
+                    <th className="p-2 border text-center">Modalidad</th>
+                    <th className="p-2 border text-center">Mov. reducida</th>
+                    <th className="p-2 border text-center">Firma Ingreso</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {delCurso.map((egr) => {
+                    const misInv = invitados.filter(i => i.egresado_id === egr.id);
+                    return (
+                      <React.Fragment key={egr.id}>
+                        <tr className="bg-slate-50 font-bold" style={{ breakInside: 'avoid' }}>
+                          <td className="p-2 border align-top" colSpan={6}>
+                            🎓 {egr.nombre_completo} (DNI: {egr.dni}) · Cel: {egr.celular || 'S/N'}
+                            {egr.activo === false ? ' · NO ASISTE' : ''}
+                          </td>
+                        </tr>
+                        {misInv.length === 0 ? (
+                          <tr><td className="p-2 border text-slate-400 italic" colSpan={6}>Sin invitados cargados</td></tr>
+                        ) : (
+                          misInv.map((inv, idx) => (
+                            <tr key={inv.id} className="hover:bg-slate-50/50" style={{ breakInside: 'avoid' }}>
+                              <td className="p-2 border text-slate-400 pl-6">↳ Cupo #{idx + 1}</td>
+                              <td className="p-2 border font-medium">{inv.nombre_completo}</td>
+                              <td className="p-2 border font-mono">{inv.dni}</td>
+                              <td className="p-2 border text-center"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800">{esGrupal(inv) ? 'En grupo' : 'Individual'}</span></td>
+                              <td className="p-2 border text-center font-bold">{tieneMovilidad(inv) ? '♿ SÍ' : ''}</td>
+                              <td className="p-2 border text-center w-28">______</td>
+                            </tr>
+                          ))
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })}
+
+      {verTodo && <>
+      <div className="space-y-3 pt-6" style={{ breakBefore: 'page', pageBreakBefore: 'always' }}>
         <h3 className="font-bold text-sm text-[#6B1D2F] uppercase tracking-wide">2. Padrón de Docentes</h3>
         <table className="w-full text-left border-collapse text-xs">
           <thead><tr className="bg-slate-100 border-b"><th className="p-2 border">Nombre y Apellido</th><th className="p-2 border">DNI</th><th className="p-2 border text-center">Firma</th></tr></thead>
@@ -4500,6 +4708,7 @@ function ReporteResumenPapel({ egresados, invitados, docentes, especiales, confi
           </tbody>
         </table>
       </div>
+      </>}
     </div>
   );
 }
