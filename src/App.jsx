@@ -24,7 +24,7 @@ const createTempAuthClient = () =>
 const sanitizeDNI = (val) => String(val || '').replace(/\D/g, '').slice(0, 8);
 const CAPACIDAD_MAXIMA = 525;
 const CUPO_BASE_DEFECTO = 4;
-const VERSION_APP = 'v17 · 19/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
+const VERSION_APP = 'v18 · 19/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
 const MSG_FALTA_COL_BUTACA = 'Falta crear la columna "ocupa_butaca" en la tabla docentes (Supabase). Ejecutá el SQL que te pasaron y volvé a intentar.';
 const esErrorColumnaButaca = (err) => /ocupa_butaca/i.test(err?.message || '') || err?.code === 'PGRST204' || err?.code === '42703';
 const aNumeroONulo = (v) => (v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
@@ -2216,6 +2216,31 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
   };
 
   // Protección: no se puede dejar al sistema sin administradores activos
+  // Cambiar la contraseña de cualquier usuario (solo admin; usa la función admin_cambiar_clave de la base)
+  const [claveDeUsr, setClaveDeUsr] = useState(null);
+  const [claveUsrNueva, setClaveUsrNueva] = useState('');
+  const [claveUsrRep, setClaveUsrRep] = useState('');
+  const [verClaveUsr, setVerClaveUsr] = useState(false);
+  const [guardandoClaveUsr, setGuardandoClaveUsr] = useState(false);
+  const cambiarClaveDeUsuario = async (e) => {
+    e.preventDefault();
+    if (claveUsrNueva.length < 8) { notify('La contraseña tiene que tener al menos 8 caracteres.', 'error'); return; }
+    if (claveUsrNueva !== claveUsrRep) { notify('Las dos contraseñas no coinciden.', 'error'); return; }
+    setGuardandoClaveUsr(true);
+    try {
+      const { error } = await supabase.rpc('admin_cambiar_clave', { p_email: claveDeUsr.email, p_clave: claveUsrNueva });
+      if (error) throw error;
+      await registrarLog('USUARIOS', 'Contraseña', `Cambió la contraseña de ${claveDeUsr.nombre || claveDeUsr.email}.`);
+      notify(`Contraseña de ${claveDeUsr.nombre || claveDeUsr.email} cambiada. Pasásela por un medio seguro.`);
+      setClaveDeUsr(null); setClaveUsrNueva(''); setClaveUsrRep('');
+    } catch (err) {
+      const m = String(err?.message || '');
+      notify(/could not find the function|PGRST202/i.test(m) ? 'Falta crear la función "admin_cambiar_clave" en Supabase (SQL de la v18).' : 'No se pudo cambiar la contraseña: ' + m, 'error');
+    } finally {
+      setGuardandoClaveUsr(false);
+    }
+  };
+
   const quedaOtroAdmin = (u) => usuariosSistema.some((x) => x.id !== u.id && String(x.rol || '').toLowerCase() === 'admin' && x.activo !== false);
 
   const actualizarUsuario = async (u, cambios, detalle) => {
@@ -4092,7 +4117,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
       {tab === 'usuarios' && perfilStaff?.rol === 'admin' && (
         <div className="bg-white rounded-2xl border p-5 space-y-5">
           <h3 className="font-bold">Gestión de Usuarios del Sistema</h3>
-          <p className="text-xs text-slate-500 -mt-3">Los administradores cambian su propia contraseña con el botón <b>🔑 Mi contraseña</b> del encabezado. La de coordinadores y Puerta, por ahora, se cambia desde Supabase.</p>
+          <p className="text-xs text-slate-500 -mt-3">Con <b>🔑 Clave</b> cambiás la contraseña de cualquier usuario (por ejemplo, si se la olvidó). Tu propia contraseña también la podés cambiar con <b>🔑 Mi contraseña</b> del encabezado.</p>
           <form onSubmit={crearUsuarioSistema} className="grid grid-cols-1 sm:grid-cols-5 gap-3 bg-slate-50 p-4 rounded-xl border">
             <input type="text" placeholder="Nombre" value={nuevoNombreUsr} onChange={(e) => setNuevoNombreUsr(e.target.value)} className="px-3 py-2 rounded-xl border text-sm bg-white" required />
             <input type="email" placeholder="Correo electrónico" value={nuevoEmailUsr} onChange={(e) => setNuevoEmailUsr(e.target.value)} className="px-3 py-2 rounded-xl border text-sm bg-white" required />
@@ -4129,6 +4154,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
                       if (!limpio) { notify('El nombre no puede quedar vacío.', 'error'); return; }
                       if (limpio !== u.nombre) actualizarUsuario(u, { nombre: limpio }, `Cambió el nombre a ${limpio}`);
                     }} className="px-2.5 py-1.5 rounded-lg text-xs font-bold cursor-pointer bg-amber-50 text-amber-700 border flex items-center gap-1"><Edit2 className="w-3 h-3" /> Nombre</button>
+                    <button onClick={() => { setClaveDeUsr(u); setClaveUsrNueva(''); setClaveUsrRep(''); }} className="px-2.5 py-1.5 rounded-lg text-xs font-bold cursor-pointer bg-slate-100 text-slate-700 border">🔑 Clave</button>
                     <select value={rolU} onChange={(e) => actualizarUsuario(u, { rol: e.target.value }, `Cambió el rol a ${e.target.value}`)} className="px-2 py-1.5 rounded-lg border text-xs font-bold bg-white">
                       <option value="puerta">Puerta</option>
                       <option value="coordinador">Coordinador</option>
@@ -4145,6 +4171,25 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
               );
             })}
           </div>
+        </div>
+      )}
+
+      {claveDeUsr && perfilStaff?.rol === 'admin' && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+          <form onSubmit={cambiarClaveDeUsuario} className="bg-white rounded-2xl max-w-sm w-full shadow-2xl p-5 space-y-3 border-t-4 border-[#6B1D2F]">
+            <h3 className="font-extrabold text-base text-slate-900">🔑 Cambiar contraseña</h3>
+            <p className="text-xs text-slate-600"><b>{claveDeUsr.nombre}</b> · {claveDeUsr.email}</p>
+            <div className="relative">
+              <input type={verClaveUsr ? 'text' : 'password'} autoComplete="new-password" placeholder="Contraseña nueva (mínimo 8)" value={claveUsrNueva} onChange={(e) => setClaveUsrNueva(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm" required />
+              <button type="button" onClick={() => setVerClaveUsr(!verClaveUsr)} className="absolute right-3 top-2.5 text-slate-400 cursor-pointer">{verClaveUsr ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}</button>
+            </div>
+            <input type={verClaveUsr ? 'text' : 'password'} autoComplete="new-password" placeholder="Repetí la contraseña nueva" value={claveUsrRep} onChange={(e) => setClaveUsrRep(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm" required />
+            <p className="text-[11px] text-slate-500">La persona va a tener que usar esta contraseña la próxima vez que entre. Si tiene la sesión abierta, sigue adentro hasta que salga.</p>
+            <div className="flex gap-2 pt-2 border-t">
+              <button type="button" onClick={() => setClaveDeUsr(null)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold cursor-pointer">Cancelar</button>
+              <button type="submit" disabled={guardandoClaveUsr} className="flex-1 py-2.5 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold cursor-pointer disabled:opacity-60">{guardandoClaveUsr ? 'Guardando...' : 'Cambiar contraseña'}</button>
+            </div>
+          </form>
         </div>
       )}
 
