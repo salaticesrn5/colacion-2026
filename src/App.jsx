@@ -24,6 +24,7 @@ const createTempAuthClient = () =>
 const sanitizeDNI = (val) => String(val || '').replace(/\D/g, '').slice(0, 8);
 const CAPACIDAD_MAXIMA = 525;
 const CUPO_BASE_DEFECTO = 4;
+const VERSION_APP = 'v17 · 19/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
 const MSG_FALTA_COL_BUTACA = 'Falta crear la columna "ocupa_butaca" en la tabla docentes (Supabase). Ejecutá el SQL que te pasaron y volvé a intentar.';
 const esErrorColumnaButaca = (err) => /ocupa_butaca/i.test(err?.message || '') || err?.code === 'PGRST204' || err?.code === '42703';
 const aNumeroONulo = (v) => (v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
@@ -168,6 +169,34 @@ export default function App() {
   const [perfilStaff, setPerfilStaff] = useState(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
   const yaUbicadoRef = useRef(false);
+  const [modalClave, setModalClave] = useState(false);
+  const [claveNueva, setClaveNueva] = useState('');
+  const [claveRepetida, setClaveRepetida] = useState('');
+  const [verClave, setVerClave] = useState(false);
+  const [guardandoClave, setGuardandoClave] = useState(false);
+
+  // Cada usuario puede cambiar SU PROPIA contraseña (no hace falta nada especial en el servidor)
+  const cambiarMiClave = async (e) => {
+    e.preventDefault();
+    if (claveNueva.length < 8) { notify('La contraseña nueva tiene que tener al menos 8 caracteres.', 'error'); return; }
+    if (claveNueva !== claveRepetida) { notify('Las dos contraseñas no coinciden.', 'error'); return; }
+    setGuardandoClave(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ password: claveNueva });
+      if (error) throw error;
+      await registrarLog('USUARIOS', 'Contraseña', 'Cambió su propia contraseña.');
+      setModalClave(false); setClaveNueva(''); setClaveRepetida('');
+      notify('Contraseña cambiada. La próxima vez que entres usá la nueva.');
+    } catch (err) {
+      const m = String(err?.message || '');
+      notify(/different from the old|same as/i.test(m) ? 'La contraseña nueva tiene que ser distinta de la actual.'
+        : /reauthentication|nonce/i.test(m) ? 'Supabase pide volver a iniciar sesión antes de cambiarla: cerrá sesión, entrá de nuevo y repetí.'
+        : /weak|at least/i.test(m) ? 'La contraseña es muy débil: usá al menos 8 caracteres con letras y números.'
+        : 'No se pudo cambiar la contraseña: ' + m, 'error');
+    } finally {
+      setGuardandoClave(false);
+    }
+  };
 
   const [config, setConfig] = useState({ id: null, estado_etapa: 'abierta', cupo_base: CUPO_BASE_DEFECTO, filas: 15, butacas_por_fila: 35 });
   const whatsappActivo = config.whatsapp_activo !== false;
@@ -446,6 +475,16 @@ export default function App() {
                 Acceso Personal
               </button>
             ) : (
+              <>
+              {perfilStaff?.rol === 'admin' && (
+              <button
+                onClick={() => { setModalClave(true); setClaveNueva(''); setClaveRepetida(''); }}
+                className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-white/10 hover:bg-white/20 text-white transition"
+                title="Cambiar mi contraseña"
+              >
+                🔑<span className="hidden sm:inline"> Mi contraseña</span>
+              </button>
+              )}
               <button
                 onClick={handleLogout}
                 className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-rose-700 hover:bg-rose-800 text-white transition"
@@ -454,6 +493,7 @@ export default function App() {
                 <LogOut className="w-3.5 h-3.5" />
                 Salir
               </button>
+              </>
             )}
           </nav>
         </div>
@@ -487,6 +527,26 @@ export default function App() {
           <PortalPrincipalDNI vipPortalActivo={vipPortalActivo} whatsappActivo={whatsappActivo} config={config} notify={notify} />
         )}
       </main>
+
+      {modalClave && perfilStaff?.rol === 'admin' && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50 print:hidden">
+          <form onSubmit={cambiarMiClave} className="bg-white rounded-2xl max-w-sm w-full shadow-2xl p-5 space-y-3 border-t-4 border-[#6B1D2F]">
+            <h3 className="font-extrabold text-base text-slate-900">🔑 Cambiar mi contraseña</h3>
+            <p className="text-xs text-slate-500">Cuenta: <b>{perfilStaff?.email || session?.user?.email}</b></p>
+            <div className="relative">
+              <input type={verClave ? 'text' : 'password'} autoComplete="new-password" placeholder="Contraseña nueva (mínimo 8)" value={claveNueva} onChange={(e) => setClaveNueva(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm" required />
+              <button type="button" onClick={() => setVerClave(!verClave)} className="absolute right-3 top-2.5 text-slate-400 cursor-pointer">{verClave ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}</button>
+            </div>
+            <input type={verClave ? 'text' : 'password'} autoComplete="new-password" placeholder="Repetí la contraseña nueva" value={claveRepetida} onChange={(e) => setClaveRepetida(e.target.value)} className="w-full px-3 py-2 border rounded-xl text-sm" required />
+            <div className="flex gap-2 pt-2 border-t">
+              <button type="button" onClick={() => setModalClave(false)} className="flex-1 py-2.5 bg-white border rounded-xl text-xs font-semibold cursor-pointer">Cancelar</button>
+              <button type="submit" disabled={guardandoClave} className="flex-1 py-2.5 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold cursor-pointer disabled:opacity-60">{guardandoClave ? 'Guardando...' : 'Cambiar contraseña'}</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      <p className="text-center text-[10px] text-slate-400 mt-2 print:hidden">Control de Acceso Colación 2026 · {VERSION_APP}</p>
 
       {whatsappActivo && (
       <a
@@ -4032,6 +4092,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
       {tab === 'usuarios' && perfilStaff?.rol === 'admin' && (
         <div className="bg-white rounded-2xl border p-5 space-y-5">
           <h3 className="font-bold">Gestión de Usuarios del Sistema</h3>
+          <p className="text-xs text-slate-500 -mt-3">Los administradores cambian su propia contraseña con el botón <b>🔑 Mi contraseña</b> del encabezado. La de coordinadores y Puerta, por ahora, se cambia desde Supabase.</p>
           <form onSubmit={crearUsuarioSistema} className="grid grid-cols-1 sm:grid-cols-5 gap-3 bg-slate-50 p-4 rounded-xl border">
             <input type="text" placeholder="Nombre" value={nuevoNombreUsr} onChange={(e) => setNuevoNombreUsr(e.target.value)} className="px-3 py-2 rounded-xl border text-sm bg-white" required />
             <input type="email" placeholder="Correo electrónico" value={nuevoEmailUsr} onChange={(e) => setNuevoEmailUsr(e.target.value)} className="px-3 py-2 rounded-xl border text-sm bg-white" required />
@@ -4060,7 +4121,14 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
                     <p className="font-bold">{u.nombre} {esYo && <span className="text-[10px] font-bold text-indigo-600 uppercase">(vos)</span>} {!activo && <span className="text-[10px] font-bold text-rose-600 uppercase">Desactivado</span>}</p>
                     <p className="text-xs text-slate-500">{u.email}</p>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button onClick={() => {
+                      const nuevo = window.prompt(`Nombre para ${u.email}:`, u.nombre || '');
+                      if (nuevo === null) return;
+                      const limpio = nuevo.trim();
+                      if (!limpio) { notify('El nombre no puede quedar vacío.', 'error'); return; }
+                      if (limpio !== u.nombre) actualizarUsuario(u, { nombre: limpio }, `Cambió el nombre a ${limpio}`);
+                    }} className="px-2.5 py-1.5 rounded-lg text-xs font-bold cursor-pointer bg-amber-50 text-amber-700 border flex items-center gap-1"><Edit2 className="w-3 h-3" /> Nombre</button>
                     <select value={rolU} onChange={(e) => actualizarUsuario(u, { rol: e.target.value }, `Cambió el rol a ${e.target.value}`)} className="px-2 py-1.5 rounded-lg border text-xs font-bold bg-white">
                       <option value="puerta">Puerta</option>
                       <option value="coordinador">Coordinador</option>
