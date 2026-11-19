@@ -24,7 +24,7 @@ const createTempAuthClient = () =>
 const sanitizeDNI = (val) => String(val || '').replace(/\D/g, '').slice(0, 8);
 const CAPACIDAD_MAXIMA = 525;
 const CUPO_BASE_DEFECTO = 4;
-const VERSION_APP = 'v19 · 19/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
+const VERSION_APP = 'v20 · 19/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
 const MSG_FALTA_COL_BUTACA = 'Falta crear la columna "ocupa_butaca" en la tabla docentes (Supabase). Ejecutá el SQL que te pasaron y volvé a intentar.';
 const esErrorColumnaButaca = (err) => /ocupa_butaca/i.test(err?.message || '') || err?.code === 'PGRST204' || err?.code === '42703';
 const aNumeroONulo = (v) => (v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
@@ -681,6 +681,15 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, notify })
     setEditando(misInv.length === 0 && habilitado);
   };
 
+  // Registro de lo que hacen las familias en el portal (no frena nada si falla o si falta el SQL)
+  const registrarPortal = (accion, detalle, dniUsado) => {
+    try {
+      const d = sanitizeDNI(dniUsado || datosPersona?.dni || dni);
+      supabase.rpc('portal_registrar', { p_tipo: tipoUsuario, p_dni: d, p_accion: accion, p_detalle: String(detalle || '').slice(0, 900) }).then(() => {}, () => {});
+    } catch (_) { /* nada */ }
+  };
+  const errorPortal = (contexto, msg) => { notify(msg, 'error'); registrarPortal('ERROR', `${contexto}: ${msg}`); };
+
   // Carga en pantalla lo que devuelve la base para un egresado (persona + invitados + solicitudes)
   const aplicarDatosEgresado = (data) => {
     const persona = data.persona;
@@ -718,18 +727,23 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, notify })
       const { data, error: errRpc } = await supabase.rpc('portal_consultar', { p_tipo: tipoUsuario, p_dni: limpio });
       if (errRpc) throw errRpc;
       if (!data || !data.encontrado) {
+        if (data?.motivo !== 'vip_desactivado') registrarPortal('NO_ENCONTRADO', `Buscó un DNI que no está en ${tipoUsuario.toUpperCase()}`, limpio);
         setError(data?.motivo === 'vip_desactivado'
           ? 'El acceso de invitados VIP por este portal no está habilitado.'
           : `No se encontró ningún registro con ese DNI en ${tipoUsuario.toUpperCase()}.`);
         return;
       }
       if (data.persona?.activo === false) {
+        registrarPortal('ERROR', 'Intentó entrar pero figura como "No asiste"', limpio);
         setError('Figurás como que no asistirás al acto. Si cambiaste de opinión, comunicate con la escuela.');
         return;
       }
       if (tipoUsuario === 'egresado') aplicarDatosEgresado(data);
       else setDatosPersona(data.persona);
+      const nInv = Array.isArray(data.invitados) ? data.invitados.length : 0;
+      registrarPortal('INGRESO', tipoUsuario === 'egresado' ? `Entró al portal (tiene ${nInv} invitado/s cargado/s)` : 'Entró al portal', limpio);
     } catch (err) {
+      registrarPortal('ERROR', `Buscar DNI: ${mensajeErrorRPC(err)}`, limpio);
       setError(mensajeErrorRPC(err));
     } finally {
       setBuscando(false);
@@ -743,11 +757,11 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, notify })
 
   const guardarInvitados = async () => {
     if (!puedeEditarInvitados(datosPersona, { config, solicitudes: misSolicitudes })) {
-      notify('La carga de invitados está cerrada. Si necesitás un cambio, comunicate con la escuela.', 'error');
+      errorPortal('Guardar invitados', 'La carga de invitados está cerrada. Si necesitás un cambio, comunicate con la escuela.');
       return;
     }
     if (whatsappActivo && (!celular || celular.trim().length < 6)) {
-      notify('El número de celular/WhatsApp es obligatorio para continuar.', 'error');
+      errorPortal('Guardar invitados', 'El número de celular/WhatsApp es obligatorio para continuar.');
       return;
     }
 
@@ -757,12 +771,12 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, notify })
       const nombre = (filasInvitados[i].nombre_completo || '').trim();
       const dniFila = sanitizeDNI(filasInvitados[i].dni || '');
       if ((nombre && !dniFila) || (!nombre && dniFila)) {
-        notify(`Invitado #${i + 1}: completá el nombre y el DNI (o dejá los dos vacíos).`, 'error');
+        errorPortal('Guardar invitados', `Invitado #${i + 1}: completá el nombre y el DNI (o dejá los dos vacíos).`);
         return;
       }
       if (dniFila) {
         if (dnisVistos.has(dniFila)) {
-          notify(`Invitado #${i + 1}: el DNI ${dniFila} está repetido en el formulario.`, 'error');
+          errorPortal('Guardar invitados', `Invitado #${i + 1}: el DNI ${dniFila} está repetido en el formulario.`);
           return;
         }
         dnisVistos.add(dniFila);
@@ -777,12 +791,19 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, notify })
         .map((f) => ({ id: f.id || null, nombre_completo: (f.nombre_completo || '').trim(), dni: sanitizeDNI(f.dni || ''), es_grupal: f.es_grupal === true, movilidad_reducida: f.movilidad_reducida === true }));
       const { data, error: errRpc } = await supabase.rpc('portal_guardar_invitados', { p_dni: sanitizeDNI(datosPersona.dni || dni), p_celular: celular, p_invitados: payload });
       if (errRpc) throw errRpc;
+      const antes = new Map(misInvitadosGuardados.map((i) => [i.id, i]));
+      const despues = Array.isArray(data?.invitados) ? data.invitados : [];
+      const etiqueta = (i) => `${i.nombre_completo} (${i.dni})${i.es_grupal ? ' grupo' : ''}${i.movilidad_reducida ? ' ♿' : ''}`;
+      const agregados = despues.filter((i) => !antes.has(i.id)).map(etiqueta);
+      const quitados = misInvitadosGuardados.filter((i) => !despues.some((x) => x.id === i.id)).map(etiqueta);
       aplicarDatosEgresado(data);
       setEditando(false);
       notify('Invitados y datos guardados correctamente.');
+      registrarPortal('GUARDAR_INVITADOS', `Quedan ${despues.length} invitado/s: ${despues.map(etiqueta).join('; ') || 'ninguno'}`
+        + (agregados.length ? ` | Agregó: ${agregados.join('; ')}` : '') + (quitados.length ? ` | Quitó: ${quitados.join('; ')}` : ''));
     } catch (err) {
       console.error(err);
-      notify(`No se pudieron guardar los invitados. ${mensajeErrorRPC(err)}`, 'error');
+      errorPortal('Guardar invitados', `No se pudieron guardar los invitados. ${mensajeErrorRPC(err)}`);
     } finally {
       setGuardando(false);
     }
@@ -792,12 +813,12 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, notify })
   const pedirSolicitudExtra = (e) => {
     e.preventDefault();
     if (misSolicitudes.length > 0) {
-      notify('Ya enviaste una solicitud de butacas extra. Solo se puede pedir una vez.', 'error');
+      errorPortal('Solicitud extra', 'Ya enviaste una solicitud de butacas extra. Solo se puede pedir una vez.');
       return;
     }
     const cel = (celular || datosPersona?.celular || '').trim();
     if (whatsappActivo && cel.length < 6) {
-      notify('Antes de pedir butacas extra, cargá tu celular / WhatsApp y guardá los datos: por ahí te avisamos si se aprueba.', 'error');
+      errorPortal('Solicitud extra', 'Antes de pedir butacas extra, cargá tu celular / WhatsApp y guardá los datos: por ahí te avisamos si se aprueba.');
       return;
     }
     setAvisoSolicitud(true);
@@ -815,11 +836,12 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, notify })
         p_celular: (celular || datosPersona.celular || '').trim(),
       });
       if (errRpc) throw errRpc;
-      setObsExtra('');
       aplicarDatosEgresado(data);
       notify('Solicitud de butacas extra enviada.');
+      registrarPortal('SOLICITUD_EXTRA', `Pidió ${Number(cantExtra)} butaca/s extra${obsExtra.trim() ? ` · "${obsExtra.trim().slice(0, 200)}"` : ''}`);
+      setObsExtra('');
     } catch (err) {
-      notify('Error: ' + mensajeErrorRPC(err), 'error');
+      errorPortal('Solicitud extra', 'Error: ' + mensajeErrorRPC(err));
     } finally {
       setEnviandoSol(false);
     }
@@ -831,7 +853,8 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, notify })
       : '¿Estás seguro de que no asistirás? Esto liberará tu plaza.';
     if (!window.confirm(aviso)) return;
     const { error: errRpc } = await supabase.rpc('portal_no_asistire', { p_tipo: tipoUsuario, p_dni: sanitizeDNI(datosPersona.dni || dni) });
-    if (errRpc) { notify('No se pudo registrar: ' + mensajeErrorRPC(errRpc), 'error'); return; }
+    if (errRpc) { errorPortal('No asistiré', 'No se pudo registrar: ' + mensajeErrorRPC(errRpc)); return; }
+    registrarPortal('NO_ASISTIRE', tipoUsuario === 'egresado' ? 'Se dio de baja (libera su butaca y las de sus invitados)' : 'Se dio de baja');
     notify('Has marcado que no asistirás. ¡Gracias!');
     setDatosPersona(null);
     setDni('');
@@ -2084,6 +2107,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
   const CAPACIDAD = capacidadDe(config);
   const [tab, setTab] = useState('egresados');
   const [filtroEgresado, setFiltroEgresado] = useState('');
+  const [filtroPortal, setFiltroPortal] = useState('todos');
   const [filtroDocente, setFiltroDocente] = useState('');
   const [filtroVip, setFiltroVip] = useState('');
   
@@ -3164,7 +3188,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
 
       const hojaEgresados = egresados.map((e) => {
         const susInv = invitados.filter((i) => i.egresado_id === e.id);
-        return { DNI: e.dni, 'Nombre completo': e.nombre_completo, 'División': e.division || '', 'Orientación': e.orientacion || '', Estado: e.activo === false ? 'NO ASISTE' : 'Asiste', Presente: si(e.asistio), 'Hora de ingreso': e.asistio ? hora(e.hora_ingreso_real) : '', 'Cupo asignado': e.cupo_asignado ?? '', 'Invitados cargados': susInv.length, 'Invitados presentes': susInv.filter((i) => i.asistio).length };
+        return { DNI: e.dni, 'Nombre completo': e.nombre_completo, 'División': e.division || '', 'Orientación': e.orientacion || '', Estado: e.activo === false ? 'NO ASISTE' : 'Asiste', Presente: si(e.asistio), 'Hora de ingreso': e.asistio ? hora(e.hora_ingreso_real) : '', 'Cupo asignado': e.cupo_asignado ?? '', 'Invitados cargados': susInv.length, 'Invitados presentes': susInv.filter((i) => i.asistio).length, 'Entró al portal': e.portal_ultimo_ingreso ? 'SI' : 'NO', 'Último ingreso al portal': hora(e.portal_ultimo_ingreso) };
       });
       const hojaFamiliares = invitados.map((i) => ({ 'N° entrada': i.numero_entrada || '', DNI: i.dni || '', 'Nombre completo': i.nombre_completo, 'Invitado de': porId[i.egresado_id]?.nombre_completo || '', Modalidad: esGrupal(i) ? 'En grupo' : 'Individual', 'Movilidad reducida': tieneMovilidad(i) ? 'SI' : '', Acceso: accesoFamiliaDe(porId[i.egresado_id]), Presente: si(i.asistio), 'Hora de ingreso': i.asistio ? hora(i.hora_ingreso) : '' }));
       const hojaDocentes = docentes.map((d) => ({ DNI: d.dni, 'Nombre completo': d.nombre_completo, Estado: d.activo === false ? 'NO ASISTE' : 'Asiste', 'Ocupa butaca': d.ocupa_butaca === false ? 'NO' : 'SI', Presente: si(d.asistio), 'Hora de ingreso': d.asistio ? hora(d.hora_ingreso_real) : '' }));
@@ -3205,7 +3229,13 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
     const soloDigitos = String(q).replace(/\D/g, '');
     return normTxt(item.nombre_completo).includes(texto) || (soloDigitos.length > 0 && String(item.dni || '').includes(soloDigitos));
   };
-  const egresadosFiltrados = egresados.filter((e) => coincideBusqueda(e, filtroEgresado));
+  const hayDatoPortal = egresados.some((e) => 'portal_ultimo_ingreso' in e);
+  const entroPortal = (e) => !!e.portal_ultimo_ingreso;
+  const cantEntraronPortal = egresados.filter((e) => e.activo !== false && entroPortal(e)).length;
+  const cantActivosEgr = egresados.filter((e) => e.activo !== false).length;
+  const fechaCorta = (v) => { const d = new Date(v); return isNaN(d.getTime()) ? '' : d.toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); };
+  const egresadosFiltrados = egresados.filter((e) => coincideBusqueda(e, filtroEgresado)
+    && (filtroPortal === 'todos' || (filtroPortal === 'entraron' ? entroPortal(e) : (!entroPortal(e) && e.activo !== false))));
   const docentesFiltrados = docentes.filter((d) => coincideBusqueda(d, filtroDocente));
   const vipsFiltrados = especiales.filter((v) => coincideBusqueda(v, filtroVip));
   const logsFiltrados = logsSistema.filter((l) => (l.usuario || '').toLowerCase().includes(filtroLogBusqueda.toLowerCase()) || (l.accion || '').toLowerCase().includes(filtroLogBusqueda.toLowerCase()) || (l.modulo || '').toLowerCase().includes(filtroLogBusqueda.toLowerCase()) || (l.detalle || '').toLowerCase().includes(filtroLogBusqueda.toLowerCase()));
@@ -3311,6 +3341,15 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
             <input type="text" placeholder="Buscar egresado por nombre o DNI..." value={filtroEgresado} onChange={(e) => setFiltroEgresado(e.target.value)} className="w-full pl-10 pr-4 py-2 rounded-xl border text-sm outline-none focus:border-[#6B1D2F]" />
           </div>
 
+          {hayDatoPortal && (
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="font-bold text-slate-600">Portal: entraron {cantEntraronPortal} de {cantActivosEgr}</span>
+              {[['todos', 'Todos'], ['entraron', '✔ Entraron'], ['sin_entrar', '✖ Todavía no entraron']].map(([v, t]) => (
+                <button key={v} onClick={() => setFiltroPortal(v)} className={`px-3 py-1 rounded-full border font-bold cursor-pointer ${filtroPortal === v ? 'bg-[#6B1D2F] text-white border-[#6B1D2F]' : 'bg-white text-slate-600'}`}>{t}</button>
+              ))}
+            </div>
+          )}
+
           <div className="max-h-96 overflow-y-auto divide-y">
             {egresadosFiltrados.length === 0 && <p className="text-center text-slate-400 text-sm py-6">No se encontraron egresados.</p>}
             {egresadosFiltrados.map((e) => {
@@ -3324,6 +3363,9 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
                     <div className="flex items-center gap-2">
                       <span className="font-semibold">{e.nombre_completo}</span> <span className="text-xs text-slate-500">({e.dni})</span> {e.activo === false && <span className="px-2 py-0.5 bg-rose-100 text-rose-700 rounded-full text-[10px] font-bold">NO ASISTE</span>}
                       {!whatsappActivo ? null : numeroWp ? <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full text-[10px] font-bold">📱 Con WhatsApp</span> : <span className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded-full text-[10px]">Sin Celular</span>}
+                      {hayDatoPortal && (entroPortal(e)
+                        ? <span title={`Primera vez: ${fechaCorta(e.portal_primer_ingreso)} · Veces: ${e.portal_ingresos || 1}`} className="px-2 py-0.5 bg-sky-100 text-sky-800 rounded-full text-[10px] font-bold">✔ Entró al portal · {fechaCorta(e.portal_ultimo_ingreso)}</span>
+                        : <span className="px-2 py-0.5 bg-orange-100 text-orange-700 rounded-full text-[10px] font-bold">✖ No entró al portal</span>)}
                     </div>
                     <p className="text-xs text-slate-400">
                       {textoCurso(e) ? <span className="font-semibold" style={{ color: colorFamiliaDe(e) }}>{textoCurso(e)} · </span> : <span className="font-semibold text-rose-600">Sin orientación · </span>}
