@@ -3160,14 +3160,25 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
       )}
 
       <div className="flex flex-wrap gap-2">
-        <button onClick={() => setTab('egresados')} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === 'egresados' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Egresados ({egresados.length})</button>
-        <button onClick={() => setTab('invitados')} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === 'invitados' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Invitados de egresados ({invitados.length})</button>
-        <button onClick={() => setTab('docentes')} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === 'docentes' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Docentes ({docentes.length})</button>
-        <button onClick={() => setTab('vip')} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === 'vip' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Invitados VIP ({especiales.length})</button>
-        <button onClick={() => setTab('solicitudes')} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === 'solicitudes' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Solicitudes Butacas ({solicitudes.length})</button>
-        <button onClick={() => setTab('reportes')} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === 'reportes' ? 'bg-[#6B1D2F] text-white' : 'bg-white border'}`}>Acreditación en Vivo</button>
+        {[
+          { id: 'egresados', texto: `Egresados (${egresados.length})`, fondo: COLOR_PASE.egresado },
+          { id: 'invitados', texto: `Invitados de egresados (${invitados.length})`, fondo: `linear-gradient(90deg, ${COLOR_PASE.cn}, ${COLOR_PASE.edu})`, borde: COLOR_PASE.cn },
+          { id: 'docentes', texto: `Docentes (${docentes.length})`, fondo: COLOR_PASE.docente },
+          { id: 'vip', texto: `Invitados VIP (${especiales.length})`, fondo: COLOR_PASE.vip },
+        ].map((t) => {
+          const activa = tab === t.id;
+          const color = t.borde || t.fondo;
+          return (
+            <button key={t.id} onClick={() => setTab(t.id)}
+              className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer border-2 transition ${activa ? 'text-white shadow' : 'bg-white hover:opacity-80'}`}
+              style={activa ? { background: t.fondo, borderColor: 'transparent' } : { borderColor: color, color }}>
+              {t.texto}
+            </button>
+          );
+        })}
+        <button onClick={() => setTab('solicitudes')} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === 'solicitudes' ? 'bg-slate-800 text-white' : 'bg-white border'}`}>Solicitudes Butacas ({solicitudes.length})</button>
+        <button onClick={() => setTab('reportes')} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === 'reportes' ? 'bg-slate-800 text-white' : 'bg-white border'}`}>Acreditación en Vivo</button>
         <button onClick={() => setTab('aforo')} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === 'aforo' ? 'bg-indigo-700 text-white shadow' : 'bg-white border'}`}>⚙️ Aforo y Sala</button>
-        <button onClick={abrirResumenPapel} className="px-4 py-2 rounded-xl text-xs font-bold cursor-pointer bg-indigo-700 hover:bg-indigo-800 text-white flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" /> Resumen Papel</button>
         {perfilStaff?.rol === 'admin' && (
           <button onClick={() => setTab('usuarios')} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === 'usuarios' ? 'bg-emerald-600 text-white' : 'bg-white border'}`}>Usuarios del Sistema ({usuariosSistema.length})</button>
         )}
@@ -4069,9 +4080,13 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
         </div>
       )}
 
-      {/* REGISTRO DE ACTIVIDAD (SOLO ADMIN): botón discreto que abre un modal */}
+      {/* PIE: Resumen Papel (admin y coordinador) + interruptores y registro de actividad (solo admin) */}
+      <div className="flex flex-wrap justify-end items-center gap-3 mt-8">
+        <button onClick={abrirResumenPapel} className="px-4 py-2.5 text-sm font-bold bg-[#6B1D2F] hover:opacity-90 text-white rounded-xl shadow-md flex items-center gap-2 cursor-pointer">
+          <FileText className="w-4 h-4" /> Resumen Papel
+        </button>
       {perfilStaff?.rol === 'admin' && (
-        <div className="flex flex-wrap justify-end items-center gap-3 mt-8">
+        <>
           <div className="flex items-center gap-2">
             <span className="text-xs font-bold uppercase text-slate-500">WhatsApp</span>
             <button onClick={cambiarWhatsapp} className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${whatsappActivo ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}`}>
@@ -4099,8 +4114,9 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
           >
             <History className="w-4 h-4" /> Registro de actividad
           </button>
-        </div>
+        </>
       )}
+      </div>
 
       {perfilStaff?.rol === 'admin' && modalLogs && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-4" onClick={() => setModalLogs(false)}>
