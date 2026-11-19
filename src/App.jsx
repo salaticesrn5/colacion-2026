@@ -24,7 +24,7 @@ const createTempAuthClient = () =>
 const sanitizeDNI = (val) => String(val || '').replace(/\D/g, '').slice(0, 8);
 const CAPACIDAD_MAXIMA = 525;
 const CUPO_BASE_DEFECTO = 4;
-const VERSION_APP = 'v18 · 19/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
+const VERSION_APP = 'v19 · 19/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
 const MSG_FALTA_COL_BUTACA = 'Falta crear la columna "ocupa_butaca" en la tabla docentes (Supabase). Ejecutá el SQL que te pasaron y volvé a intentar.';
 const esErrorColumnaButaca = (err) => /ocupa_butaca/i.test(err?.message || '') || err?.code === 'PGRST204' || err?.code === '42703';
 const aNumeroONulo = (v) => (v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
@@ -391,11 +391,16 @@ export default function App() {
   const totalDocentesConButaca = docentesActivos.filter((d) => d.ocupa_butaca !== false).length; // los que usan butaca
   const totalDocentesSinButaca = totalDocentes - totalDocentesConButaca;
   const totalEspeciales = especiales.filter((v) => v.activo !== false).length;
+  // Si hay un sector "VIP / Autoridades", sus butacas cuentan como ocupadas aunque haya menos VIP cargados.
+  // Las butacas del sector "Reservado / No usar" siempre cuentan como ocupadas.
+  const butacasSectorVip = salaConfigDe(config).sectores.filter((s) => s.grupo === 'vip').reduce((a, s) => a + butacasDeSector(s).length, 0);
+  const butacasReservadas = salaConfigDe(config).sectores.filter((s) => s.grupo === 'reservado').reduce((a, s) => a + butacasDeSector(s).length, 0);
+  const butacasVipOcupadas = Math.max(totalEspeciales, butacasSectorVip);
   // Plazas familiares: en etapa Abierta cuenta el cupo completo de cada egresado.
   // Desde el Cierre Parcial, a quien NO tiene plazas extra aprobadas solo se le cuentan los invitados cargados
   // (el resto del cupo queda libre para reasignar). En el Cierre Definitivo, a todos se les cuentan los cargados.
   const totalCuposFamiliares = egresadosActivos.reduce((acc, e) => acc + plazasFamiliaresDe(e, { config, invitados, solicitudes }), 0);
-  const totalOcupado = totalEgresados + totalDocentesConButaca + totalEspeciales + totalCuposFamiliares;
+  const totalOcupado = totalEgresados + totalDocentesConButaca + butacasVipOcupadas + butacasReservadas + totalCuposFamiliares;
   const CAPACIDAD = capacidadDe(config);
   const vacantesLibres = CAPACIDAD - totalOcupado;
 
@@ -414,8 +419,8 @@ export default function App() {
       <header className="bg-[#6B1D2F] text-white shadow-md sticky top-0 z-40 print:hidden">
         <div className="max-w-7xl mx-auto px-3 sm:px-4 py-2.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
           <div className="flex items-center gap-2.5 cursor-pointer min-w-0" onClick={() => setVista('portal')}>
-            {config.escudo ? (
-              <img src={config.escudo} alt="Escudo" className="w-9 h-9 bg-white rounded-full object-contain p-0.5 shadow shrink-0" />
+            {escudoDe(config) ? (
+              <img src={escudoDe(config)} alt="Escudo" className="w-9 h-9 bg-white rounded-full object-contain p-0.5 shadow shrink-0" />
             ) : (
               <div className="w-9 h-9 bg-white rounded-full flex items-center justify-center font-bold text-[#6B1D2F] text-sm shadow shrink-0">05</div>
             )}
@@ -515,7 +520,7 @@ export default function App() {
             whatsappActivo={whatsappActivo}
             perfilStaff={perfilStaff} config={config} egresados={egresados} invitados={invitados}
             docentes={docentes} especiales={especiales} solicitudes={solicitudes} usuariosSistema={usuariosSistema} logsSistema={logsSistema}
-            totalEgresados={totalEgresados} totalDocentes={totalDocentes} totalDocentesConButaca={totalDocentesConButaca} totalDocentesSinButaca={totalDocentesSinButaca} totalEspeciales={totalEspeciales}
+            totalEgresados={totalEgresados} totalDocentes={totalDocentes} totalDocentesConButaca={totalDocentesConButaca} totalDocentesSinButaca={totalDocentesSinButaca} totalEspeciales={totalEspeciales} butacasVipOcupadas={butacasVipOcupadas} butacasReservadas={butacasReservadas}
             totalCuposFamiliares={totalCuposFamiliares} totalOcupado={totalOcupado} vacantesLibres={vacantesLibres} recargar={cargarDatosGlobales} notify={notify}
             abrirResumenPapel={() => setVista('reporte_papel')}
             reiniciarAsistenciasGeneral={reiniciarAsistenciasGeneral}
@@ -851,7 +856,7 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, config, notify })
   return (
     <div className="max-w-md mx-auto space-y-4">
       <div className="bg-gradient-to-r from-[#6B1D2F] to-[#8a253c] text-white rounded-xl shadow-md p-5 text-center">
-        {config.escudo && <img src={config.escudo} alt="Escudo institucional" className="w-20 h-20 mx-auto mb-2 bg-white rounded-full object-contain p-1.5 shadow" />}
+        {escudoDe(config) && <img src={escudoDe(config)} alt="Escudo institucional" className="w-20 h-20 mx-auto mb-2 bg-white rounded-full object-contain p-1.5 shadow" />}
         <h2 className="text-xl font-bold mb-1">¡Bienvenidos al Acto de Colación 2026! 🎉</h2>
         <p className="text-xs text-rose-100 leading-relaxed">
           Seleccioná tu rol e ingresá tu DNI para consultar tu pase QR institucional.
@@ -1165,6 +1170,8 @@ const colorFamiliaDe = (egr) => COLOR_PASE[tipoOrientacion(egr)] || COLOR_PASE.f
 const textoCurso = (egr) => [egr?.division, etiquetaOrientacion(egr)].filter(Boolean).join(' · ');
 const esGrupal = (inv) => inv?.es_grupal === true;
 const tieneMovilidad = (p) => p?.movilidad_reducida === true;
+// Escudo que se usa en pantalla y en los pases: ninguno si está apagado el interruptor "Escudo"
+const escudoDe = (config) => (config?.escudo && config?.escudo_activo !== false ? config.escudo : null);
 
 // Texto que va dentro de cada QR (sin tildes: algunos lectores fallan con ellas)
 const valorQREgresado = (egr) => `ESRN005-EGRESADO-${egr.dni}-${sinTildes(egr.nombre_completo)}`;
@@ -1361,33 +1368,33 @@ const paseEgresado = (egr, config) => descargarPase({
   subtitulo: [`DNI: ${egr.dni}`, textoCurso(egr)].filter(Boolean).join(' · '),
   rol: 'EGRESADO/A', valor: valorQREgresado(egr), color: COLOR_PASE.egresado,
   acceso: ACCESO_TEXTO.egresados, ubicacion: ubicacionPara({ tipo: 'egresado' }, config),
-  escudo: config?.escudo, archivo: `Egresado-${egr.nombre_completo}`,
+  escudo: escudoDe(config), archivo: `Egresado-${egr.nombre_completo}`,
 });
 const paseGrupo = (egr, integrantes, config) => descargarPase({
   nombre: egr.nombre_completo,
   subtitulo: [`Grupo familiar · ${integrantes.length} persona(s)`, textoCurso(egr)].filter(Boolean).join(' · '),
   rol: 'GRUPO FAMILIAR', valor: valorQRGrupo(egr), color: colorFamiliaDe(egr),
   acceso: accesoFamiliaDe(egr), ubicacion: ubicacionPara({ tipo: 'invitado', egr }, config),
-  integrantes, escudo: config?.escudo, archivo: `Grupo-Familiar-${egr.nombre_completo}`,
+  integrantes, escudo: escudoDe(config), archivo: `Grupo-Familiar-${egr.nombre_completo}`,
 });
 const paseInvitado = (inv, egr, config) => descargarPase({
   nombre: inv.nombre_completo,
   subtitulo: `Invitado/a de ${egr?.nombre_completo || 'egresado/a'}`,
   rol: 'INVITADO INDIVIDUAL', valor: inv.numero_entrada, color: colorFamiliaDe(egr),
   acceso: accesoFamiliaDe(egr), ubicacion: ubicacionPara({ tipo: 'invitado', egr, movilidad: tieneMovilidad(inv) }, config),
-  movilidad: tieneMovilidad(inv), escudo: config?.escudo, archivo: `Invitado-${inv.nombre_completo}`,
+  movilidad: tieneMovilidad(inv), escudo: escudoDe(config), archivo: `Invitado-${inv.nombre_completo}`,
 });
 const paseDocente = (doc, config) => descargarPase({
   nombre: doc.nombre_completo, subtitulo: `DNI: ${doc.dni}`,
   rol: 'DOCENTE', valor: valorQRDocente(doc), color: COLOR_PASE.docente,
   acceso: ACCESO_TEXTO.abajo, ubicacion: doc.ocupa_butaca === false ? '' : ubicacionPara({ tipo: 'docente' }, config),
-  escudo: config?.escudo, archivo: `Docente-${doc.nombre_completo}`,
+  escudo: escudoDe(config), archivo: `Docente-${doc.nombre_completo}`,
 });
 const paseVip = (vip, config) => descargarPase({
   nombre: vip.nombre_completo, subtitulo: vip.dni ? `DNI: ${vip.dni}` : 'Autoridad / Invitado especial',
   rol: 'INVITADO VIP', valor: valorQRVip(vip), color: COLOR_PASE.vip,
   acceso: ACCESO_TEXTO.abajo, ubicacion: ubicacionPara({ tipo: 'vip', movilidad: tieneMovilidad(vip) }, config),
-  movilidad: tieneMovilidad(vip), escudo: config?.escudo, archivo: `VIP-${vip.nombre_completo}`,
+  movilidad: tieneMovilidad(vip), escudo: escudoDe(config), archivo: `VIP-${vip.nombre_completo}`,
 });
 
 // ============================================================================
@@ -2073,7 +2080,7 @@ function ModuloPuerta({ config, egresados, invitados, docentes, especiales, reca
   );
 }
 
-function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActivo, perfilStaff, config, egresados, invitados, docentes, especiales, solicitudes, usuariosSistema, logsSistema, totalEgresados, totalDocentes, totalDocentesConButaca, totalDocentesSinButaca, totalEspeciales, totalCuposFamiliares, totalOcupado, vacantesLibres, recargar, notify, reiniciarAsistenciasGeneral, borrarInvitadosEgresados, registrarLog }) {
+function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActivo, perfilStaff, config, egresados, invitados, docentes, especiales, solicitudes, usuariosSistema, logsSistema, totalEgresados, totalDocentes, totalDocentesConButaca, totalDocentesSinButaca, totalEspeciales, butacasVipOcupadas = 0, butacasReservadas = 0, totalCuposFamiliares, totalOcupado, vacantesLibres, recargar, notify, reiniciarAsistenciasGeneral, borrarInvitadosEgresados, registrarLog }) {
   const CAPACIDAD = capacidadDe(config);
   const [tab, setTab] = useState('egresados');
   const [filtroEgresado, setFiltroEgresado] = useState('');
@@ -2203,6 +2210,20 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
     } finally {
       setSubiendoEscudo(false);
     }
+  };
+
+  const cambiarEscudoActivo = async () => {
+    if (!config.id) return;
+    const nuevo = config.escudo_activo === false;
+    const { error } = await supabase.from('configuracion').update({ escudo_activo: nuevo }).eq('id', config.id);
+    if (error) {
+      const falta = /escudo_activo/i.test(error.message || '') || error.code === 'PGRST204' || error.code === '42703';
+      notify(falta ? 'Falta crear la columna "escudo_activo" en configuracion (SQL de la v19).' : 'No se pudo cambiar: ' + error.message, 'error');
+      return;
+    }
+    await registrarLog('CONFIGURACION', 'Escudo', nuevo ? 'Escudo en uso.' : 'Escudo desactivado (no se muestra).');
+    await recargar();
+    notify(nuevo ? 'El escudo vuelve a aparecer en la página y en los pases.' : 'El escudo dejó de mostrarse (sigue guardado).');
   };
 
   const quitarEscudo = async () => {
@@ -2402,7 +2423,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
   };
 
   const renderSimuladorCupo = () => {
-            const E = totalEgresados, D = totalDocentesConButaca, V = totalEspeciales;
+            const E = totalEgresados, D = totalDocentesConButaca, V = butacasVipOcupadas + butacasReservadas;
             const fijos = E + D + V;
             const n = cupoMasivo === '' ? null : Number(cupoMasivo);
             const ocupacion = n === null ? null : fijos + n * E;
@@ -3194,7 +3215,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Egresados</p><p className="text-2xl font-extrabold">{totalEgresados}</p></div>
         <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Docentes</p><p className="text-2xl font-extrabold">{totalDocentes}</p><p className="text-[10px] text-slate-500 mt-0.5">{totalDocentesConButaca} con butaca · {totalDocentesSinButaca} sin</p></div>
-        <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Especiales / VIP</p><p className="text-2xl font-extrabold">{totalEspeciales}</p></div>
+        <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Especiales / VIP</p><p className="text-2xl font-extrabold">{totalEspeciales}</p>{butacasVipOcupadas > totalEspeciales && <p className="text-[10px] text-slate-500 mt-0.5">fila reservada: {butacasVipOcupadas} butacas</p>}</div>
         <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Plazas Familiares</p><p className="text-2xl font-extrabold">{totalCuposFamiliares}</p>{(config.estado_etapa || 'abierta') !== 'abierta' && <p className="text-[10px] text-slate-500 mt-0.5">cargadas + extras aprobadas</p>}</div>
         <div className={`col-span-2 sm:col-span-1 p-4 rounded-2xl border ${vacantesLibres < 0 ? 'bg-rose-50 text-rose-700' : vacantesLibres <= 25 ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'}`}>
           <p className="text-xs font-semibold">Vacantes Libres ({CAPACIDAD} máx)</p><p className="text-2xl font-extrabold">{vacantesLibres}</p>
@@ -4220,6 +4241,11 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
               {subiendoEscudo ? 'Subiendo...' : config.escudo ? 'Cambiar escudo' : 'Subir escudo'}
             </button>
             {config.escudo && <button onClick={quitarEscudo} className="px-2.5 py-2 rounded-xl text-xs font-bold cursor-pointer bg-slate-100 hover:bg-slate-200 text-slate-600">Quitar</button>}
+            {config.escudo && (
+              <button onClick={cambiarEscudoActivo} title="Si está desactivado, el escudo no aparece en la página ni en los pases (queda guardado)" className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${config.escudo_activo !== false ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}`}>
+                {config.escudo_activo !== false ? '● En uso' : '○ No se usa'}
+              </button>
+            )}
           </div>
           <button
             onClick={() => { setModalLogs(true); recargar(); }}
@@ -4307,7 +4333,7 @@ function ReporteResumenPapel({ egresados, invitados, docentes, especiales, confi
     <div className="max-w-4xl mx-auto bg-white p-4 sm:p-8 rounded-2xl shadow-sm border space-y-8 print:shadow-none print:border-none print:p-0 print:m-0">
       <div className="flex flex-wrap justify-between items-center gap-3 border-b pb-4 print:pb-2">
         <div className="flex items-center gap-3">
-          {config?.escudo && <img src={config.escudo} alt="Escudo" className="w-12 h-12 object-contain" />}
+          {escudoDe(config) && <img src={escudoDe(config)} alt="Escudo" className="w-12 h-12 object-contain" />}
           <div>
             <h2 className="text-xl font-bold text-[#6B1D2F]">ESRN N° 005 — Cipolletti</h2>
             <p className="text-xs text-slate-500">Acto de Colación 2026 · Resumen General para Control en Papel</p>
