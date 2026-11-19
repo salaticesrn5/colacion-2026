@@ -392,7 +392,14 @@ export default function App() {
             )}
             <div className="min-w-0">
               <h1 className="font-bold text-sm sm:text-lg leading-tight truncate">ESRN N° 005 — Cipolletti</h1>
-              <p className="text-[11px] sm:text-xs text-rose-200 truncate">Acto de Colación 2026</p>
+              {session && perfilStaff ? (
+                <p className="text-[11px] sm:text-xs text-rose-100 truncate" title={perfilStaff.email}>
+                  👤 {perfilStaff.nombre || perfilStaff.email}
+                  <span className={`ml-1.5 px-1.5 py-0.5 rounded font-bold uppercase text-[9px] sm:text-[10px] ${perfilStaff.rol === 'admin' ? 'bg-amber-400 text-amber-950' : perfilStaff.rol === 'coordinador' ? 'bg-sky-200 text-sky-900' : 'bg-emerald-200 text-emerald-900'}`}>{perfilStaff.rol === 'admin' ? 'Administrador' : perfilStaff.rol === 'coordinador' ? 'Coordinador' : 'Puerta'}</span>
+                </p>
+              ) : (
+                <p className="text-[11px] sm:text-xs text-rose-200 truncate">Acto de Colación 2026</p>
+              )}
             </div>
           </div>
 
