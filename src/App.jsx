@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import {
   Users, UserCheck, Shield, QrCode, Upload, Trash2, Plus, Search,
@@ -14,7 +14,13 @@ import { renderToStaticMarkup } from 'react-dom/server';
 // ============================================================================
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// Si la red queda "colgada" (wifi sin internet), cada pedido se corta a los 12 s y se trata como sin conexión
+const fetchConTiempo = (url, opts = {}) => {
+  if (opts.signal || typeof AbortController === 'undefined') return fetch(url, opts);
+  const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 12000);
+  return fetch(url, { ...opts, signal: ctrl.signal }).catch((e) => { throw (e && e.name === 'AbortError') ? new TypeError('Failed to fetch (sin respuesta en 12 s)') : e; }).finally(() => clearTimeout(t));
+};
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, { global: { fetch: fetchConTiempo } });
 
 const createTempAuthClient = () =>
   createClient(supabaseUrl, supabaseAnonKey, {
@@ -22,10 +28,19 @@ const createTempAuthClient = () =>
   });
 
 const sanitizeDNI = (val) => String(val || '').replace(/\D/g, '').slice(0, 8);
+// Respuesta de la verificación con los 4 números del celular (v25)
+const textoClavePortal = (v) => {
+  const t = String(v || '');
+  if (t === 'falta') return 'Escribí los últimos 4 números de tu celular.';
+  if (t === 'bloqueado') return 'Por seguridad, el acceso con este DNI quedó bloqueado 15 minutos por demasiados intentos. Si no recordás el celular que cargaste, comunicate con la escuela.';
+  if (t.startsWith('incorrecta')) { const n = Number(t.split(':')[1]); return `Los números no coinciden con el celular cargado.${n ? ` Te quedan ${n} intento${n === 1 ? '' : 's'}.` : ''}`; }
+  return 'No se pudo verificar el celular.';
+};
+const fechaHoraAR = (v) => { if (!v) return ''; const d = new Date(v); return isNaN(d.getTime()) ? '' : d.toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); };
 const CAPACIDAD_MAXIMA = 525;
 const CAPACIDAD_DEFINITIVA = 525; // número definitivo de butacas (decisión del 19/11/2026)
 const CUPO_BASE_DEFECTO = 4;
-const VERSION_APP = 'v24 · 20/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
+const VERSION_APP = 'v25 · 20/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
 const MSG_FALTA_COL_BUTACA = 'Falta crear la columna "ocupa_butaca" en la tabla docentes (Supabase). Ejecutá el SQL que te pasaron y volvé a intentar.';
 const esErrorColumnaButaca = (err) => /ocupa_butaca/i.test(err?.message || '') || err?.code === 'PGRST204' || err?.code === '42703';
 const aNumeroONulo = (v) => (v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
@@ -281,6 +296,7 @@ export default function App() {
         // el rol se normaliza a minúsculas para que 'ADMIN' y 'admin' valgan igual
         const rol = String(data.rol || '').trim().toLowerCase();
         setPerfilStaff({ ...data, rol });
+        try { if (rol === 'puerta') localStorage.setItem('puerta_perfil_v1', JSON.stringify({ ...data, rol })); } catch (_) { /* nada */ }
         // Un celular de Puerta que vuelve a abrir la página con la sesión iniciada va directo a Puerta
         if (rol !== 'admin' && rol !== 'coordinador' && !yaUbicadoRef.current) setVista((v) => (v === 'portal' ? 'puerta' : v));
         yaUbicadoRef.current = true;
@@ -292,6 +308,8 @@ export default function App() {
         setVista('portal');
       }
     } catch (err) {
+      // Sin conexión: un celular de Puerta sigue con el perfil que tenía guardado
+      try { const g = JSON.parse(localStorage.getItem('puerta_perfil_v1') || 'null'); if (g && String(g.email || '').toLowerCase() === String(user?.email || '').toLowerCase() && !navigator.onLine) { setPerfilStaff(g); setVista('puerta'); yaUbicadoRef.current = true; return; } } catch (_) { /* nada */ }
       console.error(err);
       setPerfilStaff(null);
       notify('No se pudo verificar tu perfil. Probá ingresar de nuevo.', 'error');
@@ -312,6 +330,14 @@ export default function App() {
         setEgresados([]); setInvitados([]); setDocentes([]); setEspeciales([]); setSolicitudes([]); setUsuariosSistema([]); setLogsSistema([]);
         return;
       }
+      // Cambio automático de etapa (v25): por si el reloj de la base no corrió todavía
+      try {
+        const { data: c0 } = await supabase.from('configuracion').select('etapa_auto, etapa_auto_aplicada, fecha_cierre_parcial, fecha_definitivo').limit(1).maybeSingle();
+        const rango = (v) => ({ cierre_parcial: 1, cierre_definitivo: 2 }[v] || 0);
+        const ya = (f) => f && new Date(f) <= new Date();
+        const toca = c0 && c0.etapa_auto === true ? (ya(c0.fecha_definitivo) ? 2 : ya(c0.fecha_cierre_parcial) ? 1 : 0) : 0;
+        if (toca > rango(c0?.etapa_auto_aplicada)) await supabase.rpc('aplicar_etapa_automatica');
+      } catch (_) { /* sin SQL v25 o sin conexión */ }
       const [resCfg, resEgr, resInv, resDoc, resEsp, resSol, resUsr, resLog] = await Promise.all([
         supabase.from('configuracion').select('*').limit(1).maybeSingle(),
         supabase.from('egresados').select('*').order('nombre_completo', { ascending: true }),
@@ -680,6 +706,10 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
   const [obsExtra, setObsExtra] = useState('');
   const [enviandoSol, setEnviandoSol] = useState(false);
   const [avisoSolicitud, setAvisoSolicitud] = useState(false);
+  const [pideClave, setPideClave] = useState(null); // {nombre} cuando hay que escribir los 4 números del celular
+  const [clave, setClave] = useState('');
+  const claveRef = useRef('');
+  const [ultimoCambio, setUltimoCambio] = useState(null);
   const qrRef = useRef(null);
 
   const prepararFilasInvitados = (egr, misInv, sols) => {
@@ -749,7 +779,11 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
 
     setBuscando(true);
     try {
-      const { data, error: errRpc } = await supabase.rpc('portal_consultar', { p_tipo: tipoUsuario, p_dni: limpio });
+      const claveEnviada = pideClave ? String(clave || '').replace(/\D/g, '').slice(0, 4) : '';
+      if (pideClave && claveEnviada.length !== 4) { setError('Escribí los últimos 4 números de tu celular.'); return; }
+      const params = { p_tipo: tipoUsuario, p_dni: limpio };
+      if (claveEnviada) params.p_clave = claveEnviada;
+      const { data, error: errRpc } = await supabase.rpc('portal_consultar', params);
       if (errRpc) throw errRpc;
       if (!data || !data.encontrado) {
         if (data?.motivo !== 'vip_desactivado') registrarPortal('NO_ENCONTRADO', `Buscó un DNI que no está en ${tipoUsuario.toUpperCase()}`, limpio);
@@ -763,7 +797,17 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
         setError('Figurás como que no asistirás al acto. Si cambiaste de opinión, comunicate con la escuela.');
         return;
       }
-      if (tipoUsuario === 'egresado') aplicarDatosEgresado(data);
+      if (data.requiere_clave) {
+        setPideClave({ nombre: data.persona?.nombre_completo || '' });
+        if (data.clave !== 'falta') {
+          setError(textoClavePortal(data.clave));
+          registrarPortal('ERROR', data.clave === 'bloqueado' ? 'Acceso bloqueado 15 min por intentos fallidos con el celular' : 'Escribió mal los 4 números del celular', limpio);
+        }
+        return;
+      }
+      claveRef.current = claveEnviada;
+      setPideClave(null); setClave('');
+      if (tipoUsuario === 'egresado') { aplicarDatosEgresado(data); setUltimoCambio(data.ultimo_cambio || null); }
       else setDatosPersona(data.persona);
       const nInv = Array.isArray(data.invitados) ? data.invitados.length : 0;
       registrarPortal('INGRESO', tipoUsuario === 'egresado' ? `Entró al portal (tiene ${nInv} invitado/s cargado/s)` : 'Entró al portal', limpio);
@@ -814,8 +858,10 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
       const payload = filasInvitados
         .filter((f) => f.id || (f.nombre_completo || '').trim() || (f.dni || '').trim())
         .map((f) => ({ id: f.id || null, nombre_completo: (f.nombre_completo || '').trim(), dni: sanitizeDNI(f.dni || ''), es_grupal: f.es_grupal === true, movilidad_reducida: f.movilidad_reducida === true }));
-      const { data, error: errRpc } = await supabase.rpc('portal_guardar_invitados', { p_dni: sanitizeDNI(datosPersona.dni || dni), p_celular: celular, p_invitados: payload });
+      const { data, error: errRpc } = await supabase.rpc('portal_guardar_invitados', { p_dni: sanitizeDNI(datosPersona.dni || dni), p_celular: celular, p_invitados: payload, ...(claveRef.current ? { p_clave: claveRef.current } : {}) });
       if (errRpc) throw errRpc;
+      if (data?.error_clave) throw new Error(textoClavePortal(data.error_clave) + ' Volvé a entrar con tu DNI.');
+      if (celular) claveRef.current = String(celular).replace(/\D/g, '').slice(-4);
       const antes = new Map(misInvitadosGuardados.map((i) => [i.id, i]));
       const despues = Array.isArray(data?.invitados) ? data.invitados : [];
       const etiqueta = (i) => `${i.nombre_completo} (${i.dni})${i.es_grupal ? ' grupo' : ''}${i.movilidad_reducida ? ' ♿' : ''}`;
@@ -859,8 +905,10 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
         p_cantidad: Number(cantExtra),
         p_observacion: obsExtra.trim(),
         p_celular: (celular || datosPersona.celular || '').trim(),
+        ...(claveRef.current ? { p_clave: claveRef.current } : {}),
       });
       if (errRpc) throw errRpc;
+      if (data?.error_clave) throw new Error(textoClavePortal(data.error_clave) + ' Volvé a entrar con tu DNI.');
       aplicarDatosEgresado(data);
       notify('Solicitud de butacas extra enviada.');
       registrarPortal('SOLICITUD_EXTRA', `Pidió ${Number(cantExtra)} butaca/s extra${obsExtra.trim() ? ` · "${obsExtra.trim().slice(0, 200)}"` : ''}`);
@@ -877,8 +925,9 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
       ? '¿Estás seguro de que no asistirás?\n\nSe liberará tu butaca y también las de tus invitados: tus pases y los de tu grupo dejarán de servir para ingresar.'
       : '¿Estás seguro de que no asistirás? Esto liberará tu plaza.';
     if (!window.confirm(aviso)) return;
-    const { error: errRpc } = await supabase.rpc('portal_no_asistire', { p_tipo: tipoUsuario, p_dni: sanitizeDNI(datosPersona.dni || dni) });
+    const { data: dNo, error: errRpc } = await supabase.rpc('portal_no_asistire', { p_tipo: tipoUsuario, p_dni: sanitizeDNI(datosPersona.dni || dni), ...(claveRef.current ? { p_clave: claveRef.current } : {}) });
     if (errRpc) { errorPortal('No asistiré', 'No se pudo registrar: ' + mensajeErrorRPC(errRpc)); return; }
+    if (dNo?.error_clave) { errorPortal('No asistiré', textoClavePortal(dNo.error_clave) + ' Volvé a entrar con tu DNI.'); return; }
     registrarPortal('NO_ASISTIRE', tipoUsuario === 'egresado' ? 'Se dio de baja (libera su butaca y las de sus invitados)' : 'Se dio de baja');
     notify('Has marcado que no asistirás. ¡Gracias!');
     setDatosPersona(null);
@@ -917,10 +966,10 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
         <p className="text-xs text-gray-500 text-center mb-4">Seleccioná tu rol y consultá tu pase</p>
 
         <div className="flex gap-1 mb-6 bg-gray-100 p-1 rounded-lg">
-          <button type="button" onClick={() => { setTipoUsuario('egresado'); setDatosPersona(null); setError(''); }} className={`flex-1 py-2 rounded-md font-medium text-xs transition ${tipoUsuario === 'egresado' ? 'bg-[#6B1D2F] text-white shadow' : 'text-gray-600'}`}>🎓 Egresado</button>
-          <button type="button" onClick={() => { setTipoUsuario('docente'); setDatosPersona(null); setError(''); }} className={`flex-1 py-2 rounded-md font-medium text-xs transition ${tipoUsuario === 'docente' ? 'bg-[#6B1D2F] text-white shadow' : 'text-gray-600'}`}>📚 Docente</button>
+          <button type="button" onClick={() => { setTipoUsuario('egresado'); setDatosPersona(null); setError(''); setPideClave(null); setClave(''); }} className={`flex-1 py-2 rounded-md font-medium text-xs transition ${tipoUsuario === 'egresado' ? 'bg-[#6B1D2F] text-white shadow' : 'text-gray-600'}`}>🎓 Egresado</button>
+          <button type="button" onClick={() => { setTipoUsuario('docente'); setDatosPersona(null); setError(''); setPideClave(null); setClave(''); }} className={`flex-1 py-2 rounded-md font-medium text-xs transition ${tipoUsuario === 'docente' ? 'bg-[#6B1D2F] text-white shadow' : 'text-gray-600'}`}>📚 Docente</button>
           {vipPortalActivo && (
-            <button type="button" onClick={() => { setTipoUsuario('vip'); setDatosPersona(null); setError(''); }} className={`flex-1 py-2 rounded-md font-medium text-xs transition ${tipoUsuario === 'vip' ? 'bg-amber-600 text-white shadow' : 'text-gray-600'}`}>⭐ VIP</button>
+            <button type="button" onClick={() => { setTipoUsuario('vip'); setDatosPersona(null); setError(''); setPideClave(null); setClave(''); }} className={`flex-1 py-2 rounded-md font-medium text-xs transition ${tipoUsuario === 'vip' ? 'bg-amber-600 text-white shadow' : 'text-gray-600'}`}>⭐ VIP</button>
           )}
         </div>
 
@@ -928,11 +977,18 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
           <form onSubmit={buscarPorDNI} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">DNI de {tipoUsuario.toUpperCase()}</label>
-              <input type="text" maxLength={8} value={dni} onChange={(e) => setDni(sanitizeDNI(e.target.value))} placeholder="Ej: 40123456" className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-[#6B1D2F]" required />
+              <input type="text" maxLength={8} value={dni} onChange={(e) => { setDni(sanitizeDNI(e.target.value)); setPideClave(null); setClave(''); }} placeholder="Ej: 40123456" className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-[#6B1D2F]" required />
             </div>
+            {pideClave && (
+              <div className="p-3 rounded-lg bg-amber-50 border border-amber-300 space-y-2">
+                <p className="text-sm font-bold text-amber-900">🔒 {pideClave.nombre ? `Hola, ${pideClave.nombre.split(' ').slice(-1)[0]}. ` : ''}Por seguridad, escribí los <u>últimos 4 números</u> del celular que cargaste.</p>
+                <input type="text" inputMode="numeric" autoFocus maxLength={4} value={clave} onChange={(e) => setClave(String(e.target.value || '').replace(/\D/g, '').slice(0, 4))} placeholder="Ej: 4521" className="w-full px-3 py-2 border-2 border-amber-400 rounded-lg text-center text-lg font-bold tracking-[0.4em]" aria-label="Últimos 4 números del celular" />
+                <p className="text-[11px] text-amber-800">¿Cambiaste de celular o no te acordás? Comunicate con la escuela y lo corrigen.</p>
+              </div>
+            )}
             {error && <p className="text-sm text-red-600">{error}</p>}
             <button type="submit" disabled={buscando} className="w-full py-2.5 bg-[#6B1D2F] text-white rounded-lg hover:bg-opacity-90 font-medium shadow disabled:opacity-60">
-              {buscando ? 'Buscando...' : 'Continuar'}
+              {buscando ? 'Buscando...' : pideClave ? 'Entrar' : 'Continuar'}
             </button>
             {videoActivo && tipoUsuario === 'egresado' && (
               <button type="button" onClick={() => setVerVideo(true)} className="w-full py-2.5 bg-white border-2 border-[#6B1D2F] text-[#6B1D2F] rounded-lg font-bold text-sm cursor-pointer">▶ Ver video: cómo cargar a tus invitados</button>
@@ -951,6 +1007,12 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
 
               {tipoUsuario === 'egresado' && textoCurso(datosPersona) && (
                 <p className="text-xs font-semibold text-slate-600">{textoCurso(datosPersona)}</p>
+              )}
+              {tipoUsuario === 'egresado' && ultimoCambio && (
+                <p className="text-[11px] text-slate-600 bg-white border rounded-lg px-2 py-1.5">📝 Tu lista de invitados se modificó por última vez el <b>{fechaHoraAR(ultimoCambio)}</b>. Si no fuiste vos, avisá a la escuela.</p>
+              )}
+              {tipoUsuario === 'egresado' && config.etapa_auto === true && (config.estado_etapa || 'abierta') === 'abierta' && config.fecha_cierre_parcial && new Date(config.fecha_cierre_parcial) > new Date() && (
+                <p className="text-[11px] font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5">⏰ Podés cargar y modificar tus invitados hasta el {fechaHoraAR(config.fecha_cierre_parcial)}.</p>
               )}
               <button type="button" onClick={descargarMiPase} className={`w-full py-2.5 hover:bg-opacity-90 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 shadow cursor-pointer ${tipoUsuario === 'vip' ? 'bg-amber-700' : tipoUsuario === 'docente' ? 'bg-slate-700' : 'bg-[#6B1D2F]'}`}>
                 <Download className="w-4 h-4" /> {tipoUsuario === 'egresado' ? 'Descargar QR de Egresado' : tipoUsuario === 'docente' ? 'Descargar QR de Docente' : 'Descargar QR VIP'}
@@ -986,6 +1048,7 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
                 )}
                 <div className="border-2 border-emerald-500 bg-emerald-50 p-4 rounded-xl space-y-2">
                   <label className="block text-xs font-bold text-emerald-900 uppercase">📱 Tu Celular{whatsappActivo ? ' / WhatsApp' : ''} {whatsappActivo ? <span className="text-rose-600">* Obligatorio</span> : <span className="text-slate-500">(opcional)</span>}</label>
+                  {config.portal_verificar_celular === true && <p className="text-[11px] text-emerald-800">🔒 Guardá bien este número: la próxima vez que entres te vamos a pedir sus <b>últimos 4 números</b>.</p>}
                   <input 
                     type="text" 
                     maxLength={15}
@@ -1269,9 +1332,9 @@ const compararNombre = (buscado, cargado) => {
   if (!qs.length || !ns.length) return null;
   if (qs.every((t) => ns.some((n) => n === t || (t.length >= 3 && n.startsWith(t))))) return { exacto: true, motivo: 'nombre', marcas: [] };
   const tol = (t) => (t.length <= 4 ? 1 : 2);
-  const malos = [];
-  const ok = qs.every((t) => ns.some((n) => { const dd = distancia(t, n); if (dd > 0 && dd <= tol(t)) { malos.push(n); return true; } return dd === 0 || (t.length >= 4 && n.startsWith(t)); }));
-  return ok && malos.length ? { exacto: false, motivo: `nombre parecido (${malos.join(', ')})`, marcas: [] } : null;
+  const malos = []; let suma = 0;
+  const ok = qs.every((t) => ns.some((n) => { const dd = distancia(t, n); if (dd > 0 && dd <= tol(t)) { malos.push(n); suma += dd; return true; } return dd === 0 || (t.length >= 4 && n.startsWith(t)); }));
+  return ok && malos.length ? { exacto: false, motivo: `nombre parecido (${malos.join(', ')})`, marcas: [], d: suma } : null;
 };
 // Busca en todos los padrones. Devuelve {exactos:[], parecidos:[]} con {clase, item, motivo, marcas}
 const buscarPersonas = (consulta, { egresados = [], invitados = [], docentes = [], especiales = [], personal = [] }) => {
@@ -1290,8 +1353,9 @@ const buscarPersonas = (consulta, { egresados = [], invitados = [], docentes = [
       if (!r && clase === 'personal' && String(item.email || '').toLowerCase().includes(q.toLowerCase())) r = { exacto: true, motivo: 'email', marcas: [] };
       if (!r && clase === 'invitado' && item.numero_entrada && String(item.numero_entrada).toUpperCase().includes(q.toUpperCase())) r = { exacto: true, motivo: 'número de entrada', marcas: [] };
     }
-    if (r) (r.exacto ? exactos : parecidos).push({ clase, item, motivo: r.motivo, marcas: r.marcas });
+    if (r) (r.exacto ? exactos : parecidos).push({ clase, item, motivo: r.motivo, marcas: r.marcas, d: r.d });
   }));
+  parecidos.sort((a, b) => (a.d || 1) - (b.d || 1)); // primero los más parecidos
   return { exactos, parecidos: parecidos.slice(0, 30) };
 };
 const DniMarcado = ({ dni, marcas = [] }) => {
@@ -1818,7 +1882,7 @@ function AyudaPuerta({ perfilStaff, dispositivo, config, notify, ultimoCursoRef,
     if (!navigator.onLine) { setSinRed(true); return; }
     setEnviando(true);
     try {
-      const a = await enviarAlertaPuerta({ puesto, dispositivo, curso: ultimoCursoRef?.current || '', motivo: m, detalle: d, automatica });
+      const a = await enviarAlertaPuerta({ puesto, dispositivo, curso: perfilStaff?.puesto_grupo || ultimoCursoRef?.current || '', motivo: m, detalle: d, automatica });
       alertaRef.current = a; setAlerta(a); setAbierto(false); setMotivo(''); setDetalle('');
       notify(automatica ? (m === 'auto_manual' ? '🤖 Se avisó a coordinación: buscaron a mano y no lo encontraron.' : '🤖 Se avisó a coordinación: hubo varios "No encontrado" seguidos.') : '🆘 Pedido enviado a coordinación.', automatica ? 'warning' : 'success');
     } catch (err) {
@@ -1862,7 +1926,7 @@ function AyudaPuerta({ perfilStaff, dispositivo, config, notify, ultimoCursoRef,
         <div className="fixed inset-0 z-50 bg-black/60 flex items-end sm:items-center justify-center p-3" onClick={() => !enviando && setAbierto(false)}>
           <div className="bg-white rounded-2xl w-full max-w-md p-4 space-y-3 text-left" onClick={(e) => e.stopPropagation()}>
             <h3 className="font-extrabold text-lg">🆘 ¿Qué pasa en tu puesto?</h3>
-            <p className="text-xs text-slate-500">Tocá el motivo. Le llega a coordinación con tu puesto ({puesto}){ultimoCursoRef?.current ? ` y el último curso atendido (${ultimoCursoRef.current})` : ''}.</p>
+            <p className="text-xs text-slate-500">Tocá el motivo. Le llega a coordinación con tu puesto ({puesto}{perfilStaff?.puesto_grupo ? ` · ${perfilStaff.puesto_grupo}` : ''}){!perfilStaff?.puesto_grupo && ultimoCursoRef?.current ? ` y el último curso atendido (${ultimoCursoRef.current})` : ''}.</p>
             <input type="text" maxLength={120} value={detalle} onChange={(e) => setDetalle(e.target.value)} placeholder={motivo === 'otro' ? 'Contá en pocas palabras qué pasa' : 'Detalle opcional (escribilo antes de tocar el motivo)'} className="w-full px-3 py-2.5 rounded-xl border text-sm" />
             <div className="grid gap-2">
               {MOTIVOS_AYUDA.map(([k, i, t]) => (
@@ -1999,11 +2063,34 @@ function AvisosCoordinacion({ perfilStaff, notify }) {
   );
 }
 
-function ModuloPuerta({ config, egresados, invitados, docentes, especiales, recargar, notify, perfilStaff }) {
+const CLAVE_CACHE_PUERTA = 'puerta_cache_v1', CLAVE_COLA_PUERTA = 'puerta_cola_v1', CLAVE_LOGS_PUERTA = 'puerta_logs_v1';
+const leerLS = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k) || 'null'); return v === null ? d : v; } catch (_) { return d; } };
+const guardarLS = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) { /* lleno o bloqueado */ } };
+const CLAVE_DATOS_TABLA = { egresados: 'egresados', invitados: 'invitados', docentes: 'docentes', invitados_especiales: 'especiales' };
+
+function ModuloPuerta({ config, egresados: egrProp, invitados: invProp, docentes: docProp, especiales: espProp, recargar, notify, perfilStaff }) {
+  // ---- Sin conexión (v25): lista guardada en el celular + ingresos en espera que se suben solos ----
+  const [cachePuerta] = useState(() => leerLS(CLAVE_CACHE_PUERTA, null));
+  const usandoCache = !(egrProp && egrProp.length) && !!(cachePuerta && cachePuerta.egresados && cachePuerta.egresados.length);
+  const [cola, setCola] = useState(() => leerLS(CLAVE_COLA_PUERTA, []));
+  const colaRef = useRef(cola);
+  const [logsPend, setLogsPend] = useState(() => leerLS(CLAVE_LOGS_PUERTA, []).length);
+  const [enLinea, setEnLinea] = useState(typeof navigator === 'undefined' ? true : navigator.onLine);
+  const marcasLocales = useMemo(() => new Set(cola.map((x) => `${x.tabla}:${x.id}`)), [cola]);
+  const conMarcas = (lista, tabla) => (marcasLocales.size ? (lista || []).map((r) => (!r.asistio && marcasLocales.has(`${tabla}:${r.id}`) ? { ...r, asistio: true, hora_ingreso: r.hora_ingreso || new Date().toISOString() } : r)) : (lista || []));
+  const egresados = conMarcas(usandoCache ? cachePuerta.egresados : egrProp, 'egresados');
+  const invitados = conMarcas(usandoCache ? cachePuerta.invitados : invProp, 'invitados');
+  const docentes = conMarcas(usandoCache ? cachePuerta.docentes : docProp, 'docentes');
+  const especiales = conMarcas(usandoCache ? cachePuerta.especiales : espProp, 'invitados_especiales');
+  useEffect(() => { if (egrProp && egrProp.length) guardarLS(CLAVE_CACHE_PUERTA, { t: Date.now(), egresados: egrProp, invitados: invProp, docentes: docProp, especiales: espProp }); }, [egrProp, invProp, docProp, espProp]);
+  const guardarCola = (n) => { colaRef.current = n; setCola(n); guardarLS(CLAVE_COLA_PUERTA, n); };
+  const offlineRef = useRef(false);
+  const otroPuestoRef = useRef('');
   const [busqueda, setBusqueda] = useState('');
   const [egresadoSeleccionado, setEgresadoSeleccionado] = useState(null);
   const [escaneandoCamara, setEscaneandoCamara] = useState(false);
-  const [resultadoIngreso, setResultadoIngreso] = useState(null);
+  const [resultadoIngreso, setResultadoIngresoBase] = useState(null);
+  const setResultadoIngreso = setResultadoIngresoBase;
   const [sonidoActivo, setSonidoActivo] = useState(() => { try { return localStorage.getItem('puerta_sonido') !== 'off'; } catch (_) { return true; } });
   useEffect(() => {
     const habilitar = () => prepararAudioPuerta();
@@ -2060,12 +2147,14 @@ function ModuloPuerta({ config, egresados, invitados, docentes, especiales, reca
       ultimoRegistroRef.current = ahoraMs;
       const seg = dif !== null && dif <= 600 ? `${dif} s` : '-';
       const etiqueta = `[${meta.metodo || metodoRef.current || 'CAMARA'}] [${meta.tipo || '-'}] [${meta.curso || '-'}] [${meta.personas || 0} pers] [${seg}]`;
-      supabase.from('logs_sistema').insert({
-        usuario: perfilRef.current?.nombre || perfilRef.current?.email || 'Puerta',
-        accion,
-        modulo: 'Puerta',
-        detalle: `${etiqueta} ${detalle} [${dispositivo}]`,
-      }).then(({ error }) => { if (error) console.error('No se pudo registrar el log de Puerta:', error); });
+      const sinRed = typeof navigator !== 'undefined' && !navigator.onLine;
+      const fila = { usuario: perfilRef.current?.nombre || perfilRef.current?.email || 'Puerta', accion, modulo: 'Puerta',
+        detalle: `${etiqueta} ${detalle}${sinRed || offlineRef.current ? ' (sin conexión)' : ''} [${dispositivo}]`, created_at: new Date().toISOString() };
+      const encolarLog = () => { const l = leerLS(CLAVE_LOGS_PUERTA, []); l.push(fila); guardarLS(CLAVE_LOGS_PUERTA, l); setLogsPend(l.length); };
+      if (sinRed) { encolarLog(); return; }
+      supabase.from('logs_sistema').insert(fila).then(({ error }) => {
+        if (error) { if (esErrorRed(error)) encolarLog(); else console.error('No se pudo registrar el log de Puerta:', error); }
+      }, () => encolarLog());
     } catch (e) {
       console.error(e);
     }
@@ -2087,7 +2176,60 @@ function ModuloPuerta({ config, egresados, invitados, docentes, especiales, reca
 
   // Registra el ingreso en la base de forma atómica: solo si todavía no figuraba como presente.
   // Devuelve true si se registró ahora, false si ya estaba registrado (duplicado).
+  const registrarSinRed = (tabla, id, extra) => {
+    const fila = (datosRef.current[CLAVE_DATOS_TABLA[tabla]] || []).find((r) => r.id === id);
+    if (fila && fila.asistio) return false; // según la lista guardada ya había ingresado
+    guardarCola([...colaRef.current, { k: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, tabla, id, extra, hora: new Date().toISOString(), nombre: fila?.nombre_completo || '', dni: fila?.dni || '' }]);
+    offlineRef.current = true;
+    return 'offline';
+  };
   const marcarIngreso = async (tabla, id, extra = {}) => {
+    if (colaRef.current.some((x) => x.tabla === tabla && x.id === id)) return false; // ya lo registró este celular sin conexión
+    if (typeof navigator !== 'undefined' && !navigator.onLine) return registrarSinRed(tabla, id, extra);
+    try { return await marcarIngresoEnBase(tabla, id, extra); } catch (err) { if (esErrorRed(err)) return registrarSinRed(tabla, id, extra); throw err; }
+  };
+  // Sube los ingresos que quedaron guardados en el celular cuando no había conexión
+  const sincronizandoRef = useRef(false);
+  const sincronizar = async () => {
+    if (sincronizandoRef.current || (typeof navigator !== 'undefined' && !navigator.onLine)) return;
+    const pend = colaRef.current; const logsGuardados = leerLS(CLAVE_LOGS_PUERTA, []);
+    if (!pend.length && !logsGuardados.length) return;
+    sincronizandoRef.current = true;
+    let subidos = 0; const yaEstaban = [];
+    try {
+      for (const it of pend) {
+        const cambios = { asistio: true, ...(it.extra || {}) };
+        if (TABLAS_HORA_REAL.includes(it.tabla) && !tablasSinHoraReal.has(it.tabla)) cambios.hora_ingreso_real = it.hora;
+        const subir = (c) => supabase.from(it.tabla).update(c).eq('id', it.id).or('asistio.is.null,asistio.eq.false').select('id');
+        let { data, error } = await subir(cambios);
+        if (error && cambios.hora_ingreso_real && esErrorColumna(error, 'hora_ingreso_real')) { tablasSinHoraReal.add(it.tabla); delete cambios.hora_ingreso_real; ({ data, error } = await subir(cambios)); }
+        if (error && esErrorRed(error)) break;
+        if (!error && data && data.length) subidos += 1; else if (!error) yaEstaban.push(it);
+        guardarCola(colaRef.current.filter((x) => x.k !== it.k));
+      }
+      yaEstaban.forEach((it) => logPuerta('DUPLICADO', `${it.nombre || it.tabla} (DNI ${it.dni || 'S/D'}): lo registró este celular sin conexión, pero ya lo había registrado otro dispositivo`, { metodo: 'CAMARA' }));
+      const logs = leerLS(CLAVE_LOGS_PUERTA, []);
+      if (logs.length && navigator.onLine) {
+        let { error } = await supabase.from('logs_sistema').insert(logs);
+        if (error && !esErrorRed(error)) ({ error } = await supabase.from('logs_sistema').insert(logs.map(({ created_at, ...r }) => ({ ...r, detalle: `${r.detalle} (hora real ${new Date(created_at).toLocaleTimeString('es-AR')})` }))));
+        if (!error) { guardarLS(CLAVE_LOGS_PUERTA, []); setLogsPend(0); }
+      }
+    } catch (_) { /* se reintenta en 10 s */ } finally { sincronizandoRef.current = false; }
+    if (subidos || yaEstaban.length) {
+      notifyRef.current(`✓ Se subieron ${subidos} ingreso(s) guardados sin conexión${yaEstaban.length ? ` · ${yaEstaban.length} ya figuraban (los registró otro celular)` : ''}.`, yaEstaban.length ? 'warning' : 'success');
+      recargarRef.current();
+    }
+  };
+  useEffect(() => {
+    const on = () => { setEnLinea(true); sincronizar(); };
+    const off = () => setEnLinea(false);
+    window.addEventListener('online', on); window.addEventListener('offline', off);
+    const t = setInterval(() => { setEnLinea(navigator.onLine); sincronizar(); }, 10000);
+    sincronizar();
+    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); clearInterval(t); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const marcarIngresoEnBase = async (tabla, id, extra = {}) => {
     // Egresados, docentes y VIP guardan además la hora real de ingreso (si la columna existe; si no, se sigue igual)
     const conHora = TABLAS_HORA_REAL.includes(tabla) && !tablasSinHoraReal.has(tabla) ? { hora_ingreso_real: new Date().toISOString() } : {};
     const intentar = (cambios) => supabase
@@ -2107,6 +2249,7 @@ function ModuloPuerta({ config, egresados, invitados, docentes, especiales, reca
 
   const alternarAsistencia = async (tabla, item) => {
     try {
+      offlineRef.current = false;
       if (!item.asistio) {
         // Aviso si figura como "No asiste" (o si es invitado de un egresado dado de baja)
         const anf = tabla === 'invitados' ? egresados.find((e) => e.id === item.egresado_id) : null;
@@ -2114,9 +2257,10 @@ function ModuloPuerta({ config, egresados, invitados, docentes, especiales, reca
         if (dadoDeBaja && !window.confirm(`${item.nombre_completo} ${tabla === 'invitados' ? `es invitado/a de ${anf.nombre_completo}, que dio de baja su asistencia` : 'figura como "No asiste"'}.\n\n¿Registrar el ingreso igual? (solo si coordinación lo autorizó)`)) return;
         const extra = tabla === 'invitados' ? { hora_ingreso: new Date().toISOString() } : {};
         const ok = await marcarIngreso(tabla, item.id, extra);
+        if (ok === 'offline') notify(`📵 Sin conexión: ingreso de ${item.nombre_completo} guardado en este celular. Se sube solo cuando vuelva internet.`, 'warning');
         const tipoManual = { egresados: 'egresado', invitados: 'familiar', docentes: 'docente', invitados_especiales: 'VIP' }[tabla] || tabla;
         if (!ok) {
-          notify('Ya figuraba como presente (lo registró otro dispositivo).', 'warning');
+          notify(colaRef.current.some((x) => x.tabla === tabla && x.id === item.id) ? 'Ya está registrado en este celular (sin conexión, falta subirlo).' : 'Ya figuraba como presente (lo registró otro dispositivo).', 'warning');
           logPuerta('DUPLICADO', `Manual: ${tipoManual} ${item.nombre_completo} (DNI ${item.dni || 'S/D'}) ya figuraba presente`, { metodo: 'MANUAL', tipo: tipoManual, curso: tabla === 'egresados' ? item.division : anf?.division });
         } else {
           logPuerta('INGRESO_MANUAL', `${tipoManual} ${item.nombre_completo} (DNI ${item.dni || 'S/D'})`, { metodo: 'MANUAL', tipo: tipoManual, curso: tabla === 'egresados' ? item.division : anf?.division, personas: 1 });
@@ -2143,13 +2287,14 @@ function ModuloPuerta({ config, egresados, invitados, docentes, especiales, reca
   const marcarGrupoManual = async (egr, pendientes) => {
     if (egr.activo === false && !window.confirm(`${egr.nombre_completo} dio de baja su asistencia (sus plazas se liberaron).\n\n¿Registrar el ingreso de su grupo igual? (solo si coordinación lo autorizó)`)) return;
     if (!window.confirm(`¿Registrar el ingreso de ${pendientes.length} integrante(s) del grupo de ${egr.nombre_completo}?\n\n${pendientes.map((p) => '• ' + p.nombre_completo).join('\n')}`)) return;
+    offlineRef.current = false;
     try {
       const nuevos = [];
       for (const g of pendientes) {
         if (await marcarIngreso('invitados', g.id, { hora_ingreso: new Date().toISOString() })) nuevos.push(g.nombre_completo);
       }
       logPuerta('INGRESO_GRUPAL', `Manual: grupo de ${egr.nombre_completo} (DNI ${egr.dni || 'S/D'}): ${nuevos.join(', ') || '(ya habían ingresado)'}`, { metodo: 'MANUAL', tipo: 'grupo', curso: egr.division, personas: nuevos.length });
-      notify(nuevos.length ? `✓ Ingresaron ${nuevos.length} integrante(s) del grupo.` : 'Ya figuraban todos como presentes.', nuevos.length ? undefined : 'warning');
+      notify(nuevos.length ? `✓ Ingresaron ${nuevos.length} integrante(s) del grupo.${offlineRef.current ? ' 📵 Guardado sin conexión: se sube solo.' : ''}` : 'Ya figuraban todos como presentes.', nuevos.length && !offlineRef.current ? undefined : 'warning');
       await recargar();
     } catch (err) {
       notify('No se pudo registrar el grupo: ' + err.message, 'error');
@@ -2167,6 +2312,15 @@ function ModuloPuerta({ config, egresados, invitados, docentes, especiales, reca
     ultimoEscaneoRef.current = { code: raw, t: ahora };
     procesandoRef.current = true;
     metodoRef.current = origen;
+    offlineRef.current = false; otroPuestoRef.current = '';
+    const setResultadoIngreso = (r) => {
+      if (!r) { setResultadoIngresoBase(r); return; }
+      let res = r;
+      if (offlineRef.current && r.tipo !== 'error') res = { ...res, titulo: `${res.titulo} · SIN CONEXIÓN`, detalle: `📵 Guardado en este celular: se sube solo cuando vuelva internet. ${res.detalle || ''}` };
+      if (otroPuestoRef.current) res = { ...res, detalle: `${res.detalle || ''} · ⚠️ Corresponde al puesto: ${otroPuestoRef.current}` };
+      setResultadoIngresoBase(res);
+    };
+    const enBase = async (...a) => { try { return await buscarCodigoEnBase(...a); } catch (err) { if (esErrorRed(err)) return null; throw err; } };
 
     const avisar = (msg, tipo) => notifyRef.current(msg, tipo);
 
@@ -2194,9 +2348,9 @@ function ModuloPuerta({ config, egresados, invitados, docentes, especiales, reca
 
       const preferido = raw.toUpperCase().includes('ESRN005-VIP-') ? 'vip' : raw.toUpperCase().includes('ESRN005-DOCENTE-') ? 'docente' : '';
       let hallado = null;
-      if (preferido) hallado = localizarCodigo(code, false, datosRef.current, preferido, true) || await buscarCodigoEnBase(code, false, preferido, true);
+      if (preferido) hallado = localizarCodigo(code, false, datosRef.current, preferido, true) || await enBase(code, false, preferido, true);
       if (!hallado) hallado = localizarCodigo(code, esQrEgresado, datosRef.current);
-      if (!hallado) hallado = await buscarCodigoEnBase(code, esQrEgresado);
+      if (!hallado) hallado = await enBase(code, esQrEgresado);
 
       if (!hallado) {
         setResultadoIngreso({ tipo: 'error', titulo: '❌ CÓDIGO NO ENCONTRADO', nombre: raw, detalle: 'Verifique el padrón o busque manualmente.' });
@@ -2207,6 +2361,9 @@ function ModuloPuerta({ config, egresados, invitados, docentes, especiales, reca
 
       const f = hallado.fila;
       const egrsLocal = datosRef.current.egresados;
+      const miPuesto = String(perfilRef.current?.puesto_grupo || '');
+      const suGrupo = grupoDePersona(esQrGrupo ? 'grupo' : hallado.tipo, f, egrsLocal);
+      if (miPuesto && !/^Coordinaci/.test(miPuesto) && suGrupo && suGrupo !== miPuesto) otroPuestoRef.current = suGrupo;
 
       // QR del GRUPO FAMILIAR: registra a todos los invitados del egresado marcados "en grupo"
       if (esQrGrupo) {
@@ -2224,9 +2381,16 @@ function ModuloPuerta({ config, egresados, invitados, docentes, especiales, reca
           logPuerta('BLOQUEADO_NO_ASISTE', `grupo de ${f.nombre_completo} (DNI ${f.dni || 'S/D'})`, { tipo: 'grupo', curso: f.division });
           return;
         }
-        const { data: dg, error: eg } = await supabase.from('invitados').select('id, nombre_completo, asistio, movilidad_reducida').eq('egresado_id', f.id).eq('es_grupal', true);
-        if (eg) throw eg;
-        const grupales = dg || [];
+        let grupales = [];
+        try {
+          if (!navigator.onLine) throw new TypeError('Failed to fetch');
+          const { data: dg, error: eg } = await supabase.from('invitados').select('id, nombre_completo, asistio, movilidad_reducida').eq('egresado_id', f.id).eq('es_grupal', true);
+          if (eg) throw eg;
+          grupales = dg || [];
+        } catch (eg) {
+          if (!esErrorRed(eg)) throw eg;
+          grupales = (datosRef.current.invitados || []).filter((i) => i.egresado_id === f.id && esGrupal(i)); // lista guardada en el celular
+        }
         if (grupales.length === 0) {
           setResultadoIngreso({ tipo: 'warning', titulo: '⚠️ GRUPO SIN INTEGRANTES', nombre: nombreGrupo, detalle: 'Este egresado no tiene invitados marcados "en grupo". Buscá a cada invitado en la búsqueda manual.', acceso });
           avisar(`⚠️ ${nombreGrupo} no tiene integrantes cargados.`, 'warning');
@@ -2411,6 +2575,15 @@ function ModuloPuerta({ config, egresados, invitados, docentes, especiales, reca
 
   return (
     <div className="max-w-xl mx-auto space-y-4">
+      {perfilStaff?.puesto_grupo && <p className="text-center text-sm font-extrabold text-[#6B1D2F]">📍 Tu puesto: {perfilStaff.puesto_grupo}</p>}
+      {(!enLinea || cola.length > 0 || logsPend > 0 || usandoCache) && (
+        <div className={`rounded-2xl p-3 border-2 text-sm ${!enLinea ? 'bg-amber-50 border-amber-400' : 'bg-sky-50 border-sky-300'}`}>
+          <p className="font-extrabold">{!enLinea ? '📵 Sin conexión: seguí escaneando' : cola.length ? '⏳ Subiendo los ingresos guardados…' : '✓ Conexión normal'}</p>
+          {cola.length > 0 && <p className="text-xs">{cola.length} ingreso(s) guardados en este celular. Se suben solos cuando vuelve internet. <b>No cierres ni recargues esta página.</b></p>}
+          {usandoCache && <p className="text-xs">Usando la lista guardada en el celular ({cachePuerta?.t ? new Date(cachePuerta.t).toLocaleString('es-AR') : ''}). Los cargados después de esa hora no aparecen: usá el Resumen impreso.</p>}
+          {!enLinea && !cola.length && <p className="text-xs">Los ingresos se guardan en el celular y se suben solos cuando vuelva la señal.</p>}
+        </div>
+      )}
       <AyudaPuerta perfilStaff={perfilStaff} dispositivo={dispositivo} config={config} notify={notify} ultimoCursoRef={ultimoCursoRef} registrarApi={ayudaApiRef} />
       <div className="bg-slate-900 text-white rounded-2xl p-4 sm:p-6 space-y-4 shadow-xl text-center">
         <div>
@@ -2628,6 +2801,79 @@ function ModuloPuerta({ config, egresados, invitados, docentes, especiales, reca
             })()}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+const isoALocal = (v) => { if (!v) return ''; const d = new Date(v); if (isNaN(d.getTime())) return ''; const z = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}T${z(d.getHours())}:${z(d.getMinutes())}`; };
+const localAIso = (v) => { if (!v) return null; const d = new Date(v); return isNaN(d.getTime()) ? null : d.toISOString(); };
+// Grupos posibles para cada usuario de Puerta
+const gruposPuesto = (egresados) => ['Egresados', ...cursosDe(egresados).map((c) => `Familias ${c}`), 'Docentes y VIP', 'Coordinación (todos)'];
+const grupoDePersona = (tipo, fila, egresados) => {
+  if (tipo === 'egresado') return 'Egresados';
+  if (tipo === 'invitado' || tipo === 'grupo') { const e = tipo === 'grupo' ? fila : (egresados || []).find((x) => x.id === fila?.egresado_id); return e?.division ? `Familias ${e.division}` : ''; }
+  if (tipo === 'docente' || tipo === 'vip') return 'Docentes y VIP';
+  return '';
+};
+
+// ---------- Aviso del día anterior por WhatsApp (de a uno, con el mensaje armado) ----------
+const PLANTILLA_AVISO = 'Hola {nombre} 👋 Te recordamos que mañana es el Acto de Colación de la ESRN N° 005. Tu familia entra a partir de las 8:30 por {acceso}; el acto empieza a las 9:00 en punto. Traé tu QR y el de tus invitados abiertos en el celular (con el brillo alto). ¡Te esperamos!';
+function AvisoDiaAnterior({ egresados, invitados, cerrar, registrarLog }) {
+  const leer = (k, d) => { try { return localStorage.getItem(k) || d; } catch (_) { return d; } };
+  const [plantilla, setPlantilla] = useState(() => leer('aviso_plantilla', PLANTILLA_AVISO));
+  const [curso, setCurso] = useState('');
+  const [enviados, setEnviados] = useState(() => { try { return new Set(JSON.parse(localStorage.getItem('aviso_enviados') || '[]')); } catch (_) { return new Set(); } });
+  useEffect(() => { try { localStorage.setItem('aviso_plantilla', plantilla); } catch (_) { /* nada */ } }, [plantilla]);
+  const marcar = (id) => { const n = new Set(enviados); n.add(id); setEnviados(n); try { localStorage.setItem('aviso_enviados', JSON.stringify([...n])); } catch (_) { /* nada */ } };
+  const activos = egresados.filter((e) => e.activo !== false && coincideCurso(e, curso));
+  const numero = (e) => String(e.celular || '').replace(/\D/g, '');
+  const conCel = activos.filter((e) => numero(e).length >= 8);
+  const sinCel = activos.filter((e) => numero(e).length < 8);
+  const texto = (e) => plantilla.replace(/\{nombre\}/g, String(e.nombre_completo || '').split(' ').slice(-1)[0] || '').replace(/\{acceso\}/g, accesoFamiliaDe(e).toLowerCase()).replace(/\{curso\}/g, e.division || '').replace(/\{invitados\}/g, String(invitados.filter((i) => i.egresado_id === e.id).length));
+  const general = plantilla.replace(/Hola \{nombre\} 👋 /g, '').replace(/\{nombre\}/g, '').replace(/\{acceso\}/g, 'el acceso que figura en el pase').replace(/\{curso\}/g, curso && curso !== SIN_CURSO ? curso : '').replace(/\{invitados\}/g, '');
+  const imprimirSinCel = () => {
+    const w = window.open('', '_blank'); if (!w) return;
+    const filas = sinCel.map((e) => `<tr><td>${e.division || ''}</td><td>${e.nombre_completo}</td><td>${e.dni}</td><td></td></tr>`).join('');
+    w.document.write(`<html><head><title>Egresados sin celular</title><style>body{font-family:Arial;font-size:12px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #999;padding:5px;text-align:left}</style></head><body><h3>Egresados sin celular cargado${curso && curso !== SIN_CURSO ? ' · ' + curso : ''} (${sinCel.length})</h3><p>Avisar por otro medio (preceptor, grupo del curso).</p><table><tr><th>Curso</th><th>Egresado</th><th>DNI</th><th>Avisado</th></tr>${filas}</table></body></html>`);
+    w.document.close(); w.focus(); w.print();
+  };
+  const copiar = async () => { try { await navigator.clipboard.writeText(general); alert('Mensaje copiado: pegalo en el grupo del curso.'); } catch (_) { window.prompt('Copiá el mensaje:', general); } };
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-3" onClick={cerrar}>
+      <div className="bg-white rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+        <div className="flex justify-between items-start gap-2">
+          <div><h3 className="font-extrabold text-lg">📣 Aviso del día anterior</h3><p className="text-xs text-slate-500">Mensaje armado para mandar por WhatsApp a cada egresado. Se abre WhatsApp con el texto listo; vos tocás Enviar.</p></div>
+          <button type="button" onClick={cerrar} className="px-3 py-1.5 bg-slate-100 rounded-lg text-xs font-bold cursor-pointer">Cerrar</button>
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-bold text-slate-600">Mensaje (podés usar {'{nombre}'}, {'{acceso}'}, {'{curso}'} y {'{invitados}'})</label>
+          <textarea value={plantilla} onChange={(e) => setPlantilla(e.target.value)} rows={4} className="w-full px-3 py-2 rounded-xl border text-sm" />
+          <div className="flex flex-wrap gap-2 items-center">
+            <SelectorCurso egresados={egresados} valor={curso} onChange={setCurso} />
+            <button type="button" onClick={() => setPlantilla(PLANTILLA_AVISO)} className="px-3 py-1.5 bg-white border rounded-lg text-xs font-bold cursor-pointer">Volver al mensaje original</button>
+            <button type="button" onClick={copiar} className="px-3 py-1.5 bg-white border rounded-lg text-xs font-bold cursor-pointer">📋 Copiar mensaje general (para el grupo del curso)</button>
+            {enviados.size > 0 && <button type="button" onClick={() => { if (window.confirm('¿Borrar las marcas de "enviado"?')) { setEnviados(new Set()); try { localStorage.removeItem('aviso_enviados'); } catch (_) { /* nada */ } } }} className="px-3 py-1.5 bg-white border rounded-lg text-xs font-bold cursor-pointer">Borrar marcas</button>}
+          </div>
+        </div>
+        <div>
+          <p className="text-xs font-bold uppercase text-emerald-700 mb-1.5">Con celular ({conCel.length}) · enviados {conCel.filter((e) => enviados.has(e.id)).length}</p>
+          <div className="divide-y border rounded-xl max-h-72 overflow-y-auto">
+            {conCel.map((e) => (
+              <div key={e.id} className={`px-3 py-2 flex flex-wrap items-center gap-2 text-sm ${enviados.has(e.id) ? 'bg-emerald-50' : ''}`}>
+                <span className="font-bold">{e.nombre_completo}</span><span className="text-xs text-slate-500">{e.division}</span>
+                <a href={`https://wa.me/549${numero(e)}?text=${encodeURIComponent(texto(e))}`} target="_blank" rel="noreferrer" onClick={() => { marcar(e.id); registrarLog('AVISO_WHATSAPP', 'Egresados', `Aviso del día anterior a ${e.nombre_completo}`); }} className="ml-auto px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-bold">{enviados.has(e.id) ? '✓ Enviado · reenviar' : 'Enviar WhatsApp'}</a>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div>
+          <div className="flex justify-between items-center mb-1.5"><p className="text-xs font-bold uppercase text-rose-700">Sin celular cargado ({sinCel.length}): avisar por otro medio</p>{sinCel.length > 0 && <button type="button" onClick={imprimirSinCel} className="px-3 py-1.5 bg-white border rounded-lg text-xs font-bold cursor-pointer">🖨 Imprimir lista para preceptores</button>}</div>
+          <div className="divide-y border rounded-xl max-h-48 overflow-y-auto text-sm">
+            {sinCel.map((e) => <div key={e.id} className="px-3 py-1.5 flex gap-2"><span className="font-semibold">{e.nombre_completo}</span><span className="text-xs text-slate-500">{e.division} · DNI {e.dni}</span></div>)}
+            {sinCel.length === 0 && <p className="px-3 py-2 text-xs text-slate-400">Todos tienen celular cargado.</p>}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -3286,6 +3532,64 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
     } catch (err) {
       notify(/telefono_coordinacion/i.test(err.message || '') || err.code === 'PGRST204' ? 'Falta correr el SQL de la v24 (columna telefono_coordinacion).' : 'Error: ' + err.message, 'error');
     }
+  };
+
+  const [modalAviso, setModalAviso] = useState(false);
+  const [haciendoRespaldo, setHaciendoRespaldo] = useState(false);
+  const [autoParcial, setAutoParcial] = useState(isoALocal(config.fecha_cierre_parcial));
+  const [autoDefinitivo, setAutoDefinitivo] = useState(isoALocal(config.fecha_definitivo));
+  useEffect(() => { setAutoParcial(isoALocal(config.fecha_cierre_parcial)); setAutoDefinitivo(isoALocal(config.fecha_definitivo)); }, [config.fecha_cierre_parcial, config.fecha_definitivo]);
+  const faltaSqlV25 = (err) => /etapa_auto|fecha_cierre|fecha_definitivo|portal_verificar|puesto_grupo/i.test(err?.message || '') || err?.code === 'PGRST204' || err?.code === '42703';
+  const guardarConfigV25 = async (cambios, detalle, ok) => {
+    try {
+      const { error } = await supabase.from('configuracion').update(cambios).eq('id', config.id);
+      if (error) throw error;
+      await registrarLog('CONFIGURACION', 'Configuración', detalle);
+      await recargar(); notify(ok);
+    } catch (err) {
+      notify(faltaSqlV25(err) ? 'Falta correr el SQL de la v25 (sql_v25.sql).' : 'Error: ' + err.message, 'error');
+    }
+  };
+  const cambiarVerificarCelular = () => {
+    const nuevo = config.portal_verificar_celular !== true;
+    if (!window.confirm(nuevo ? '¿Pedir los últimos 4 números del celular para entrar al portal?\n\nSolo a los egresados que ya cargaron su celular. Desde Administración se sigue editando todo sin pedir nada.' : '¿Dejar de pedir los 4 números del celular en el portal?')) return;
+    guardarConfigV25({ portal_verificar_celular: nuevo }, nuevo ? 'Portal: se pide el celular (4 números) para entrar.' : 'Portal: ya no se pide el celular para entrar.', nuevo ? 'El portal ahora pide los 4 números del celular.' : 'El portal ya no pide el celular.');
+  };
+  const guardarEtapaAuto = (activar) => {
+    const fp = localAIso(autoParcial), fd = localAIso(autoDefinitivo);
+    if (activar && !fp && !fd) { notify('Cargá al menos una fecha.', 'error'); return; }
+    if (fp && fd && new Date(fd) <= new Date(fp)) { notify('El Definitivo tiene que ser después del Cierre Parcial.', 'error'); return; }
+    const txt = `Cambio automático ${activar ? 'ACTIVADO' : 'desactivado'}. Cierre Parcial: ${fp ? fechaHoraAR(fp) : '—'} · Definitivo: ${fd ? fechaHoraAR(fd) : '—'}`;
+    if (activar && !window.confirm(`¿Activar el cambio automático de etapa?\n\nCierre Parcial: ${fp ? fechaHoraAR(fp) : '(sin fecha)'}\nDefinitivo: ${fd ? fechaHoraAR(fd) : '(sin fecha)'}\n\nA esa hora el sistema cambia la etapa solo. Si después la cambiás a mano, se respeta.`)) return;
+    guardarConfigV25({ etapa_auto: activar, fecha_cierre_parcial: fp, fecha_definitivo: fd, etapa_auto_aplicada: null }, txt, activar ? 'Cambio automático de etapa activado.' : 'Cambio automático desactivado.');
+  };
+  const descargarRespaldo = async () => {
+    setHaciendoRespaldo(true);
+    try {
+      const tablas = [['egresados', 'Egresados'], ['invitados', 'Invitados'], ['docentes', 'Docentes'], ['invitados_especiales', 'VIP'], ['solicitudes_butacas', 'Solicitudes'], ['usuarios_sistema', 'Usuarios'], ['configuracion', 'Configuración'], ['alertas_puerta', 'Pedidos de ayuda'], ['logs_sistema', 'Registro']];
+      const XLSX = await import('xlsx');
+      const libro = XLSX.utils.book_new(); const resumen = [];
+      for (const [t, hoja] of tablas) {
+        let filas = [], desde = 0, faltante = false;
+        for (;;) {
+          const { data, error } = await supabase.from(t).select('*').range(desde, desde + 999);
+          if (error) { faltante = true; break; }
+          filas = filas.concat(data || []); if (!data || data.length < 1000) break; desde += 1000;
+        }
+        const limpias = filas.map((f) => Object.fromEntries(Object.entries(f).map(([k, v]) => [k, k === 'escudo' && v ? '(imagen guardada)' : v !== null && typeof v === 'object' ? JSON.stringify(v).slice(0, 32000) : typeof v === 'string' ? v.slice(0, 32000) : v])));
+        XLSX.utils.book_append_sheet(libro, XLSX.utils.json_to_sheet(limpias.length ? limpias : [{ '(vacía)': faltante ? 'No se pudo leer esta tabla' : 'Sin datos' }]), hoja.slice(0, 31));
+        resumen.push({ Tabla: hoja, Filas: filas.length, Estado: faltante ? 'no se pudo leer' : 'ok' });
+      }
+      XLSX.utils.book_append_sheet(libro, XLSX.utils.json_to_sheet([{ Tabla: `Respaldo del ${new Date().toLocaleString('es-AR')}`, Filas: '', Estado: '' }, ...resumen]), 'Índice');
+      libro.SheetNames.unshift(libro.SheetNames.pop());
+      const f = new Date(); const z = (n) => String(n).padStart(2, '0');
+      const nombre = `respaldo-colacion-esrn5-${f.getFullYear()}-${z(f.getMonth() + 1)}-${z(f.getDate())}-${z(f.getHours())}${z(f.getMinutes())}.xlsx`;
+      XLSX.writeFile(libro, nombre);
+      await registrarLog('RESPALDO', 'Sistema', `Descargó el respaldo completo (${resumen.map((r) => `${r.Tabla} ${r.Filas}`).join(', ')})`);
+      notify(`Respaldo descargado: ${nombre}`);
+    } catch (err) {
+      notify('No se pudo armar el respaldo: ' + err.message, 'error');
+    } finally { setHaciendoRespaldo(false); }
   };
 
   const cambiarPortalVip = async () => {
@@ -4139,6 +4443,18 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
           <button onClick={() => cambiarEtapaGlobalConAdvertencia('cierre_parcial')} className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${config.estado_etapa === 'cierre_parcial' ? 'bg-amber-600 text-white shadow' : 'bg-slate-100 text-slate-700'}`}>Cierre Parcial</button>
           <button onClick={() => cambiarEtapaGlobalDirecto('cierre_definitivo')} className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${config.estado_etapa === 'cierre_definitivo' ? 'bg-rose-600 text-white shadow' : 'bg-slate-100 text-slate-700'}`}>Definitivo</button>
         </div>
+        {perfilStaff?.rol === 'admin' && (
+          <div className="w-full border-t pt-3 flex flex-wrap items-end gap-3">
+            <div>
+              <p className="text-xs font-bold uppercase text-slate-500">Cambio automático por fecha</p>
+              <p className="text-[11px] text-slate-500">{config.etapa_auto === true ? `● Activado${config.etapa_auto_aplicada ? ` · ya aplicó: ${config.etapa_auto_aplicada === 'cierre_definitivo' ? 'Definitivo' : 'Cierre Parcial'}` : ''}` : '○ Desactivado: la etapa se cambia solo a mano'}</p>
+            </div>
+            <label className="text-[11px] font-bold text-slate-600">Cierre Parcial desde<br /><input type="datetime-local" value={autoParcial} onChange={(e) => setAutoParcial(e.target.value)} className="px-2 py-1.5 rounded-lg border text-xs" /></label>
+            <label className="text-[11px] font-bold text-slate-600">Definitivo desde<br /><input type="datetime-local" value={autoDefinitivo} onChange={(e) => setAutoDefinitivo(e.target.value)} className="px-2 py-1.5 rounded-lg border text-xs" /></label>
+            <button onClick={() => guardarEtapaAuto(true)} className="px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer bg-[#6B1D2F] text-white">{config.etapa_auto === true ? 'Guardar fechas' : 'Activar'}</button>
+            {config.etapa_auto === true && <button onClick={() => guardarEtapaAuto(false)} className="px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer bg-slate-100 text-slate-700">Desactivar</button>}
+          </div>
+        )}
       </div>
 
       {modalCierreParcialAbierto && (
@@ -4192,11 +4508,13 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
         )}
       </div>
 
+      {modalAviso && <AvisoDiaAnterior egresados={egresados} invitados={invitados} cerrar={() => setModalAviso(false)} registrarLog={registrarLog} />}
       {tab === 'egresados' && (
         <div className="bg-white rounded-2xl border p-5 space-y-4">
           <div className="flex flex-wrap justify-between items-center gap-2">
             <h3 className="font-bold">Padrón de Egresados</h3>
             <div className="flex flex-wrap gap-2">
+              <button onClick={() => setModalAviso(true)} className="px-3.5 py-2 bg-green-600 text-white rounded-xl text-xs font-bold shadow cursor-pointer">📣 Aviso del día anterior</button>
               <button onClick={() => exportarCSV('egresados')} className="px-3.5 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow cursor-pointer"><Download className="w-4 h-4" /> Exportar CSV</button>
               <button onClick={() => setModalAgregarEgresado(true)} className="px-3.5 py-2 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow cursor-pointer"><Plus className="w-4 h-4" /> Agregar Egresado</button>
               <input ref={fileEgrRef} type="file" accept=".csv,.txt" onChange={handleImportarCSVEgresados} className="hidden" />
@@ -5106,6 +5424,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
                   <div>
                     <p className="font-bold">{u.nombre} {esYo && <span className="text-[10px] font-bold text-indigo-600 uppercase">(vos)</span>} {!activo && <span className="text-[10px] font-bold text-rose-600 uppercase">Desactivado</span>}</p>
                     <p className="text-xs text-slate-500">{u.email}</p>
+                    {rolU === 'puerta' && u.puesto_grupo && <p className="text-[11px] font-bold text-[#6B1D2F]">📍 {u.puesto_grupo}</p>}
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <button onClick={() => {
@@ -5121,6 +5440,12 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
                       <option value="coordinador">Coordinador</option>
                       <option value="admin">Administrador</option>
                     </select>
+                    {rolU === 'puerta' && (
+                      <select value={u.puesto_grupo || ''} onChange={(e) => actualizarUsuario(u, { puesto_grupo: e.target.value || null }, `Puesto: ${e.target.value || 'sin asignar'}`)} title="De qué grupo es responsable en la puerta" className="px-2 py-1.5 rounded-lg border text-xs font-bold bg-white max-w-[12rem]">
+                        <option value="">📍 Puesto: sin asignar</option>
+                        {gruposPuesto(egresados).map((g) => <option key={g} value={g}>{g}</option>)}
+                      </select>
+                    )}
                     <button onClick={() => actualizarUsuario(u, { activo: !activo }, activo ? 'Desactivó al usuario' : 'Activó al usuario')} className={`px-2.5 py-1.5 rounded-lg text-xs font-bold cursor-pointer ${activo ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'}`}>
                       {activo ? 'Desactivar' : 'Activar'}
                     </button>
@@ -5174,6 +5499,13 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
             </button>
             {videoActivoAdm && <a href={VIDEO_TUTORIAL} target="_blank" rel="noreferrer" className="text-xs font-bold text-[#6B1D2F] underline">probar</a>}
           </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold uppercase text-slate-500">Portal: pedir celular</span>
+            <button onClick={cambiarVerificarCelular} title="Pide los últimos 4 números del celular cargado para entrar al portal" className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer ${config.portal_verificar_celular === true ? 'bg-[#6B1D2F] hover:opacity-90 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}`}>
+              {config.portal_verificar_celular === true ? '● Activado' : '○ Desactivado'}
+            </button>
+          </div>
+          <button onClick={descargarRespaldo} disabled={haciendoRespaldo} className="px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer bg-emerald-700 hover:bg-emerald-800 text-white disabled:opacity-60">{haciendoRespaldo ? 'Armando respaldo…' : '💾 Respaldo completo (Excel)'}</button>
           <div className="flex items-center gap-2">
             <span className="text-xs font-bold uppercase text-slate-500">Tel. coordinación</span>
             <input type="text" value={telCoord} onChange={(e) => setTelCoord(e.target.value)} placeholder="Ej: Martín 2995551234, Laura 2994443322" title="Uno o varios teléfonos separados por coma, con el nombre adelante si querés. Se muestran en la Puerta cuando no hay internet." className="w-72 px-2.5 py-1.5 rounded-xl border text-xs" />
