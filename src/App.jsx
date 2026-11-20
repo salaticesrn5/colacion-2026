@@ -40,7 +40,7 @@ const fechaHoraAR = (v) => { if (!v) return ''; const d = new Date(v); return is
 const CAPACIDAD_MAXIMA = 525;
 const CAPACIDAD_DEFINITIVA = 525; // número definitivo de butacas (decisión del 19/11/2026)
 const CUPO_BASE_DEFECTO = 4;
-const VERSION_APP = 'v25 · 20/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
+const VERSION_APP = 'v26 · 20/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
 const MSG_FALTA_COL_BUTACA = 'Falta crear la columna "ocupa_butaca" en la tabla docentes (Supabase). Ejecutá el SQL que te pasaron y volvé a intentar.';
 const esErrorColumnaButaca = (err) => /ocupa_butaca/i.test(err?.message || '') || err?.code === 'PGRST204' || err?.code === '42703';
 const aNumeroONulo = (v) => (v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
@@ -179,6 +179,97 @@ const plazasFamiliaresDe = (egr, { config, invitados, solicitudes }) => {
   return Math.min(cupo, cargados);
 };
 
+// ---------- Historial de cambios (se muestra con el botón "📋 Novedades"). Agregar arriba en cada entrega. ----------
+const NOVEDADES = [
+  { v: 'v26', fecha: '20/11/2026', items: ['Botón "📋 Novedades" con este historial de cambios.'] },
+  { v: 'v25', fecha: '20/11/2026', items: [
+    'Puerta sin conexión: si se corta internet sigue registrando y cuando vuelve la señal sube todo solo, con la hora real.',
+    'Cada usuario de Puerta tiene su puesto (Egresados, Familias de un curso, Docentes y VIP); avisa si escanean a alguien de otro puesto.',
+    'Cambio automático de etapa por fecha (se activa y desactiva en Administración).',
+    'Portal: opción de pedir los últimos 4 números del celular para entrar (5 errores bloquean 15 minutos).',
+    'Portal: el egresado ve cuándo se modificó su lista por última vez.',
+    'Respaldo completo de todas las tablas en un Excel.',
+    'Aviso del día anterior por WhatsApp, con lista para imprimir de los que no tienen celular.',
+    'Coordinadores ven la historia del registro en la ficha de persona.'] },
+  { v: 'v24', fecha: '19–20/11/2026', items: [
+    'Botón 🆘 "Pedir ayuda a coordinación" en la Puerta, con motivos rápidos y estado "va en camino".',
+    'Avisos automáticos a coordinación: 3 QR no encontrados seguidos o búsquedas manuales sin resultado; botón "No lo encuentro".',
+    'Cartel rojo con alarma para coordinación y admin en cualquier pantalla, con "Voy yo", "Resuelto" e historial.',
+    'Teléfonos de coordinación (uno o varios) para llamar cuando no hay internet.',
+    'Hoja "Pedidos de ayuda" en el Excel de estadística.'] },
+  { v: 'v23', fecha: '19/11/2026', items: [
+    'Solapa "🔎 Buscar persona": cualquiera del sistema por DNI o nombre, también con errores de carga, con su ficha e historia.',
+    'Puerta: "¿Quisiste decir…?" en la búsqueda manual.',
+    'Registro de la Puerta preparado para estadística y botón "Estadística de la Puerta (Excel)".',
+    'Selector de curso más visible.'] },
+  { v: 'v22', fecha: '19/11/2026', items: [
+    'Puerta: respeta si el QR es de VIP o de docente cuando el DNI está en dos listas.',
+    'Egresados: filtro por curso y por "entró / no entró al portal"; botón para reiniciar esas marcas.',
+    'Invitados: filtro por curso y exportar solo lo filtrado.',
+    'Resumen Papel ordenado por curso, con opción de imprimir un solo curso.',
+    'Curso en los pases y en la Puerta. Bip y vibración al escanear, con botón para silenciar.',
+    'Video tutorial en el portal (con interruptor).',
+    'VIP: DNI visible en la lista y aviso al cambiar DNI o nombre.'] },
+  { v: 'Base real', fecha: '19/11/2026', items: ['Arreglo del portal VIP (columna "activo"), VIP sin DNI permitidos y estado de solicitudes en minúscula.'] },
+  { v: 'v19 a v21', fecha: '19/11/2026', items: [
+    'Escudo con opción de usarlo o no; fila VIP.',
+    'Registro de lo que hacen las familias en el portal y marca de quién entró.',
+    'Portal: el celular ya no se corta en 8 números.'] },
+  { v: 'Seguridad (Etapa C)', fecha: '18–19/11/2026', items: [
+    'El portal pasó a funciones seguras de la base: sin sesión no se pueden ver ni modificar los padrones.',
+    'Puerta solo puede marcar asistencia; admin puede cambiar la contraseña de otros usuarios.'] },
+  { v: 'Tanda 14', fecha: '18/11/2026', items: [
+    'Aforo y Sala con el croquis del Teatro CCC, capacidad configurable y sectores; la ubicación sale en los pases y en la Puerta.',
+    'Hora real de ingreso de egresados, docentes y VIP.',
+    'Importar docentes con la columna "Ocupa butaca". Ícono de la página.'] },
+  { v: 'Tanda 13', fecha: '18/11/2026', items: [
+    'Orientación y división de los 114 egresados.',
+    'QR propio del grupo familiar; el QR del egresado registra solo al egresado.',
+    'Accesos por orientación, colores de pase y movilidad reducida.',
+    'Una sola solicitud de butacas extra por egresado, con aprobación total o parcial.',
+    'Etapas Abierta / Cierre Parcial / Definitivo.',
+    '"No asistiré" bloquea en la Puerta al grupo de ese egresado. Escudo institucional.'] },
+  { v: 'Pases', fecha: '18/11/2026', items: ['Pases de docentes regenerados con el QR correcto; QR sin tildes; aviso de "pase antiguo" en la Puerta.'] },
+  { v: 'Tandas 10 a 12', fecha: '17/11/2026', items: [
+    'Corregidos los QR de invitados y los QR ficticios del panel; el grupo entra con un solo QR.',
+    'El portal ya no dice "guardado" si falló al guardar.',
+    'Al aplicar el cupo se pueden recortar los invitados que sobran.'] },
+  { v: 'Tandas 2 a 9', fecha: '16/11/2026', items: [
+    'Importación de CSV rehecha, con vista previa y "Deshacer última importación". Pestaña "Invitados de egresados".',
+    'Interruptores de Portal VIP y de WhatsApp.',
+    'Docentes con y sin butaca.',
+    'Simulador de cupo y cantidad de invitados para todos de una vez.',
+    'La Puerta deja registro de todo; exportar el registro de actividad.',
+    '"No asiste" libera la plaza y bloquea en la Puerta.',
+    'Búsqueda manual completa en la Puerta, reporte de asistencia en Excel y alerta de aforo.',
+    'Panel de usuarios: cambiar rol y activar o desactivar.'] },
+  { v: 'Puerta y varios celulares', fecha: '16/11/2026', items: [
+    'Se registra el ingreso del egresado; duplicados detectados aunque escaneen dos celulares a la vez.',
+    'Lector de QR para iPhone; el rol Puerta entra directo a la Puerta.'] },
+  { v: 'Inicio', fecha: '15/11/2026', items: ['Buscadores en las listas y recuperación de las funciones que se habían perdido (agregar, eliminar, importar).'] },
+];
+function ModalNovedades({ cerrar }) {
+  useEffect(() => { try { localStorage.setItem('novedades_vista', NOVEDADES[0].v); } catch (_) { /* nada */ } }, []);
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-3 print:hidden" onClick={cerrar}>
+      <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl border-t-4 border-[#6B1D2F]" onClick={(e) => e.stopPropagation()}>
+        <div className="flex justify-between items-start gap-3 p-5 border-b">
+          <div><h3 className="font-extrabold text-lg">📋 Novedades del sistema</h3><p className="text-xs text-slate-500">Todos los cambios, del más nuevo al más viejo. Versión publicada: {VERSION_APP}</p></div>
+          <button type="button" onClick={cerrar} className="px-3 py-1.5 bg-slate-100 rounded-lg text-xs font-bold cursor-pointer">Cerrar</button>
+        </div>
+        <div className="overflow-y-auto p-5 space-y-4">
+          {NOVEDADES.map((n, i) => (
+            <div key={n.v} className={`rounded-xl border p-3 ${i === 0 ? 'border-[#6B1D2F] bg-rose-50/40' : ''}`}>
+              <p className="font-extrabold text-sm text-[#6B1D2F]">{n.v} <span className="text-xs font-semibold text-slate-500">· {n.fecha}</span>{i === 0 && <span className="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-[#6B1D2F] text-white">ACTUAL</span>}</p>
+              <ul className="mt-1.5 space-y-1 text-sm text-slate-700 list-disc pl-5">{n.items.map((t, k) => <li key={k}>{t}</li>)}</ul>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [vista, setVista] = useState('portal'); // 'portal', 'login', 'puerta', 'admin', 'reporte_papel'
   const [session, setSession] = useState(null);
@@ -186,6 +277,8 @@ export default function App() {
   const [loadingAuth, setLoadingAuth] = useState(true);
   const yaUbicadoRef = useRef(false);
   const [modalClave, setModalClave] = useState(false);
+  const [verNovedades, setVerNovedades] = useState(false);
+  const novedadNueva = (() => { try { return localStorage.getItem('novedades_vista') !== NOVEDADES[0].v; } catch (_) { return false; } })();
   const [claveNueva, setClaveNueva] = useState('');
   const [claveRepetida, setClaveRepetida] = useState('');
   const [verClave, setVerClave] = useState(false);
@@ -580,7 +673,13 @@ export default function App() {
         </div>
       )}
 
-      <p className="text-center text-[10px] text-slate-400 mt-2 print:hidden">Control de Acceso Colación 2026 · {VERSION_APP}</p>
+      <p className="text-center text-[10px] text-slate-400 mt-2 print:hidden">
+        Control de Acceso Colación 2026 · {VERSION_APP}
+        {session && perfilStaff && (perfilStaff.rol === 'admin' || perfilStaff.rol === 'coordinador') && (
+          <button type="button" onClick={() => setVerNovedades(true)} className="ml-2 px-2 py-0.5 rounded-full border border-slate-300 text-slate-600 font-bold cursor-pointer hover:bg-slate-100">📋 Novedades{novedadNueva ? ' 🔴' : ''}</button>
+        )}
+      </p>
+      {verNovedades && <ModalNovedades cerrar={() => setVerNovedades(false)} />}
 
       {whatsappActivo && (
       <a
