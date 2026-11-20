@@ -25,7 +25,7 @@ const sanitizeDNI = (val) => String(val || '').replace(/\D/g, '').slice(0, 8);
 const CAPACIDAD_MAXIMA = 525;
 const CAPACIDAD_DEFINITIVA = 525; // número definitivo de butacas (decisión del 19/11/2026)
 const CUPO_BASE_DEFECTO = 4;
-const VERSION_APP = 'v22 · 19/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
+const VERSION_APP = 'v24 · 20/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
 const MSG_FALTA_COL_BUTACA = 'Falta crear la columna "ocupa_butaca" en la tabla docentes (Supabase). Ejecutá el SQL que te pasaron y volvé a intentar.';
 const esErrorColumnaButaca = (err) => /ocupa_butaca/i.test(err?.message || '') || err?.code === 'PGRST204' || err?.code === '42703';
 const aNumeroONulo = (v) => (v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
@@ -506,6 +506,7 @@ export default function App() {
         </div>
       </header>
 
+      {session && puedeAdministrar && <AvisosCoordinacion perfilStaff={perfilStaff} notify={notify} />}
       <main className="max-w-7xl mx-auto px-3 sm:px-4 py-5 sm:py-6">
         {(loadingAuth || (session && !perfilStaff)) ? (
           <div className="flex justify-center items-center py-24 text-slate-500 gap-2">
@@ -1231,15 +1232,100 @@ const claveCurso = (div) => {
   return `${t}-${String(n).padStart(2, '0')}-${d}`;
 };
 const SIN_CURSO = '__sin_curso__';
+
+// ---------- Búsqueda tolerante a errores de carga (DNI y nombres parecidos) ----------
+const soloDigitos = (v) => String(v || '').replace(/\D/g, '');
+const normNombre = (t) => sinTildes(String(t || '')).toUpperCase().replace(/[^A-Z\s]/g, ' ').replace(/\s+/g, ' ').trim();
+const distancia = (a, b) => { // Levenshtein corto
+  if (a === b) return 0; if (!a.length) return b.length; if (!b.length) return a.length;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a.charAt(i - 1) === b.charAt(j - 1) ? 0 : 1));
+    prev = cur;
+  }
+  return prev[b.length];
+};
+// Compara un DNI buscado con uno cargado. Devuelve null si no se parecen, o {exacto, motivo, marcas:[posiciones distintas en el cargado]}
+const compararDni = (buscado, cargado) => {
+  const q = soloDigitos(buscado), d = soloDigitos(cargado);
+  if (q.length < 4 || !d) return null;
+  if (q === d) return { exacto: true, motivo: 'DNI exacto', marcas: [] };
+  if (q.length === d.length) {
+    const dif = []; for (let i = 0; i < d.length; i++) if (q.charAt(i) !== d.charAt(i)) dif.push(i);
+    if (dif.length === 1) return { exacto: false, motivo: 'un número distinto', marcas: dif };
+    if (dif.length === 2 && dif[1] === dif[0] + 1 && q.charAt(dif[0]) === d.charAt(dif[1]) && q.charAt(dif[1]) === d.charAt(dif[0])) return { exacto: false, motivo: 'dos números invertidos', marcas: dif };
+  }
+  if (Math.abs(q.length - d.length) === 1 && q.length >= 6) {
+    const [lar, cor] = q.length > d.length ? [q, d] : [d, q];
+    for (let i = 0; i < lar.length; i++) if (lar.slice(0, i) + lar.slice(i + 1) === cor) return { exacto: false, motivo: q.length > d.length ? 'tiene un número de menos' : 'tiene un número de más', marcas: q.length < d.length ? [i] : [] };
+  }
+  if (q.length >= 4 && d.includes(q)) { const i = d.indexOf(q); return { exacto: false, motivo: 'contiene lo buscado', marcas: Array.from({ length: q.length }, (_, k) => i + k) }; }
+  return null;
+};
+// Compara un nombre buscado con uno cargado (sin importar orden, tildes ni mayúsculas)
+const compararNombre = (buscado, cargado) => {
+  const qs = normNombre(buscado).split(' ').filter((x) => x.length >= 2), ns = normNombre(cargado).split(' ').filter(Boolean);
+  if (!qs.length || !ns.length) return null;
+  if (qs.every((t) => ns.some((n) => n === t || (t.length >= 3 && n.startsWith(t))))) return { exacto: true, motivo: 'nombre', marcas: [] };
+  const tol = (t) => (t.length <= 4 ? 1 : 2);
+  const malos = [];
+  const ok = qs.every((t) => ns.some((n) => { const dd = distancia(t, n); if (dd > 0 && dd <= tol(t)) { malos.push(n); return true; } return dd === 0 || (t.length >= 4 && n.startsWith(t)); }));
+  return ok && malos.length ? { exacto: false, motivo: `nombre parecido (${malos.join(', ')})`, marcas: [] } : null;
+};
+// Busca en todos los padrones. Devuelve {exactos:[], parecidos:[]} con {clase, item, motivo, marcas}
+const buscarPersonas = (consulta, { egresados = [], invitados = [], docentes = [], especiales = [], personal = [] }) => {
+  const q = String(consulta || '').trim();
+  const exactos = [], parecidos = [];
+  if (q.length < 2) return { exactos, parecidos };
+  const dig = soloDigitos(q), esDni = dig.length >= 4 && dig.length >= q.replace(/[\s.]/g, '').length - 1;
+  const grupos = [['egresado', egresados], ['invitado', invitados], ['docente', docentes], ['vip', especiales], ['personal', personal]];
+  grupos.forEach(([clase, lista]) => lista.forEach((item) => {
+    let r = null;
+    if (esDni) {
+      r = compararDni(dig, item.dni);
+      if (!r && clase === 'invitado' && item.numero_entrada && String(item.numero_entrada).toUpperCase().includes(q.toUpperCase())) r = { exacto: true, motivo: 'número de entrada', marcas: [] };
+    } else {
+      r = compararNombre(q, item.nombre_completo || item.nombre);
+      if (!r && clase === 'personal' && String(item.email || '').toLowerCase().includes(q.toLowerCase())) r = { exacto: true, motivo: 'email', marcas: [] };
+      if (!r && clase === 'invitado' && item.numero_entrada && String(item.numero_entrada).toUpperCase().includes(q.toUpperCase())) r = { exacto: true, motivo: 'número de entrada', marcas: [] };
+    }
+    if (r) (r.exacto ? exactos : parecidos).push({ clase, item, motivo: r.motivo, marcas: r.marcas });
+  }));
+  return { exactos, parecidos: parecidos.slice(0, 30) };
+};
+const DniMarcado = ({ dni, marcas = [] }) => {
+  const d = soloDigitos(dni);
+  if (!d) return <span className="text-slate-400">sin DNI</span>;
+  return <span className="font-mono">{d.split('').map((ch, i) => <span key={i} className={marcas.includes(i) ? 'bg-amber-300 text-slate-900 rounded px-px font-bold' : ''}>{ch}</span>)}</span>;
+};
+const CLASE_PERSONA = { egresado: { t: 'Egresado/a', c: COLOR_PASE.egresado, i: '🎓' }, invitado: { t: 'Invitado/a de egresado', c: COLOR_PASE.cn, i: '👨‍👩‍👧' }, docente: { t: 'Docente', c: COLOR_PASE.docente, i: '📚' }, vip: { t: 'VIP / autoridad', c: COLOR_PASE.vip, i: '⭐' }, personal: { t: 'Personal del sistema', c: '#334155', i: '👤' } };
+
+// Lee un registro de Puerta (formato fijo desde la v23; los anteriores se interpretan por la acción)
+const RE_LOG_PUERTA = /^\[([A-Z]+)\] \[([^\]]*)\] \[([^\]]*)\] \[(-?\d+) pers\] \[([^\]]*)\] (.*?)(?: \[([^\]]*)\])?$/;
+const leerLogPuerta = (l) => {
+  const m = RE_LOG_PUERTA.exec(String(l.detalle || ''));
+  if (m) {
+    const seg = /^(\d+) s$/.exec(m[5]);
+    return { metodo: m[1], tipo: m[2] === '-' ? '' : m[2], curso: m[3] === '-' ? '' : m[3], personas: Number(m[4]) || 0, seg: seg ? Number(seg[1]) : null, texto: m[6], dispositivo: m[7] || '', nuevo: true };
+  }
+  const d = String(l.detalle || '');
+  const manual = l.accion === 'INGRESO_MANUAL' || /^Manual:/.test(d);
+  const personas = l.accion === 'INGRESO' || l.accion === 'INGRESO_MANUAL' ? 1 : l.accion === 'INGRESO_GRUPAL' ? (d.split(':').slice(-1)[0].split(',').filter((x) => x.trim() && !/ya hab/.test(x)).length) : 0;
+  return { metodo: manual ? 'MANUAL' : 'CAMARA', tipo: (/^(egresado|familiar|docente|VIP)/.exec(d) || [])[1] || (/grupo/.test(d) ? 'grupo' : ''), curso: '', personas, seg: null, texto: d, dispositivo: (/\[([^\]]*)\]$/.exec(d) || [])[1] || '', nuevo: false };
+};
 const cursosDe = (egrs) => [...new Set((egrs || []).map((e) => e.division || ''))].sort((a, b) => claveCurso(a).localeCompare(claveCurso(b)));
 const coincideCurso = (egr, filtro) => !filtro || (filtro === SIN_CURSO ? !egr?.division : (egr?.division || '') === filtro);
 // Selector de curso reutilizable (Egresados, Invitados)
 const SelectorCurso = ({ egresados, valor, onChange }) => (
-  <select value={valor} onChange={(e) => onChange(e.target.value)} className="px-3 py-2 rounded-xl border text-sm bg-white outline-none focus:border-[#6B1D2F]" aria-label="Filtrar por curso">
+  <label className={`inline-flex items-center gap-2 pl-3 pr-1 py-1 rounded-xl border-2 text-sm font-bold ${valor ? 'bg-[#6B1D2F] border-[#6B1D2F] text-white' : 'bg-rose-50 border-[#6B1D2F]/50 text-[#6B1D2F]'}`}>
+  🎓 Curso:
+  <select value={valor} onChange={(e) => onChange(e.target.value)} className={`px-2 py-1.5 rounded-lg text-sm font-bold outline-none cursor-pointer ${valor ? 'bg-white text-[#6B1D2F]' : 'bg-white text-slate-700 border border-[#6B1D2F]/30'}`} aria-label="Filtrar por curso">
     <option value="">Todos los cursos</option>
     {cursosDe(egresados).filter(Boolean).map((c) => <option key={c} value={c}>{c}</option>)}
     {(egresados || []).some((e) => !e.division) && <option value={SIN_CURSO}>Sin curso</option>}
   </select>
+  </label>
 );
 const esGrupal = (inv) => inv?.es_grupal === true;
 const tieneMovilidad = (p) => p?.movilidad_reducida === true;
@@ -1559,6 +1645,7 @@ const prepararAudioPuerta = () => {
 };
 const tonosPuerta = {
   // [frecuencia Hz, duración s, pausa antes s]
+  alarma: [[988, 0.18, 0], [740, 0.18, 0.06], [988, 0.18, 0.06], [740, 0.22, 0.06]],
   success: [[1320, 0.13, 0]],
   movilidad: [[1320, 0.12, 0], [1760, 0.14, 0.05]],
   warning: [[880, 0.11, 0], [880, 0.11, 0.08]],
@@ -1666,6 +1753,252 @@ const buscarCodigoEnBase = async (code, esQrEgresado, preferido = '', solo = fal
   return null;
 };
 
+// ---------- Pedidos de ayuda: un puesto de Puerta avisa a coordinación ----------
+const MOTIVOS_AYUDA = [
+  ['cola', '👥', 'Se está juntando mucha gente'],
+  ['equipo', '📵', 'La cámara o el celular no anda'],
+  ['no_figura', '❓', 'Alguien no figura o no tiene QR'],
+  ['persona', '⚠️', 'Problema con una persona (No asiste, discute, pase copiado)'],
+  ['movilidad', '♿', 'Necesito acompañante para movilidad reducida'],
+  ['otro', '✏️', 'Otro'],
+];
+const TEXTO_MOTIVO = { ...Object.fromEntries(MOTIVOS_AYUDA.map(([k, i, t]) => [k, `${i} ${t}`])), auto_errores: '🤖 Automático: varios "No encontrado" o errores seguidos', auto_manual: '🤖 Automático: buscan a mano y no lo encuentran' };
+// "Martín 299 555-1234, Laura 2994443322" -> [{nombre, numero, tel}]
+const telefonosCoordinacion = (texto) => String(texto || '').split(/[,;\n]+/).map((x) => x.trim()).filter(Boolean).map((x) => {
+  const numero = (x.match(/[+\d][\d\s-]{5,}/) || [''])[0].trim(); const nombre = x.replace(numero, '').replace(/[:\-–]+$/, '').trim();
+  return { nombre, numero, tel: numero.replace(/[^\d+]/g, '') };
+}).filter((t) => t.tel.length >= 6);
+const BotonesLlamar = ({ texto, className = '' }) => telefonosCoordinacion(texto).map((t) => (
+  <a key={t.tel} href={`tel:${t.tel}`} className={className}>📞 Llamar{t.nombre ? ` a ${t.nombre}` : ' a coordinación'} · {t.numero}</a>
+));
+const haceCuanto = (v) => { const m = Math.max(0, Math.round((Date.now() - new Date(v).getTime()) / 60000)); return m < 1 ? 'recién' : m === 1 ? 'hace 1 min' : `hace ${m} min`; };
+const minutosEntre = (a, b) => (a && b ? Math.max(0, Math.round((new Date(b) - new Date(a)) / 60000)) : '');
+const nombreStaff = (p) => p?.nombre || p?.email || 'Sin nombre';
+const esErrorRed = (err) => !navigator.onLine || /fetch|network|Failed to fetch|Load failed/i.test(String(err?.message || err || ''));
+const faltaTablaAlertas = (err) => /alertas_puerta/i.test(err?.message || '') || err?.code === '42P01' || err?.code === 'PGRST205';
+
+async function enviarAlertaPuerta({ puesto, dispositivo, curso, motivo, detalle, automatica = false }) {
+  const { data, error } = await supabase.from('alertas_puerta').insert({ puesto, dispositivo, curso: curso || null, motivo, detalle: detalle || null, automatica }).select().single();
+  if (error) throw error;
+  supabase.from('logs_sistema').insert({ usuario: puesto, modulo: 'Ayuda', accion: automatica ? 'AYUDA_AUTOMATICA' : 'PEDIDO_AYUDA', detalle: `${TEXTO_MOTIVO[motivo] || motivo}${detalle ? ' · ' + detalle : ''}${curso ? ` [${curso}]` : ''} [${dispositivo}]` }).then(() => {});
+  return data;
+}
+
+// Botón y estado del pedido en el celular de la Puerta
+function AyudaPuerta({ perfilStaff, dispositivo, config, notify, ultimoCursoRef, registrarApi }) {
+  const puesto = nombreStaff(perfilStaff);
+  const [abierto, setAbierto] = useState(false);
+  const [motivo, setMotivo] = useState('');
+  const [detalle, setDetalle] = useState('');
+  const [enviando, setEnviando] = useState(false);
+  const [alerta, setAlerta] = useState(null);
+  const [sinRed, setSinRed] = useState(false);
+  const alertaRef = useRef(null);
+  const tel = telefonosCoordinacion(config?.telefono_coordinacion).length > 0;
+
+  const consultar = async () => {
+    try {
+      const { data, error } = await supabase.from('alertas_puerta').select('*').eq('puesto', puesto).neq('estado', 'resuelta').order('created_at', { ascending: false }).limit(1);
+      if (error) return;
+      const nueva = (data && data[0]) || null;
+      const previa = alertaRef.current;
+      if (previa && !nueva) {
+        const { data: d2 } = await supabase.from('alertas_puerta').select('*').eq('id', previa.id).limit(1);
+        const r = d2 && d2[0];
+        if (r && r.estado === 'resuelta' && r.resuelta_por !== puesto) { notify(`✓ Coordinación marcó tu pedido como resuelto${r.resuelta_por ? ' (' + r.resuelta_por + ')' : ''}.`); sonarPuerta('success'); }
+      }
+      if (previa && nueva && previa.estado === 'abierta' && nueva.estado === 'en_camino') { notify(`🏃 ${nueva.atiende || 'Un coordinador'} va en camino.`); sonarPuerta('movilidad'); }
+      alertaRef.current = nueva; setAlerta(nueva);
+    } catch (_) { /* sin red: se reintenta */ }
+  };
+  useEffect(() => { consultar(); const t = setInterval(consultar, 5000); return () => clearInterval(t); }, [puesto]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const enviar = async (m, d, automatica = false) => {
+    if (alertaRef.current) { if (!automatica) notify('Ya tenés un pedido abierto. Usá "Insistir" si tardan.', 'warning'); return; }
+    if (!navigator.onLine) { setSinRed(true); return; }
+    setEnviando(true);
+    try {
+      const a = await enviarAlertaPuerta({ puesto, dispositivo, curso: ultimoCursoRef?.current || '', motivo: m, detalle: d, automatica });
+      alertaRef.current = a; setAlerta(a); setAbierto(false); setMotivo(''); setDetalle('');
+      notify(automatica ? (m === 'auto_manual' ? '🤖 Se avisó a coordinación: buscaron a mano y no lo encontraron.' : '🤖 Se avisó a coordinación: hubo varios "No encontrado" seguidos.') : '🆘 Pedido enviado a coordinación.', automatica ? 'warning' : 'success');
+    } catch (err) {
+      if (esErrorRed(err)) setSinRed(true);
+      else notify(faltaTablaAlertas(err) ? 'Falta correr el SQL de la v24 (tabla alertas_puerta).' : 'No se pudo enviar el pedido: ' + (err.message || err), 'error');
+    } finally { setEnviando(false); }
+  };
+  useEffect(() => { if (registrarApi) registrarApi.current = { automatica: (m = 'auto_errores', d = '') => enviar(m, d, true), pedir: (m, d) => enviar(m, d, false) }; });
+
+  const insistir = async () => {
+    const a = alertaRef.current; if (!a) return;
+    if (a.ultima_insistencia && Date.now() - new Date(a.ultima_insistencia).getTime() < 30000) { notify('Ya insististe hace menos de 30 segundos.', 'warning'); return; }
+    const { error } = await supabase.from('alertas_puerta').update({ insistencias: (a.insistencias || 0) + 1, ultima_insistencia: new Date().toISOString() }).eq('id', a.id);
+    if (error) { if (esErrorRed(error)) setSinRed(true); else notify('No se pudo: ' + error.message, 'error'); return; }
+    notify('🔔 Se volvió a avisar a coordinación.'); consultar();
+  };
+  const yaSeSoluciono = async () => {
+    const a = alertaRef.current; if (!a) return;
+    const { error } = await supabase.from('alertas_puerta').update({ estado: 'resuelta', resuelta_at: new Date().toISOString(), resuelta_por: puesto }).eq('id', a.id);
+    if (error) { notify('No se pudo: ' + error.message, 'error'); return; }
+    alertaRef.current = null; setAlerta(null); notify('Pedido cerrado.');
+  };
+
+  return (
+    <>
+      {alerta ? (
+        <div className={`rounded-2xl p-4 border-2 text-left space-y-2 ${alerta.estado === 'en_camino' ? 'bg-emerald-50 border-emerald-400' : 'bg-rose-50 border-rose-400'}`}>
+          <p className="font-extrabold text-base">{alerta.estado === 'en_camino' ? `🏃 ${alerta.atiende || 'Un coordinador'} va en camino` : '🆘 Pedido de ayuda enviado · esperando a coordinación'}</p>
+          <p className="text-xs text-slate-600">{TEXTO_MOTIVO[alerta.motivo] || alerta.motivo}{alerta.detalle ? ` · ${alerta.detalle}` : ''} · {haceCuanto(alerta.created_at)}{alerta.insistencias ? ` · insististe ${alerta.insistencias} vez/veces` : ''}</p>
+          <div className="flex flex-wrap gap-2">
+            {alerta.estado === 'abierta' && <button type="button" onClick={insistir} className="px-3 py-2 bg-rose-600 text-white rounded-xl text-xs font-bold cursor-pointer">🔔 Insistir</button>}
+            <button type="button" onClick={yaSeSoluciono} className="px-3 py-2 bg-white border rounded-xl text-xs font-bold cursor-pointer">✓ Ya se solucionó</button>
+            {tel && <BotonesLlamar texto={config?.telefono_coordinacion} className="px-3 py-2 bg-white border rounded-xl text-xs font-bold" />}
+          </div>
+        </div>
+      ) : (
+        <button type="button" onClick={() => { setAbierto(true); prepararAudioPuerta(); }} className="w-full py-3 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-base shadow cursor-pointer">🆘 Pedir ayuda a coordinación</button>
+      )}
+
+      {abierto && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-end sm:items-center justify-center p-3" onClick={() => !enviando && setAbierto(false)}>
+          <div className="bg-white rounded-2xl w-full max-w-md p-4 space-y-3 text-left" onClick={(e) => e.stopPropagation()}>
+            <h3 className="font-extrabold text-lg">🆘 ¿Qué pasa en tu puesto?</h3>
+            <p className="text-xs text-slate-500">Tocá el motivo. Le llega a coordinación con tu puesto ({puesto}){ultimoCursoRef?.current ? ` y el último curso atendido (${ultimoCursoRef.current})` : ''}.</p>
+            <input type="text" maxLength={120} value={detalle} onChange={(e) => setDetalle(e.target.value)} placeholder={motivo === 'otro' ? 'Contá en pocas palabras qué pasa' : 'Detalle opcional (escribilo antes de tocar el motivo)'} className="w-full px-3 py-2.5 rounded-xl border text-sm" />
+            <div className="grid gap-2">
+              {MOTIVOS_AYUDA.map(([k, i, t]) => (
+                <button key={k} type="button" disabled={enviando} onClick={() => (k === 'otro' ? setMotivo(k) : enviar(k, detalle))} className={`w-full text-left px-3 py-3 rounded-xl border-2 text-sm font-bold cursor-pointer ${motivo === k ? 'border-rose-500 bg-rose-50' : 'border-slate-200 hover:bg-slate-50'}`}>{i} {t}</button>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setAbierto(false)} disabled={enviando} className="flex-1 py-2.5 bg-slate-100 rounded-xl text-sm font-bold cursor-pointer">Cancelar</button>
+              {motivo === 'otro' && <button type="button" disabled={enviando || !detalle.trim()} onClick={() => enviar('otro', detalle.trim())} className="flex-1 py-2.5 bg-rose-600 disabled:opacity-50 text-white rounded-xl text-sm font-bold cursor-pointer">Enviar</button>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {sinRed && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-3" onClick={() => setSinRed(false)}>
+          <div className="bg-white rounded-2xl w-full max-w-sm p-5 space-y-3 text-center" onClick={(e) => e.stopPropagation()}>
+            <p className="text-3xl">📵</p>
+            <h3 className="font-extrabold text-lg">Sin internet: no se pudo avisar</h3>
+            {tel ? (
+              <div className="space-y-2"><BotonesLlamar texto={config?.telefono_coordinacion} className="block w-full py-3 bg-emerald-600 text-white rounded-xl font-extrabold" /></div>
+            ) : <p className="text-sm text-slate-600">Buscá a un coordinador o mandale un mensaje.</p>}
+            <button type="button" onClick={() => setSinRed(false)} className="w-full py-2 bg-slate-100 rounded-xl text-sm font-bold cursor-pointer">Cerrar</button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// Avisos que ven coordinación y administración en cualquier pantalla
+function AvisosCoordinacion({ perfilStaff, notify }) {
+  const yo = nombreStaff(perfilStaff);
+  const [alertas, setAlertas] = useState([]);
+  const [sonidoListo, setSonidoListo] = useState(false);
+  const [verHistorial, setVerHistorial] = useState(false);
+  const [historial, setHistorial] = useState([]);
+  const [minimizado, setMinimizado] = useState(false);
+  const vistasRef = useRef({}); // id -> insistencias ya escuchadas
+  const ultimaAlarmaRef = useRef(0);
+  const sinTablaRef = useRef(false);
+
+  useEffect(() => {
+    const habilitar = () => { prepararAudioPuerta(); setSonidoListo(true); };
+    window.addEventListener('pointerdown', habilitar, { once: true });
+    window.addEventListener('keydown', habilitar, { once: true });
+    return () => { window.removeEventListener('pointerdown', habilitar); window.removeEventListener('keydown', habilitar); };
+  }, []);
+
+  const consultar = async () => {
+    if (sinTablaRef.current) return;
+    try {
+      const { data, error } = await supabase.from('alertas_puerta').select('*').neq('estado', 'resuelta').order('created_at', { ascending: true }).limit(50);
+      if (error) { if (faltaTablaAlertas(error)) sinTablaRef.current = true; return; }
+      const lista = data || [];
+      let hayNovedad = false;
+      lista.forEach((a) => { const antes = vistasRef.current[a.id]; if (antes === undefined || (a.insistencias || 0) > antes) hayNovedad = true; vistasRef.current[a.id] = a.insistencias || 0; });
+      const sinAtender = lista.some((a) => a.estado === 'abierta');
+      const ahora = Date.now();
+      if (hayNovedad || (sinAtender && ahora - ultimaAlarmaRef.current > 30000)) {
+        if (sinAtender || hayNovedad) { sonarPuerta('alarma'); ultimaAlarmaRef.current = ahora; if (hayNovedad) setMinimizado(false); }
+      }
+      setAlertas(lista);
+    } catch (_) { /* sin red */ }
+  };
+  useEffect(() => { consultar(); const t = setInterval(consultar, 5000); return () => clearInterval(t); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const tomar = async (a) => {
+    const { data, error } = await supabase.from('alertas_puerta').update({ estado: 'en_camino', atiende: yo, atendida_at: new Date().toISOString() }).eq('id', a.id).eq('estado', 'abierta').select('id');
+    if (error) { notify('No se pudo: ' + error.message, 'error'); return; }
+    if (!data || !data.length) { notify('Ese pedido ya lo tomó otra persona.', 'warning'); consultar(); return; }
+    supabase.from('logs_sistema').insert({ usuario: yo, modulo: 'Ayuda', accion: 'AYUDA_EN_CAMINO', detalle: `Va a ${a.puesto}: ${TEXTO_MOTIVO[a.motivo] || a.motivo}` }).then(() => {});
+    notify(`Le avisamos a ${a.puesto} que vas en camino.`); consultar();
+  };
+  const resolver = async (a) => {
+    const { error } = await supabase.from('alertas_puerta').update({ estado: 'resuelta', resuelta_at: new Date().toISOString(), resuelta_por: yo }).eq('id', a.id);
+    if (error) { notify('No se pudo: ' + error.message, 'error'); return; }
+    supabase.from('logs_sistema').insert({ usuario: yo, modulo: 'Ayuda', accion: 'AYUDA_RESUELTA', detalle: `${a.puesto}: ${TEXTO_MOTIVO[a.motivo] || a.motivo} (${minutosEntre(a.created_at, new Date())} min)` }).then(() => {});
+    notify('Pedido resuelto.'); consultar();
+  };
+  const abrirHistorial = async () => {
+    const { data, error } = await supabase.from('alertas_puerta').select('*').order('created_at', { ascending: false }).limit(100);
+    if (error) { notify(faltaTablaAlertas(error) ? 'Falta correr el SQL de la v24 (tabla alertas_puerta).' : 'No se pudo leer: ' + error.message, 'error'); return; }
+    setHistorial(data || []); setVerHistorial(true);
+  };
+
+  const hora = (v) => (v ? new Date(v).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }) : '');
+  return (
+    <>
+      <div className="fixed top-2 right-2 z-50 w-[min(420px,calc(100vw-1rem))] space-y-2">
+        {alertas.length > 0 && (minimizado ? (
+          <button type="button" onClick={() => setMinimizado(false)} className="ml-auto block px-4 py-2 rounded-full bg-rose-600 text-white text-sm font-extrabold shadow-xl cursor-pointer animate-pulse">🆘 {alertas.length} pedido(s) de ayuda</button>
+        ) : (
+          <div className="bg-white rounded-2xl shadow-2xl border-2 border-rose-500 p-3 space-y-2 max-h-[70vh] overflow-y-auto">
+            <div className="flex items-center justify-between">
+              <p className="font-extrabold text-rose-700">🆘 Pedidos de ayuda de la Puerta ({alertas.length})</p>
+              <button type="button" onClick={() => setMinimizado(true)} className="text-xs font-bold text-slate-500 cursor-pointer">Minimizar</button>
+            </div>
+            {alertas.map((a) => (
+              <div key={a.id} className={`rounded-xl p-2.5 border text-sm ${a.estado === 'abierta' ? 'bg-rose-50 border-rose-200' : 'bg-emerald-50 border-emerald-200'}`}>
+                <p className="font-extrabold">{a.puesto}{a.curso ? ` · ${a.curso}` : ''}</p>
+                <p>{TEXTO_MOTIVO[a.motivo] || a.motivo}{a.detalle ? ` · “${a.detalle}”` : ''}</p>
+                <p className="text-xs text-slate-500">{haceCuanto(a.created_at)} ({hora(a.created_at)}){a.insistencias ? ` · 🔔 insistió ${a.insistencias}` : ''}{a.estado === 'en_camino' ? ` · 🏃 va ${a.atiende}` : ' · sin atender'}</p>
+                <div className="flex gap-2 mt-1.5">
+                  {a.estado === 'abierta' && <button type="button" onClick={() => tomar(a)} className="px-3 py-1.5 bg-rose-600 text-white rounded-lg text-xs font-bold cursor-pointer">🏃 Voy yo</button>}
+                  <button type="button" onClick={() => resolver(a)} className="px-3 py-1.5 bg-white border rounded-lg text-xs font-bold cursor-pointer">✓ Resuelto</button>
+                </div>
+              </div>
+            ))}
+            <button type="button" onClick={abrirHistorial} className="text-xs font-bold text-[#6B1D2F] underline cursor-pointer">Ver historial</button>
+          </div>
+        ))}
+      </div>
+      <div className="fixed bottom-3 left-3 z-40 flex gap-2">
+        {!sonidoListo && <span className="px-3 py-1.5 rounded-full bg-amber-100 text-amber-800 text-[11px] font-bold shadow">🔕 Tocá cualquier lugar para activar el sonido de los avisos</span>}
+        {alertas.length === 0 && <button type="button" onClick={abrirHistorial} className="px-3 py-1.5 rounded-full bg-white border text-[11px] font-bold text-slate-600 shadow cursor-pointer">🆘 Pedidos de ayuda</button>}
+      </div>
+      {verHistorial && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-3" onClick={() => setVerHistorial(false)}>
+          <div className="bg-white rounded-2xl w-full max-w-3xl p-4 space-y-3 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center"><h3 className="font-extrabold">🆘 Historial de pedidos de ayuda ({historial.length})</h3><button type="button" onClick={() => setVerHistorial(false)} className="px-3 py-1.5 bg-slate-100 rounded-lg text-xs font-bold cursor-pointer">Cerrar</button></div>
+            {historial.length === 0 ? <p className="text-sm text-slate-500">Todavía no hubo pedidos.</p> : (
+              <table className="w-full text-xs">
+                <thead><tr className="text-left text-slate-500"><th className="py-1">Hora</th><th>Puesto</th><th>Motivo</th><th>Atendió</th><th>Llegó en</th><th>Resuelto en</th></tr></thead>
+                <tbody className="divide-y">{historial.map((a) => (
+                  <tr key={a.id}><td className="py-1.5">{hora(a.created_at)}</td><td>{a.puesto}{a.curso ? ` · ${a.curso}` : ''}</td><td>{TEXTO_MOTIVO[a.motivo] || a.motivo}{a.detalle ? ` · ${a.detalle}` : ''}</td><td>{a.atiende || a.resuelta_por || ''}</td><td>{a.atendida_at ? `${minutosEntre(a.created_at, a.atendida_at)} min` : ''}</td><td>{a.resuelta_at ? `${minutosEntre(a.created_at, a.resuelta_at)} min` : a.estado === 'abierta' ? 'abierto' : 'en camino'}</td></tr>
+                ))}</tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 function ModuloPuerta({ config, egresados, invitados, docentes, especiales, recargar, notify, perfilStaff }) {
   const [busqueda, setBusqueda] = useState('');
   const [egresadoSeleccionado, setEgresadoSeleccionado] = useState(null);
@@ -1708,13 +2041,30 @@ function ModuloPuerta({ config, egresados, invitados, docentes, especiales, reca
     return 'Otro';
   })();
   const ETIQUETA_TIPO = { egresado: 'egresado', invitado: 'familiar', docente: 'docente', vip: 'VIP' };
-  const logPuerta = (accion, detalle) => {
+  // Formato fijo para estadística: [MÉTODO] [tipo] [curso] [N pers] [segundos desde el registro anterior en este celular] texto [dispositivo]
+  const metodoRef = useRef('CAMARA');
+  const ultimoRegistroRef = useRef(0);
+  const ultimoCursoRef = useRef('');
+  const ayudaApiRef = useRef(null);
+  const fallosSeguidosRef = useRef(0);
+  const busqFallidasRef = useRef([]); // búsquedas manuales sin resultado: [{t, ms}]
+  const logPuerta = (accion, detalle, meta = {}) => {
     try {
+      if (meta.curso && meta.curso !== '-') ultimoCursoRef.current = meta.curso;
+      if (['NO_ENCONTRADO', 'ERROR'].includes(accion)) {
+        fallosSeguidosRef.current += 1;
+        if (fallosSeguidosRef.current === 3 && ayudaApiRef.current) ayudaApiRef.current.automatica();
+      } else if (/^INGRESO/.test(accion)) { fallosSeguidosRef.current = 0; busqFallidasRef.current = []; }
+      const ahoraMs = Date.now();
+      const dif = ultimoRegistroRef.current ? Math.round((ahoraMs - ultimoRegistroRef.current) / 1000) : null;
+      ultimoRegistroRef.current = ahoraMs;
+      const seg = dif !== null && dif <= 600 ? `${dif} s` : '-';
+      const etiqueta = `[${meta.metodo || metodoRef.current || 'CAMARA'}] [${meta.tipo || '-'}] [${meta.curso || '-'}] [${meta.personas || 0} pers] [${seg}]`;
       supabase.from('logs_sistema').insert({
         usuario: perfilRef.current?.nombre || perfilRef.current?.email || 'Puerta',
         accion,
         modulo: 'Puerta',
-        detalle: `${detalle} [${dispositivo}]`,
+        detalle: `${etiqueta} ${detalle} [${dispositivo}]`,
       }).then(({ error }) => { if (error) console.error('No se pudo registrar el log de Puerta:', error); });
     } catch (e) {
       console.error(e);
@@ -1767,9 +2117,9 @@ function ModuloPuerta({ config, egresados, invitados, docentes, especiales, reca
         const tipoManual = { egresados: 'egresado', invitados: 'familiar', docentes: 'docente', invitados_especiales: 'VIP' }[tabla] || tabla;
         if (!ok) {
           notify('Ya figuraba como presente (lo registró otro dispositivo).', 'warning');
-          logPuerta('DUPLICADO', `Manual: ${tipoManual} ${item.nombre_completo} ya figuraba presente`);
+          logPuerta('DUPLICADO', `Manual: ${tipoManual} ${item.nombre_completo} (DNI ${item.dni || 'S/D'}) ya figuraba presente`, { metodo: 'MANUAL', tipo: tipoManual, curso: tabla === 'egresados' ? item.division : anf?.division });
         } else {
-          logPuerta('INGRESO_MANUAL', `${tipoManual} ${item.nombre_completo} (DNI ${item.dni || 'S/D'})`);
+          logPuerta('INGRESO_MANUAL', `${tipoManual} ${item.nombre_completo} (DNI ${item.dni || 'S/D'})`, { metodo: 'MANUAL', tipo: tipoManual, curso: tabla === 'egresados' ? item.division : anf?.division, personas: 1 });
         }
       } else {
         if (!window.confirm(`¿Quitar el ingreso de ${item.nombre_completo}?`)) return;
@@ -1781,7 +2131,7 @@ function ModuloPuerta({ config, egresados, invitados, docentes, especiales, reca
           ({ error } = await supabase.from(tabla).update(base).eq('id', item.id));
         }
         if (error) throw error;
-        logPuerta('QUITAR_INGRESO', `${item.nombre_completo} (DNI ${item.dni || 'S/D'})`);
+        logPuerta('QUITAR_INGRESO', `${item.nombre_completo} (DNI ${item.dni || 'S/D'})`, { metodo: 'MANUAL' });
       }
       await recargar();
     } catch (err) {
@@ -1798,7 +2148,7 @@ function ModuloPuerta({ config, egresados, invitados, docentes, especiales, reca
       for (const g of pendientes) {
         if (await marcarIngreso('invitados', g.id, { hora_ingreso: new Date().toISOString() })) nuevos.push(g.nombre_completo);
       }
-      logPuerta('INGRESO_GRUPAL', `Manual: grupo de ${egr.nombre_completo}: ${nuevos.join(', ') || '(ya habían ingresado)'}`);
+      logPuerta('INGRESO_GRUPAL', `Manual: grupo de ${egr.nombre_completo} (DNI ${egr.dni || 'S/D'}): ${nuevos.join(', ') || '(ya habían ingresado)'}`, { metodo: 'MANUAL', tipo: 'grupo', curso: egr.division, personas: nuevos.length });
       notify(nuevos.length ? `✓ Ingresaron ${nuevos.length} integrante(s) del grupo.` : 'Ya figuraban todos como presentes.', nuevos.length ? undefined : 'warning');
       await recargar();
     } catch (err) {
@@ -1806,7 +2156,7 @@ function ModuloPuerta({ config, egresados, invitados, docentes, especiales, reca
     }
   };
 
-  const validarCodigoEntrada = async (codigoRaw) => {
+  const validarCodigoEntrada = async (codigoRaw, origen = 'CAMARA') => {
     const raw = String(codigoRaw || '').trim();
     if (!raw) return;
 
@@ -1816,6 +2166,7 @@ function ModuloPuerta({ config, egresados, invitados, docentes, especiales, reca
     if (ultimoEscaneoRef.current.code === raw && ahora - ultimoEscaneoRef.current.t < 4000) return;
     ultimoEscaneoRef.current = { code: raw, t: ahora };
     procesandoRef.current = true;
+    metodoRef.current = origen;
 
     const avisar = (msg, tipo) => notifyRef.current(msg, tipo);
 
@@ -1862,7 +2213,7 @@ function ModuloPuerta({ config, egresados, invitados, docentes, especiales, reca
         if (hallado.tipo !== 'egresado') {
           setResultadoIngreso({ tipo: 'error', titulo: '❌ GRUPO NO ENCONTRADO', nombre: raw, detalle: 'No se encontró al egresado de este grupo. Usá la búsqueda manual.' });
           avisar('❌ Grupo no encontrado. Usá la búsqueda manual.', 'error');
-          logPuerta('NO_ENCONTRADO', `QR de grupo: ${raw.slice(0, 60)}`);
+          logPuerta('NO_ENCONTRADO', `QR de grupo: ${raw.slice(0, 60)}`, { tipo: 'grupo' });
           return;
         }
         const acceso = accesoPuertaDe('grupo', f, egrsLocal);
@@ -1870,7 +2221,7 @@ function ModuloPuerta({ config, egresados, invitados, docentes, especiales, reca
         if (f.activo === false) {
           setResultadoIngreso({ tipo: 'warning', titulo: '⛔ EL EGRESADO DIO DE BAJA SU ASISTENCIA', nombre: nombreGrupo, detalle: 'Al darse de baja se liberaron también las plazas de su grupo. Consultar con coordinación antes de dejarlos pasar.', acceso });
           avisar(`⛔ ${nombreGrupo}: el egresado figura como "No asiste". Consultar con coordinación.`, 'warning');
-          logPuerta('BLOQUEADO_NO_ASISTE', `grupo de ${f.nombre_completo} (DNI ${f.dni || 'S/D'})`);
+          logPuerta('BLOQUEADO_NO_ASISTE', `grupo de ${f.nombre_completo} (DNI ${f.dni || 'S/D'})`, { tipo: 'grupo', curso: f.division });
           return;
         }
         const { data: dg, error: eg } = await supabase.from('invitados').select('id, nombre_completo, asistio, movilidad_reducida').eq('egresado_id', f.id).eq('es_grupal', true);
@@ -1879,7 +2230,7 @@ function ModuloPuerta({ config, egresados, invitados, docentes, especiales, reca
         if (grupales.length === 0) {
           setResultadoIngreso({ tipo: 'warning', titulo: '⚠️ GRUPO SIN INTEGRANTES', nombre: nombreGrupo, detalle: 'Este egresado no tiene invitados marcados "en grupo". Buscá a cada invitado en la búsqueda manual.', acceso });
           avisar(`⚠️ ${nombreGrupo} no tiene integrantes cargados.`, 'warning');
-          logPuerta('NO_ENCONTRADO', `grupo de ${f.nombre_completo} sin integrantes`);
+          logPuerta('NO_ENCONTRADO', `grupo de ${f.nombre_completo} (DNI ${f.dni || 'S/D'}) sin integrantes`, { tipo: 'grupo', curso: f.division });
           return;
         }
         const nuevos = [];
@@ -1898,11 +2249,11 @@ function ModuloPuerta({ config, egresados, invitados, docentes, especiales, reca
           const faltaban = nuevos.length < grupales.length;
           setResultadoIngreso({ tipo: faltaban ? 'warning' : 'success', titulo: faltaban ? `✓ INGRESAN ${nuevos.length} DE ${grupales.length} (los demás ya habían ingresado)` : `✓ INGRESO GRUPO FAMILIAR (${nuevos.length})`, nombre: nombreGrupo, detalle: textoCurso(f), acceso, lista, movilidad: conMovilidad > 0 });
           avisar(`✓ INGRESO PERMITIDO: ${nombreGrupo} (${nuevos.length} persona/s)`, faltaban ? 'warning' : undefined);
-          logPuerta('INGRESO_GRUPAL', `grupo de ${f.nombre_completo}: ${grupales.filter((g) => nuevos.includes(g.id)).map((g) => g.nombre_completo).join(', ')}`);
+          logPuerta('INGRESO_GRUPAL', `grupo de ${f.nombre_completo} (DNI ${f.dni || 'S/D'}): ${grupales.filter((g) => nuevos.includes(g.id)).map((g) => g.nombre_completo).join(', ')}`, { tipo: 'grupo', curso: f.division, personas: nuevos.length });
         } else {
           setResultadoIngreso({ tipo: 'error', titulo: '¡ALERTA DUPLICADO! EL GRUPO YA INGRESÓ', nombre: nombreGrupo, detalle: `Los ${grupales.length} integrantes ya figuraban como presentes.`, acceso, lista });
           avisar(`⚠️ ¡ALERTA DUPLICADO! ${nombreGrupo} ya ingresó.`, 'error');
-          logPuerta('DUPLICADO', `grupo de ${f.nombre_completo} ya había ingresado`);
+          logPuerta('DUPLICADO', `grupo de ${f.nombre_completo} (DNI ${f.dni || 'S/D'}) ya había ingresado`, { tipo: 'grupo', curso: f.division });
         }
         return;
       }
@@ -1913,10 +2264,12 @@ function ModuloPuerta({ config, egresados, invitados, docentes, especiales, reca
       acceso.ubicacion = hallado.tipo === 'docente' && f.ocupa_butaca === false ? 'No ocupa butaca'
         : ubicacionPara({ tipo: hallado.tipo, egr: hallado.tipo === 'invitado' ? egrsLocal.find((e) => e.id === f.egresado_id) : null, movilidad }, configRef.current);
 
+      const cursoH = hallado.tipo === 'egresado' ? f.division : hallado.tipo === 'invitado' ? (egrsLocal.find((e) => e.id === f.egresado_id) || {}).division : '';
+      const metaH = { tipo: ETIQUETA_TIPO[hallado.tipo], curso: cursoH };
       if (hallado.tipo !== 'invitado' && f.activo === false) {
         setResultadoIngreso({ tipo: 'warning', titulo: '⛔ FIGURA COMO "NO ASISTE"', nombre: f.nombre_completo, detalle: 'Dio de baja su asistencia. Consultar con coordinación antes de dejarlo pasar.' });
         avisar(`⛔ ${f.nombre_completo} figura como "No asiste". Consultar con coordinación.`, 'warning');
-        logPuerta('BLOQUEADO_NO_ASISTE', `${ETIQUETA_TIPO[hallado.tipo]} ${f.nombre_completo} (DNI ${f.dni || 'S/D'})`);
+        logPuerta('BLOQUEADO_NO_ASISTE', `${ETIQUETA_TIPO[hallado.tipo]} ${f.nombre_completo} (DNI ${f.dni || 'S/D'})`, metaH);
         return;
       }
       // Invitado individual de un egresado que se dio de baja: su plaza quedó liberada
@@ -1924,7 +2277,7 @@ function ModuloPuerta({ config, egresados, invitados, docentes, especiales, reca
       if (hallado.tipo === 'invitado' && anfitrion && anfitrion.activo === false) {
         setResultadoIngreso({ tipo: 'warning', titulo: '⛔ SU EGRESADO DIO DE BAJA LA ASISTENCIA', nombre: f.nombre_completo, detalle: `Invitado/a de ${anfitrion.nombre_completo}. Al darse de baja se liberaron las plazas de su grupo. Consultar con coordinación.`, acceso });
         avisar(`⛔ ${f.nombre_completo}: su egresado figura como "No asiste". Consultar con coordinación.`, 'warning');
-        logPuerta('BLOQUEADO_NO_ASISTE', `familiar ${f.nombre_completo} (egresado ${anfitrion.nombre_completo} dado de baja)`);
+        logPuerta('BLOQUEADO_NO_ASISTE', `familiar ${f.nombre_completo} (DNI ${f.dni || 'S/D'}) (egresado ${anfitrion.nombre_completo} dado de baja)`, metaH);
         return;
       }
       const detalleExtra = hallado.tipo === 'invitado'
@@ -1937,9 +2290,9 @@ function ModuloPuerta({ config, egresados, invitados, docentes, especiales, reca
       if (ok) {
         setResultadoIngreso({ tipo: 'success', titulo: c.okTitulo, nombre: f.nombre_completo, detalle: detalleExtra, acceso, movilidad });
         avisar(`✓ INGRESO PERMITIDO: ${f.nombre_completo}`);
-        logPuerta('INGRESO', `${ETIQUETA_TIPO[hallado.tipo]} ${f.nombre_completo} (DNI ${f.dni || 'S/D'})`);
+        logPuerta('INGRESO', `${ETIQUETA_TIPO[hallado.tipo]} ${f.nombre_completo} (DNI ${f.dni || 'S/D'})`, { ...metaH, personas: 1 });
       } else {
-        logPuerta('DUPLICADO', `${ETIQUETA_TIPO[hallado.tipo]} ${f.nombre_completo} (DNI ${f.dni || 'S/D'}) ya había ingresado`);
+        logPuerta('DUPLICADO', `${ETIQUETA_TIPO[hallado.tipo]} ${f.nombre_completo} (DNI ${f.dni || 'S/D'}) ya había ingresado`, metaH);
         setResultadoIngreso({ tipo: c.dupTipo, titulo: c.dupTitulo, nombre: f.nombre_completo, detalle: c.dupDetalle ? c.dupDetalle(f) : detalleExtra, acceso, movilidad });
         avisar(c.dupToast(f), c.dupTipo === 'error' ? 'error' : 'warning');
       }
@@ -2034,9 +2387,31 @@ function ModuloPuerta({ config, egresados, invitados, docentes, especiales, reca
   const docentesCoincidentes = termino ? docentes.filter((d) => coincideTexto([d.nombre_completo, d.dni], busqueda)) : [];
   const invitadosCoincidentes = termino ? invitados.filter((i) => coincideTexto([i.nombre_completo, i.dni, i.numero_entrada], busqueda)) : [];
   const vipsCoincidentes = termino ? especiales.filter((v) => coincideTexto([v.nombre_completo, v.dni], busqueda)) : [];
+  const totalCoincidencias = egresadosCoincidentes.length + docentesCoincidentes.length + invitadosCoincidentes.length + vipsCoincidentes.length;
+  // Búsqueda manual que queda sin resultados 4 s: se registra; si pasa 2 veces seguidas (distintas búsquedas, en menos de 3 min) se avisa solo a coordinación
+  useEffect(() => {
+    const t = busqueda.trim();
+    if (t.length < 4 || totalCoincidencias > 0) return undefined;
+    const h = setTimeout(() => {
+      const ahora = Date.now();
+      const lista = busqFallidasRef.current.filter((x) => ahora - x.ms < 180000);
+      const norm = (v) => sinTildes(v).toLowerCase().replace(/[\s.]/g, '');
+      const ult = lista[lista.length - 1];
+      if (ult && (norm(t).startsWith(norm(ult.t)) || norm(ult.t).startsWith(norm(t)))) lista[lista.length - 1] = { t, ms: ahora };
+      else lista.push({ t, ms: ahora });
+      busqFallidasRef.current = lista;
+      logPuerta('NO_ENCONTRADO_MANUAL', `Búsqueda manual sin resultados: "${t}"`, { metodo: 'MANUAL' });
+      if (lista.length >= 2 && ayudaApiRef.current) {
+        ayudaApiRef.current.automatica('auto_manual', 'Buscaron: ' + lista.slice(-3).map((x) => `"${x.t}"`).join(', '));
+        busqFallidasRef.current = [];
+      }
+    }, 4000);
+    return () => clearTimeout(h);
+  }, [busqueda, totalCoincidencias]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="max-w-xl mx-auto space-y-4">
+      <AyudaPuerta perfilStaff={perfilStaff} dispositivo={dispositivo} config={config} notify={notify} ultimoCursoRef={ultimoCursoRef} registrarApi={ayudaApiRef} />
       <div className="bg-slate-900 text-white rounded-2xl p-4 sm:p-6 space-y-4 shadow-xl text-center">
         <div>
           <div className="flex justify-end">
@@ -2119,7 +2494,7 @@ function ModuloPuerta({ config, egresados, invitados, docentes, especiales, reca
             if (e.key === 'Enter') {
               e.preventDefault();
               const c = codigoManual.trim();
-              if (c) { validarCodigoEntrada(c); setCodigoManual(''); }
+              if (c) { validarCodigoEntrada(c, 'TIPEADO'); setCodigoManual(''); }
             }
           }}
           placeholder="Escaneá o escribí el código y apretá Enter..."
@@ -2223,11 +2598,251 @@ function ModuloPuerta({ config, egresados, invitados, docentes, especiales, reca
               </div>
             ))}
             {termino && egresadosCoincidentes.length + docentesCoincidentes.length + invitadosCoincidentes.length + vipsCoincidentes.length === 0 && (
-              <p className="text-center text-slate-400 text-sm py-4">No se encontraron resultados.</p>
+              <div className="text-center py-3 space-y-2">
+                <p className="text-slate-400 text-sm">No se encontraron resultados exactos.</p>
+                <button type="button" onClick={() => ayudaApiRef.current && ayudaApiRef.current.pedir('no_figura', `Buscado: "${busqueda.trim()}"`)} className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-sm font-extrabold cursor-pointer">🆘 No lo encuentro: avisar a coordinación</button>
+              </div>
             )}
+            {termino && termino.length >= 3 && (() => {
+              const yaVistos = new Set([...egresadosCoincidentes, ...docentesCoincidentes, ...invitadosCoincidentes, ...vipsCoincidentes].map((x) => x.id));
+              const par = buscarPersonas(busqueda, { egresados, invitados, docentes, especiales }).parecidos.filter((r) => !yaVistos.has(r.item.id)).slice(0, 6);
+              if (!par.length) return null;
+              const porIdP = {}; egresados.forEach((e) => { porIdP[e.id] = e; });
+              return (
+                <div className="mt-2 p-3 rounded-xl bg-amber-50 border border-amber-200 space-y-1.5">
+                  <p className="text-xs font-bold text-amber-800">¿Quisiste decir…? (DNI o nombre parecido: puede haber un error de carga)</p>
+                  {par.map((r) => {
+                    const anf = r.clase === 'invitado' ? porIdP[r.item.egresado_id] : null;
+                    return (
+                      <button key={r.clase + r.item.id} type="button" onClick={() => setBusqueda(r.item.dni ? String(r.item.dni) : r.item.nombre_completo)} className="w-full text-left px-2.5 py-2 bg-white border rounded-lg text-xs flex flex-wrap gap-x-2 items-center cursor-pointer hover:bg-amber-100">
+                        <span>{CLASE_PERSONA[r.clase].i}</span><b>{r.item.nombre_completo}</b>
+                        <span>DNI <DniMarcado dni={r.item.dni} marcas={r.marcas} /></span>
+                        {anf && <span className="text-slate-500">de {anf.nombre_completo}{anf.division ? ` (${anf.division})` : ''}</span>}
+                        <span className="text-amber-700 font-bold">⚠ {r.motivo}</span>
+                      </button>
+                    );
+                  })}
+                  <p className="text-[11px] text-amber-800">Antes de dejar pasar, confirmá nombre y DNI con la persona. Si hay un error, avisá a coordinación para corregirlo.</p>
+                </div>
+              );
+            })()}
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ---------- Ficha de persona: busca a cualquiera del sistema y muestra todo lo que pasó con esa persona ----------
+const TABLA_DE_CLASE = { egresado: 'egresados', invitado: 'invitados', docente: 'docentes', vip: 'invitados_especiales' };
+function FichaPersona({ egresados, invitados, docentes, especiales, solicitudes, usuariosSistema, perfilStaff, config, recargar, notify, abrirEditar }) {
+  const [consulta, setConsulta] = useState('');
+  const [sel, setSel] = useState(null); // {clase, id}
+  const [historia, setHistoria] = useState({ cargando: false, filas: [], error: '' });
+  const esAdmin = perfilStaff?.rol === 'admin';
+  const res = buscarPersonas(consulta, { egresados, invitados, docentes, especiales, personal: esAdmin ? usuariosSistema : [] });
+  const lista = { egresado: egresados, invitado: invitados, docente: docentes, vip: especiales, personal: usuariosSistema };
+  const item = sel ? (lista[sel.clase] || []).find((x) => x.id === sel.id) : null;
+  const porId = {}; egresados.forEach((e) => { porId[e.id] = e; });
+  const anfitrion = item && sel.clase === 'invitado' ? porId[item.egresado_id] : null;
+  const egrDe = sel?.clase === 'egresado' ? item : anfitrion;
+  const hora = (v) => { if (!v) return ''; const d = new Date(v); return isNaN(d.getTime()) ? '' : d.toLocaleString('es-AR'); };
+
+  const cargarHistoria = async () => {
+    if (!item) return;
+    setHistoria({ cargando: true, filas: [], error: '' });
+    try {
+      const claves = [];
+      const dni = soloDigitos(item.dni);
+      if (dni.length >= 4) claves.push(dni);
+      const nombre = String(item.nombre_completo || item.nombre || '').trim();
+      if (nombre.length >= 4) claves.push(nombre);
+      if (sel.clase === 'personal' && item.email) claves.push(item.email);
+      const vistos = new Map();
+      for (const k of claves) {
+        const patron = `%${k.replace(/[%_]/g, '')}%`;
+        for (const col of ['detalle', 'usuario']) {
+          const { data, error } = await supabase.from('logs_sistema').select('*').ilike(col, patron).order('created_at', { ascending: true }).limit(500);
+          if (error) throw error;
+          (data || []).forEach((l) => vistos.set(l.id, l));
+        }
+      }
+      const filas = [...vistos.values()].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+      setHistoria({ cargando: false, filas, error: '' });
+    } catch (err) {
+      setHistoria({ cargando: false, filas: [], error: 'No se pudo leer el registro: ' + (err.message || err) });
+    }
+  };
+  useEffect(() => { if (item) cargarHistoria(); else setHistoria({ cargando: false, filas: [], error: '' }); }, [sel?.clase, sel?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const ultimoIngresoLog = [...historia.filas].reverse().find((l) => l.modulo === 'Puerta' && ['INGRESO', 'INGRESO_MANUAL', 'INGRESO_GRUPAL'].includes(l.accion));
+  const datoIngreso = ultimoIngresoLog ? leerLogPuerta(ultimoIngresoLog) : null;
+  const NOMBRE_METODO = { CAMARA: 'escaneo del QR con la cámara', TIPEADO: 'DNI o código tipeado', MANUAL: 'búsqueda manual', COORDINACION: 'coordinación' };
+
+  const marcar = async (presente) => {
+    if (!item || sel.clase === 'personal') return;
+    const tabla = TABLA_DE_CLASE[sel.clase];
+    const tipoTxt = { egresado: 'egresado', invitado: 'familiar', docente: 'docente', vip: 'VIP' }[sel.clase];
+    if (presente && (item.activo === false || anfitrion?.activo === false) && !window.confirm(`${item.nombre_completo} ${anfitrion?.activo === false ? 'es invitado/a de un egresado que dio de baja su asistencia' : 'figura como "No asiste"'}.\n\n¿Registrar el ingreso igual?`)) return;
+    if (!window.confirm(presente ? `¿Registrar el ingreso de ${item.nombre_completo}?` : `¿Quitar el ingreso de ${item.nombre_completo}?`)) return;
+    try {
+      const ahora = new Date().toISOString();
+      const extra = presente ? (tabla === 'invitados' ? { hora_ingreso: ahora } : TABLAS_HORA_REAL.includes(tabla) ? { hora_ingreso_real: ahora } : {}) : (tabla === 'invitados' ? { hora_ingreso: null } : TABLAS_HORA_REAL.includes(tabla) ? { hora_ingreso_real: null } : {});
+      let q = supabase.from(tabla).update({ asistio: presente, ...extra }).eq('id', item.id);
+      if (presente) q = q.or('asistio.is.null,asistio.eq.false');
+      const { data, error } = await q.select('id');
+      if (error) throw error;
+      if (presente && (!data || data.length === 0)) { notify('Ya figuraba como presente.', 'warning'); return; }
+      const curso = egrDe?.division || '-';
+      await supabase.from('logs_sistema').insert({ usuario: perfilStaff?.nombre || perfilStaff?.email || 'Coordinación', modulo: 'Puerta', accion: presente ? 'INGRESO_MANUAL' : 'QUITAR_INGRESO',
+        detalle: `[COORDINACION] [${tipoTxt}] [${curso}] [${presente ? 1 : 0} pers] [-] ${tipoTxt} ${item.nombre_completo} (DNI ${item.dni || 'S/D'}) [Administración]` });
+      notify(presente ? `✓ Ingreso registrado: ${item.nombre_completo}` : `Ingreso quitado: ${item.nombre_completo}`);
+      await recargar(); cargarHistoria();
+    } catch (err) {
+      notify('No se pudo guardar: ' + (err.message || err), 'error');
+    }
+  };
+  const descargarQR = () => {
+    if (!item) return;
+    if (sel.clase === 'egresado') paseEgresado(item, config);
+    else if (sel.clase === 'docente') paseDocente(item, config);
+    else if (sel.clase === 'vip') paseVip(item, config);
+    else if (sel.clase === 'invitado') {
+      if (esGrupal(item) && anfitrion) paseGrupo(anfitrion, invitados.filter((i) => i.egresado_id === anfitrion.id && esGrupal(i)), config);
+      else paseInvitado(item, anfitrion, config);
+    }
+  };
+
+  const Chip = ({ children, className = '' }) => <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${className}`}>{children}</span>;
+  const Resultado = ({ r }) => {
+    const k = CLASE_PERSONA[r.clase]; const anf = r.clase === 'invitado' ? porId[r.item.egresado_id] : null;
+    const curso = r.clase === 'egresado' ? r.item.division : anf?.division;
+    return (
+      <button type="button" onClick={() => setSel({ clase: r.clase, id: r.item.id })} className={`w-full text-left p-2.5 rounded-xl border flex flex-wrap items-center gap-2 cursor-pointer hover:bg-slate-50 ${sel?.id === r.item.id ? 'ring-2 ring-[#6B1D2F]' : ''}`}>
+        <span className="text-lg">{k.i}</span>
+        <span className="font-bold text-sm">{r.item.nombre_completo || r.item.nombre}</span>
+        <span className="text-xs text-slate-600">DNI <DniMarcado dni={r.item.dni} marcas={r.marcas} /></span>
+        <Chip className="bg-slate-100 text-slate-700">{k.t}</Chip>
+        {curso && <Chip className="bg-rose-50 text-[#6B1D2F]">{curso}</Chip>}
+        {anf && <span className="text-xs text-slate-500">de {anf.nombre_completo}</span>}
+        {!r.exacto && r.motivo && <Chip className="bg-amber-100 text-amber-800">⚠ {r.motivo}</Chip>}
+        {r.item.asistio && <Chip className="bg-emerald-100 text-emerald-800">✓ ingresó</Chip>}
+      </button>
+    );
+  };
+
+  return (
+    <div className="bg-white rounded-2xl border p-5 space-y-4">
+      <div>
+        <h3 className="font-bold">🔎 Buscar persona · ¿qué pasó con…?</h3>
+        <p className="text-xs text-slate-500">Escribí un DNI (aunque sea parte) o un nombre. Busca en egresados, invitados, docentes y VIP{esAdmin ? ', y en el personal del sistema' : ''}. Abajo aparecen también los <b>parecidos</b>, por si el DNI o el nombre se cargaron con un error.</p>
+      </div>
+      <input type="text" autoFocus value={consulta} onChange={(e) => { setConsulta(e.target.value); setSel(null); }} placeholder="Ej: 30125648 o Gómez Sofía" className="w-full px-4 py-3 rounded-xl border-2 border-[#6B1D2F]/40 text-base outline-none focus:border-[#6B1D2F]" />
+      {consulta.trim().length >= 2 && !item && (
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <p className="text-xs font-bold text-slate-600 uppercase">Coincidencias ({res.exactos.length})</p>
+            {res.exactos.length === 0 && <p className="text-xs text-slate-400">No hay coincidencias exactas.</p>}
+            {res.exactos.slice(0, 40).map((r) => <Resultado key={r.clase + r.item.id} r={{ ...r, exacto: true }} />)}
+          </div>
+          {res.parecidos.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-xs font-bold text-amber-700 uppercase">Parecidos · posible error de carga ({res.parecidos.length})</p>
+              {res.parecidos.map((r) => <Resultado key={'p' + r.clase + r.item.id} r={{ ...r, exacto: false }} />)}
+            </div>
+          )}
+        </div>
+      )}
+      {item && (() => {
+        const k = CLASE_PERSONA[sel.clase];
+        const misInv = sel.clase === 'egresado' ? invitados.filter((i) => i.egresado_id === item.id) : [];
+        const miSol = egrDe ? (solicitudes || []).filter((x) => x.egresado_id === egrDe.id) : [];
+        const horaIngreso = item.asistio ? hora(item.hora_ingreso_real || item.hora_ingreso) : '';
+        return (
+          <div className="border-2 rounded-2xl p-4 space-y-4" style={{ borderColor: k.c }}>
+            <div className="flex flex-wrap justify-between gap-2">
+              <div>
+                <p className="text-xs font-bold uppercase" style={{ color: k.c }}>{k.i} {k.t}</p>
+                <h4 className="text-xl font-extrabold">{item.nombre_completo || item.nombre}</h4>
+                <p className="text-sm text-slate-600">DNI {item.dni ? <span className="font-mono">{item.dni}</span> : 'sin DNI'}{sel.clase === 'personal' ? ` · ${item.email} · rol ${item.rol}` : ''}</p>
+                <div className="flex flex-wrap gap-1.5 mt-1.5">
+                  {egrDe && textoCurso(egrDe) && <Chip className="bg-rose-50 text-[#6B1D2F]">{textoCurso(egrDe)}</Chip>}
+                  {item.activo === false && <Chip className="bg-rose-100 text-rose-700">NO ASISTE</Chip>}
+                  {anfitrion?.activo === false && <Chip className="bg-rose-100 text-rose-700">su egresado: NO ASISTE</Chip>}
+                  {tieneMovilidad(item) && <Chip className="bg-amber-100 text-amber-800">♿ movilidad reducida</Chip>}
+                  {sel.clase === 'invitado' && <Chip className="bg-indigo-50 text-indigo-700">{esGrupal(item) ? 'Entra en grupo' : 'Entra con QR individual'}</Chip>}
+                  {sel.clase === 'docente' && <Chip className="bg-slate-100 text-slate-700">{item.ocupa_butaca === false ? 'Sin butaca' : 'Con butaca'}</Chip>}
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2 items-start">
+                <button type="button" onClick={() => setSel(null)} className="px-3 py-2 bg-white border rounded-xl text-xs font-bold cursor-pointer">← Volver a la búsqueda</button>
+                {sel.clase !== 'personal' && <button type="button" onClick={descargarQR} className="px-3 py-2 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold cursor-pointer">⬇ Descargar QR</button>}
+                {sel.clase !== 'personal' && (item.asistio
+                  ? <button type="button" onClick={() => marcar(false)} className="px-3 py-2 bg-white border border-rose-300 text-rose-700 rounded-xl text-xs font-bold cursor-pointer">Quitar ingreso</button>
+                  : <button type="button" onClick={() => marcar(true)} className="px-3 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold cursor-pointer">✓ Marcar ingreso</button>)}
+                {sel.clase !== 'personal' && abrirEditar && <button type="button" onClick={() => abrirEditar(sel.clase === 'invitado' ? 'egresado' : sel.clase, sel.clase === 'invitado' ? anfitrion : item)} className="px-3 py-2 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl text-xs font-bold cursor-pointer">✏️ {sel.clase === 'invitado' ? 'Editar (en su egresado)' : 'Editar / corregir DNI'}</button>}
+              </div>
+            </div>
+
+            {sel.clase !== 'personal' && (
+              <div className={`p-3 rounded-xl text-sm ${item.asistio ? 'bg-emerald-50 border border-emerald-200' : 'bg-slate-50 border'}`}>
+                {item.asistio
+                  ? <p><b>✓ Ingresó</b>{horaIngreso ? ` el ${horaIngreso}` : ''}{datoIngreso ? ` · por ${ultimoIngresoLog.usuario || '—'} (${NOMBRE_METODO[datoIngreso.metodo] || datoIngreso.metodo})` : ''}.</p>
+                  : <p><b>Todavía no ingresó.</b> Acceso: {sel.clase === 'egresado' ? ACCESO_TEXTO.egresados.toLowerCase() : sel.clase === 'invitado' ? accesoFamiliaDe(anfitrion).toLowerCase() : ACCESO_TEXTO.abajo.toLowerCase()}{ubicacionPara({ tipo: sel.clase === 'vip' ? 'vip' : sel.clase, egr: anfitrion, movilidad: tieneMovilidad(item) }, config) ? ` · ${ubicacionPara({ tipo: sel.clase === 'vip' ? 'vip' : sel.clase, egr: anfitrion, movilidad: tieneMovilidad(item) }, config)}` : ''}.</p>}
+              </div>
+            )}
+
+            {sel.clase === 'invitado' && anfitrion && (
+              <div className="text-sm space-y-1">
+                <p><b>Invitado/a de:</b> <button type="button" onClick={() => setSel({ clase: 'egresado', id: anfitrion.id })} className="underline font-semibold text-[#6B1D2F] cursor-pointer">{anfitrion.nombre_completo}</button> (DNI {anfitrion.dni}) · celular {anfitrion.celular || 'S/N'}</p>
+                <p className="text-xs text-slate-500">N° de entrada {item.numero_entrada || '—'}</p>
+              </div>
+            )}
+            {sel.clase === 'egresado' && (
+              <div className="text-sm space-y-2">
+                <p>Celular <b>{item.celular || 'S/N'}</b> · cupo <b>{cupoDe(item, config)}</b> · invitados cargados <b>{misInv.length}</b>{item.portal_ultimo_ingreso ? ` · entró al portal ${item.portal_ingresos || 1} vez/veces (última ${hora(item.portal_ultimo_ingreso)})` : ' · nunca entró al portal'}</p>
+                {misInv.length > 0 && (
+                  <div className="divide-y border rounded-xl">
+                    {misInv.map((i) => (
+                      <button key={i.id} type="button" onClick={() => setSel({ clase: 'invitado', id: i.id })} className="w-full text-left px-3 py-2 text-xs flex flex-wrap gap-2 items-center hover:bg-slate-50 cursor-pointer">
+                        <b>{i.nombre_completo}</b><span className="font-mono text-slate-500">{i.dni}</span>
+                        <Chip className="bg-indigo-50 text-indigo-700">{esGrupal(i) ? 'en grupo' : 'individual'}</Chip>
+                        {tieneMovilidad(i) && <Chip className="bg-amber-100 text-amber-800">♿</Chip>}
+                        {i.asistio ? <Chip className="bg-emerald-100 text-emerald-800">✓ ingresó {hora(i.hora_ingreso)}</Chip> : <Chip className="bg-slate-100 text-slate-500">no ingresó</Chip>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            {miSol.length > 0 && (
+              <p className="text-sm">Solicitud de butacas extra: <b>{miSol.map((x) => `${x.cantidad_solicitada} pedida(s) · ${String(x.estado || '').toLowerCase()}${String(x.estado || '').toLowerCase() === 'aprobada' ? ` (${x.cantidad_aprobada ?? x.cantidad_solicitada} aprobada/s)` : ''}`).join(' / ')}</b></p>
+            )}
+
+            <div className="space-y-2">
+              <div className="flex justify-between items-center">
+                <p className="text-xs font-bold uppercase text-slate-600">Historia en el registro de actividad ({historia.filas.length})</p>
+                <button type="button" onClick={cargarHistoria} className="px-2.5 py-1 bg-white border rounded-lg text-xs font-bold cursor-pointer">↻ Actualizar</button>
+              </div>
+              {historia.cargando && <p className="text-xs text-slate-400">Buscando en el registro…</p>}
+              {historia.error && <p className="text-xs text-rose-600">{historia.error}</p>}
+              {!historia.cargando && !historia.error && historia.filas.length === 0 && <p className="text-xs text-slate-400">{esAdmin ? 'No hay movimientos registrados de esta persona.' : 'El registro de actividad completo solo lo ve administración. Los datos de arriba (ingreso, invitados, QR) sí están al día.'}</p>}
+              <div className="max-h-80 overflow-y-auto divide-y border rounded-xl">
+                {historia.filas.map((l) => {
+                  const p2 = l.modulo === 'Puerta' ? leerLogPuerta(l) : null;
+                  const color = /ERROR|BLOQUEADO|NO_ENCONTRADO/.test(l.accion) ? 'text-rose-700' : /DUPLICADO|QUITAR/.test(l.accion) ? 'text-amber-700' : /INGRESO/.test(l.accion) ? 'text-emerald-700' : 'text-slate-700';
+                  return (
+                    <div key={l.id} className="px-3 py-2 text-xs space-y-0.5">
+                      <p><span className="font-mono text-slate-500">{hora(l.created_at)}</span> · <b className={color}>{l.accion}</b> · {l.modulo} · <span className="text-slate-500">{l.usuario}</span>{p2 && p2.nuevo ? ` · ${NOMBRE_METODO[p2.metodo] || p2.metodo}` : ''}</p>
+                      <p className="text-slate-600 break-words">{p2 ? p2.texto : l.detalle}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -2656,6 +3271,20 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
     } catch (err) {
       const faltaColumna = /video_activo/i.test(err.message || '') || err.code === 'PGRST204' || err.code === '42703';
       notify(faltaColumna ? 'Falta crear la columna "video_activo" en configuracion (SQL de la v22).' : 'Error: ' + err.message, 'error');
+    }
+  };
+
+  const [telCoord, setTelCoord] = useState(config.telefono_coordinacion || '');
+  useEffect(() => { setTelCoord(config.telefono_coordinacion || ''); }, [config.telefono_coordinacion]);
+  const guardarTelCoord = async () => {
+    const v = String(telCoord || '').replace(/[<>]/g, '').trim().slice(0, 150);
+    try {
+      const { error } = await supabase.from('configuracion').update({ telefono_coordinacion: v || null }).eq('id', config.id);
+      if (error) throw error;
+      await registrarLog('CONFIGURACION', 'Teléfono de coordinación', v ? `Teléfono para la Puerta sin internet: ${v}` : 'Se borró el teléfono de coordinación.');
+      await recargar(); notify(v ? 'Teléfono de coordinación guardado.' : 'Teléfono borrado.');
+    } catch (err) {
+      notify(/telefono_coordinacion/i.test(err.message || '') || err.code === 'PGRST204' ? 'Falta correr el SQL de la v24 (columna telefono_coordinacion).' : 'Error: ' + err.message, 'error');
     }
   };
 
@@ -3387,6 +4016,83 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
   };
 
 
+  // Estadística de la Puerta: lee todo el registro de Puerta y arma un Excel por puesto, por curso y cada 5 minutos
+  const exportarEstadisticaPuerta = async () => {
+    try {
+      const XLSX = await import('xlsx');
+      const regs = [];
+      for (let desde = 0; desde < 50000; desde += 1000) {
+        const { data: parte, error } = await supabase.from('logs_sistema').select('*').eq('modulo', 'Puerta').order('created_at', { ascending: true }).range(desde, desde + 999);
+        if (error) throw error;
+        regs.push(...(parte || []));
+        if (!parte || parte.length < 1000) break;
+      }
+      if (regs.length === 0) { notify('Todavía no hay registros de la Puerta.', 'warning'); return; }
+      const filas = regs.map((l) => ({ l, ...leerLogPuerta(l) }));
+      const esIngreso = (r) => ['INGRESO', 'INGRESO_MANUAL', 'INGRESO_GRUPAL'].includes(r.l.accion) && r.personas > 0;
+      const hhmm = (d) => d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+      const mediana = (arr) => { const a = arr.filter((x) => x !== null && x !== undefined).sort((x, y) => x - y); return a.length ? a[Math.floor(a.length / 2)] : ''; };
+      const pct = (a, b) => (b ? `${Math.round(a / b * 100)} %` : '');
+      const ing = filas.filter(esIngreso);
+      const personas = ing.reduce((s2, r) => s2 + r.personas, 0);
+      const porMetodo = (m) => ing.filter((r) => r.metodo === m).reduce((s2, r) => s2 + r.personas, 0);
+      const cuenta = (acc) => filas.filter((r) => r.l.accion === acc).length;
+      const resumen = [
+        { Concepto: 'Personas que ingresaron (según la Puerta)', Valor: personas },
+        { Concepto: 'Registros de ingreso', Valor: ing.length },
+        { Concepto: '   por cámara (QR)', Valor: `${porMetodo('CAMARA')} personas (${pct(porMetodo('CAMARA'), personas)})` },
+        { Concepto: '   por DNI o código tipeado', Valor: `${porMetodo('TIPEADO')} personas (${pct(porMetodo('TIPEADO'), personas)})` },
+        { Concepto: '   por búsqueda manual', Valor: `${porMetodo('MANUAL')} personas (${pct(porMetodo('MANUAL'), personas)})` },
+        { Concepto: '   por coordinación (ficha de persona)', Valor: `${porMetodo('COORDINACION')} personas (${pct(porMetodo('COORDINACION'), personas)})` },
+        { Concepto: 'Duplicados (QR ya usado)', Valor: cuenta('DUPLICADO') },
+        { Concepto: 'No encontrados', Valor: cuenta('NO_ENCONTRADO') },
+        { Concepto: 'Bloqueados por "No asiste"', Valor: cuenta('BLOQUEADO_NO_ASISTE') },
+        { Concepto: 'Errores (no se registró)', Valor: cuenta('ERROR') },
+        { Concepto: 'Ingresos quitados', Valor: cuenta('QUITAR_INGRESO') },
+        { Concepto: 'Primer ingreso', Valor: ing.length ? new Date(ing[0].l.created_at).toLocaleString('es-AR') : '' },
+        { Concepto: 'Último ingreso', Valor: ing.length ? new Date(ing[ing.length - 1].l.created_at).toLocaleString('es-AR') : '' },
+        { Concepto: 'Segundos entre escaneos (mediana, todos los puestos)', Valor: mediana(filas.map((r) => r.seg)) },
+        { Concepto: 'Generado el', Valor: new Date().toLocaleString('es-AR') },
+      ];
+      const usuarios = [...new Set(filas.map((r) => r.l.usuario || '(sin usuario)'))];
+      const porPuesto = usuarios.map((u) => {
+        const fu = filas.filter((r) => (r.l.usuario || '(sin usuario)') === u); const iu = fu.filter(esIngreso);
+        const sum = (m) => iu.filter((r) => r.metodo === m).reduce((s2, r) => s2 + r.personas, 0);
+        return { 'Puesto / usuario': u, 'Personas ingresadas': iu.reduce((s2, r) => s2 + r.personas, 0), 'Registros de ingreso': iu.length, 'Por cámara': sum('CAMARA'), Tipeado: sum('TIPEADO'), 'Búsqueda manual': sum('MANUAL'), Duplicados: fu.filter((r) => r.l.accion === 'DUPLICADO').length, 'No encontrados': fu.filter((r) => r.l.accion === 'NO_ENCONTRADO').length, Bloqueados: fu.filter((r) => r.l.accion === 'BLOQUEADO_NO_ASISTE').length, Errores: fu.filter((r) => r.l.accion === 'ERROR').length, 'Seg. entre escaneos (mediana)': mediana(fu.map((r) => r.seg)), 'Primer registro': fu.length ? hhmm(new Date(fu[0].l.created_at)) : '', 'Último registro': fu.length ? hhmm(new Date(fu[fu.length - 1].l.created_at)) : '' };
+      }).sort((a, b) => b['Personas ingresadas'] - a['Personas ingresadas']);
+      const cursos = [...new Set(ing.map((r) => r.curso || 'Sin curso / docentes y VIP'))].sort((a, b) => claveCurso(a).localeCompare(claveCurso(b)));
+      const porCurso = cursos.map((c) => {
+        const ic = ing.filter((r) => (r.curso || 'Sin curso / docentes y VIP') === c); const tot = ic.reduce((s2, r) => s2 + r.personas, 0);
+        const sumT = (t) => ic.filter((r) => r.tipo === t).reduce((s2, r) => s2 + r.personas, 0);
+        const sumM = (m) => ic.filter((r) => r.metodo === m).reduce((s2, r) => s2 + r.personas, 0);
+        return { Curso: c, 'Personas ingresadas': tot, Egresados: sumT('egresado'), 'Familiares (individual)': sumT('familiar'), 'Familiares (grupo)': sumT('grupo'), Docentes: sumT('docente'), VIP: sumT('VIP'), 'Por cámara': sumM('CAMARA'), Tipeado: sumM('TIPEADO'), 'Búsqueda manual': sumM('MANUAL'), '% manual': pct(sumM('MANUAL') + sumM('TIPEADO'), tot) };
+      });
+      const tramos = {};
+      ing.forEach((r) => { const d = new Date(r.l.created_at); d.setMinutes(Math.floor(d.getMinutes() / 5) * 5, 0, 0); const k = d.getTime(); tramos[k] = tramos[k] || { personas: 0, regs: 0, manual: 0 }; tramos[k].personas += r.personas; tramos[k].regs += 1; if (r.metodo !== 'CAMARA') tramos[k].manual += r.personas; });
+      let acumulado = 0;
+      const cada5 = Object.keys(tramos).sort().map((k) => { const t = tramos[k]; acumulado += t.personas; const d = new Date(Number(k)); return { Desde: hhmm(d), Hasta: hhmm(new Date(Number(k) + 5 * 60000)), 'Personas que entraron': t.personas, 'Registros': t.regs, 'De ellas a mano': t.manual, 'Acumulado': acumulado }; });
+      const detalle = filas.map((r) => ({ 'Fecha y hora': new Date(r.l.created_at).toLocaleString('es-AR'), Usuario: r.l.usuario || '', Acción: r.l.accion, Método: r.metodo, Tipo: r.tipo, Curso: r.curso, Personas: r.personas, 'Seg. desde el anterior': r.seg ?? '', Detalle: r.texto, Dispositivo: r.dispositivo }));
+      const libro = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(libro, XLSX.utils.json_to_sheet(resumen), 'Resumen');
+      XLSX.utils.book_append_sheet(libro, XLSX.utils.json_to_sheet(porPuesto), 'Por puesto');
+      XLSX.utils.book_append_sheet(libro, XLSX.utils.json_to_sheet(porCurso), 'Por curso');
+      XLSX.utils.book_append_sheet(libro, XLSX.utils.json_to_sheet(cada5), 'Cada 5 minutos');
+      XLSX.utils.book_append_sheet(libro, XLSX.utils.json_to_sheet(detalle), 'Detalle');
+      try {
+        const { data: al } = await supabase.from('alertas_puerta').select('*').order('created_at', { ascending: true }).limit(1000);
+        const filasAl = (al || []).map((a) => ({ Hora: new Date(a.created_at).toLocaleString('es-AR'), Puesto: a.puesto, Curso: a.curso || '', Motivo: TEXTO_MOTIVO[a.motivo] || a.motivo, Detalle: a.detalle || '', Automático: a.automatica ? 'Sí' : 'No', Insistencias: a.insistencias || 0, Atendió: a.atiende || '', 'Min. hasta que fueron': a.atendida_at ? minutosEntre(a.created_at, a.atendida_at) : '', 'Min. hasta resolver': a.resuelta_at ? minutosEntre(a.created_at, a.resuelta_at) : '', Estado: a.estado, 'Cerró': a.resuelta_por || '' }));
+        XLSX.utils.book_append_sheet(libro, XLSX.utils.json_to_sheet(filasAl.length ? filasAl : [{ Hora: 'Sin pedidos de ayuda' }]), 'Pedidos de ayuda');
+      } catch (_) { /* sin tabla de alertas todavía */ }
+      const f = new Date();
+      const nombre = `estadistica-puerta-esrn5-${f.getFullYear()}-${String(f.getMonth() + 1).padStart(2, '0')}-${String(f.getDate()).padStart(2, '0')}.xlsx`;
+      XLSX.writeFile(libro, nombre);
+      notify(`Estadística descargada: ${nombre} (${regs.length} registros de Puerta).`);
+    } catch (err) {
+      console.error(err);
+      notify('No se pudo generar la estadística: ' + err.message, 'error');
+    }
+  };
+
   const normTxt = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
   const coincideBusqueda = (item, q) => {
     const texto = normTxt(q);
@@ -3477,6 +4183,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
             </button>
           );
         })}
+        <button onClick={() => setTab('buscar')} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer border-2 ${tab === 'buscar' ? 'bg-[#6B1D2F] text-white border-[#6B1D2F]' : 'bg-white border-[#6B1D2F] text-[#6B1D2F]'}`}>🔎 Buscar persona</button>
         <button onClick={() => setTab('solicitudes')} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === 'solicitudes' ? 'bg-slate-800 text-white' : 'bg-white border'}`}>Solicitudes Butacas ({solicitudes.length})</button>
         <button onClick={() => setTab('reportes')} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === 'reportes' ? 'bg-slate-800 text-white' : 'bg-white border'}`}>Acreditación en Vivo</button>
         <button onClick={() => setTab('aforo')} className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer ${tab === 'aforo' ? 'bg-indigo-700 text-white shadow' : 'bg-white border'}`}>⚙️ Aforo y Sala</button>
@@ -3701,6 +4408,12 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
             </form>
           </div>
         </div>
+      )}
+
+      {tab === 'buscar' && (
+        <FichaPersona egresados={egresados} invitados={invitados} docentes={docentes} especiales={especiales} solicitudes={solicitudes} usuariosSistema={usuariosSistema}
+          perfilStaff={perfilStaff} config={config} recargar={recargar} notify={notify}
+          abrirEditar={(clase, it) => { if (!it) return; if (clase === 'egresado') abrirModalEditar(it); else if (clase === 'docente') abrirModalEditarDocente(it); else if (clase === 'vip') abrirModalEditarVip(it); }} />
       )}
 
       {tab === 'invitados' && (() => {
@@ -4092,6 +4805,9 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
               <button onClick={exportarReporteAsistencia} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer">
                 <Download className="w-3.5 h-3.5" /> Reporte de asistencia (Excel)
               </button>
+              <button onClick={exportarEstadisticaPuerta} className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer">
+                <Download className="w-3.5 h-3.5" /> Estadística de la Puerta (Excel)
+              </button>
               <button onClick={() => recargar()} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer">
                 <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Actualizar Datos
               </button>
@@ -4457,6 +5173,11 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
               {videoActivoAdm ? '● Visible' : '○ Oculto'}
             </button>
             {videoActivoAdm && <a href={VIDEO_TUTORIAL} target="_blank" rel="noreferrer" className="text-xs font-bold text-[#6B1D2F] underline">probar</a>}
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold uppercase text-slate-500">Tel. coordinación</span>
+            <input type="text" value={telCoord} onChange={(e) => setTelCoord(e.target.value)} placeholder="Ej: Martín 2995551234, Laura 2994443322" title="Uno o varios teléfonos separados por coma, con el nombre adelante si querés. Se muestran en la Puerta cuando no hay internet." className="w-72 px-2.5 py-1.5 rounded-xl border text-xs" />
+            {(telCoord || '') !== (config.telefono_coordinacion || '') && <button onClick={guardarTelCoord} className="px-3 py-1.5 bg-[#6B1D2F] text-white rounded-xl text-xs font-bold cursor-pointer">Guardar</button>}
           </div>
           <div className="flex items-center gap-2">
             <span className="text-xs font-bold uppercase text-slate-500">Portal VIP</span>
