@@ -40,7 +40,7 @@ const fechaHoraAR = (v) => { if (!v) return ''; const d = new Date(v); return is
 const CAPACIDAD_MAXIMA = 525;
 const CAPACIDAD_DEFINITIVA = 525; // número definitivo de butacas (decisión del 19/11/2026)
 const CUPO_BASE_DEFECTO = 4;
-const VERSION_APP = 'v30 · 20/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
+const VERSION_APP = 'v30 · 21/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
 const MSG_FALTA_COL_BUTACA = 'Falta crear la columna "ocupa_butaca" en la tabla docentes (Supabase). Ejecutá el SQL que te pasaron y volvé a intentar.';
 const esErrorColumnaButaca = (err) => /ocupa_butaca/i.test(err?.message || '') || err?.code === 'PGRST204' || err?.code === '42703';
 const aNumeroONulo = (v) => (v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
@@ -181,7 +181,9 @@ const plazasFamiliaresDe = (egr, { config, invitados, solicitudes }) => {
 
 // ---------- Historial de cambios (se muestra con el botón "📋 Novedades"). Agregar arriba en cada entrega. ----------
 const NOVEDADES = [
-  { v: 'v30', fecha: '20/11/2026', items: [
+  { v: 'v30', fecha: '21/11/2026', items: [
+    'Portal: si la base no tiene todavía la verificación del celular, el portal sigue funcionando igual (antes, al guardar por segunda vez o pedir extras salía "falta configurar la base").',
+    'Registro de actividad exportado con la hora en formato de 24 horas.',
     'Aforo y Sala: grupo de sector nuevo "VIP, autoridades y movilidad reducida". Los VIP y las FAMILIAS COMPLETAS con alguien con movilidad reducida se sientan ahí: lo ven en sus pases y se cuentan juntos en "asignadas vs. necesarias".',
     'Pases de las familias con movilidad reducida en color naranja (grupo e individuales), para reconocerlos en la Puerta.',
     'Portal: queda registrado cuando el egresado descarga su QR, el del grupo familiar o el de cada invitado (y cuando abre el video).',
@@ -779,6 +781,17 @@ const mensajeErrorRPC = (err) => {
   return m;
 };
 
+// Llama a una función del portal. Si la base todavía no tiene la versión que acepta p_clave
+// (sql_v25 sin correr o incompleto), reintenta sin ese dato para que la familia no quede trabada.
+const rpcPortal = async (fn, params) => {
+  let r = await supabase.rpc(fn, params);
+  if (r.error && params && 'p_clave' in params && (r.error.code === 'PGRST202' || r.error.code === '42883' || /could not find the function|function .* does not exist/i.test(r.error.message || ''))) {
+    const { p_clave: _omitida, ...resto } = params;
+    r = await supabase.rpc(fn, resto);
+  }
+  return r;
+};
+
 const VIDEO_TUTORIAL = '/tutorial.mp4';
 function ModalVideoTutorial({ cerrar }) {
   const [fallo, setFallo] = useState(false);
@@ -898,7 +911,7 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
       if (pideClave && claveEnviada.length !== 4) { setError('Escribí los últimos 4 números de tu celular.'); return; }
       const params = { p_tipo: tipoUsuario, p_dni: limpio };
       if (claveEnviada) params.p_clave = claveEnviada;
-      const { data, error: errRpc } = await supabase.rpc('portal_consultar', params);
+      const { data, error: errRpc } = await rpcPortal('portal_consultar', params);
       if (errRpc) throw errRpc;
       if (!data || !data.encontrado) {
         if (data?.motivo !== 'vip_desactivado') registrarPortal('NO_ENCONTRADO', `Buscó un DNI que no está en ${tipoUsuario.toUpperCase()}`, limpio);
@@ -973,7 +986,7 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
       const payload = filasInvitados
         .filter((f) => f.id || (f.nombre_completo || '').trim() || (f.dni || '').trim())
         .map((f) => ({ id: f.id || null, nombre_completo: (f.nombre_completo || '').trim(), dni: sanitizeDNI(f.dni || ''), es_grupal: f.es_grupal === true, movilidad_reducida: f.movilidad_reducida === true }));
-      const { data, error: errRpc } = await supabase.rpc('portal_guardar_invitados', { p_dni: sanitizeDNI(datosPersona.dni || dni), p_celular: celular, p_invitados: payload, ...(claveRef.current ? { p_clave: claveRef.current } : {}) });
+      const { data, error: errRpc } = await rpcPortal('portal_guardar_invitados', { p_dni: sanitizeDNI(datosPersona.dni || dni), p_celular: celular, p_invitados: payload, ...(claveRef.current ? { p_clave: claveRef.current } : {}) });
       if (errRpc) throw errRpc;
       if (data?.error_clave) throw new Error(textoClavePortal(data.error_clave) + ' Volvé a entrar con tu DNI.');
       if (celular) claveRef.current = String(celular).replace(/\D/g, '').slice(-4);
@@ -1015,7 +1028,7 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
     setAvisoSolicitud(false);
     setEnviandoSol(true);
     try {
-      const { data, error: errRpc } = await supabase.rpc('portal_solicitar_extra', {
+      const { data, error: errRpc } = await rpcPortal('portal_solicitar_extra', {
         p_dni: sanitizeDNI(datosPersona.dni || dni),
         p_cantidad: Number(cantExtra),
         p_observacion: obsExtra.trim(),
@@ -1040,7 +1053,7 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
       ? '¿Estás seguro de que no asistirás?\n\nSe liberará tu butaca y también las de tus invitados: tus pases y los de tu grupo dejarán de servir para ingresar.'
       : '¿Estás seguro de que no asistirás? Esto liberará tu plaza.';
     if (!window.confirm(aviso)) return;
-    const { data: dNo, error: errRpc } = await supabase.rpc('portal_no_asistire', { p_tipo: tipoUsuario, p_dni: sanitizeDNI(datosPersona.dni || dni), ...(claveRef.current ? { p_clave: claveRef.current } : {}) });
+    const { data: dNo, error: errRpc } = await rpcPortal('portal_no_asistire', { p_tipo: tipoUsuario, p_dni: sanitizeDNI(datosPersona.dni || dni), ...(claveRef.current ? { p_clave: claveRef.current } : {}) });
     if (errRpc) { errorPortal('No asistiré', 'No se pudo registrar: ' + mensajeErrorRPC(errRpc)); return; }
     if (dNo?.error_clave) { errorPortal('No asistiré', textoClavePortal(dNo.error_clave) + ' Volvé a entrar con tu DNI.'); return; }
     registrarPortal('NO_ASISTIRE', tipoUsuario === 'egresado' ? 'Se dio de baja (libera su butaca y las de sus invitados)' : 'Se dio de baja');
@@ -3664,7 +3677,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
       const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
       const filas = [['fecha_hora_local', 'fecha_hora_iso', 'usuario', 'modulo', 'accion', 'detalle'].join(',')];
       (data || []).forEach((l) => {
-        filas.push([esc(new Date(l.created_at).toLocaleString('es-AR')), esc(l.created_at), esc(l.usuario), esc(l.modulo), esc(l.accion), esc(l.detalle)].join(','));
+        filas.push([esc(new Date(l.created_at).toLocaleString('es-AR', { hourCycle: 'h23' })), esc(l.created_at), esc(l.usuario), esc(l.modulo), esc(l.accion), esc(l.detalle)].join(','));
       });
       const blob = new Blob(['\uFEFF' + filas.join('\r\n')], { type: 'text/csv;charset=utf-8' });
       const f = new Date();
