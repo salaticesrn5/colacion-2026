@@ -40,7 +40,7 @@ const fechaHoraAR = (v) => { if (!v) return ''; const d = new Date(v); return is
 const CAPACIDAD_MAXIMA = 525;
 const CAPACIDAD_DEFINITIVA = 525; // número definitivo de butacas (decisión del 19/11/2026)
 const CUPO_BASE_DEFECTO = 4;
-const VERSION_APP = 'v26 · 20/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
+const VERSION_APP = 'v29 · 20/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
 const MSG_FALTA_COL_BUTACA = 'Falta crear la columna "ocupa_butaca" en la tabla docentes (Supabase). Ejecutá el SQL que te pasaron y volvé a intentar.';
 const esErrorColumnaButaca = (err) => /ocupa_butaca/i.test(err?.message || '') || err?.code === 'PGRST204' || err?.code === '42703';
 const aNumeroONulo = (v) => (v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
@@ -181,6 +181,14 @@ const plazasFamiliaresDe = (egr, { config, invitados, solicitudes }) => {
 
 // ---------- Historial de cambios (se muestra con el botón "📋 Novedades"). Agregar arriba en cada entrega. ----------
 const NOVEDADES = [
+  { v: 'v29', fecha: '20/11/2026', items: [
+    'Puerta: lo que quedó guardado sin conexión en un celular se descarta a las 12 horas. Así ningún ingreso de las pruebas se sube después de reiniciar la base.'] },
+  { v: 'v28', fecha: '20/11/2026', items: [
+    'Si un invitado de un egresado tiene movilidad reducida, TODA esa familia entra por el acceso de abajo y la atiende el puesto de Docentes y VIP: se ve en los pases, en el portal, en la Puerta, en la ficha y en el aviso del día anterior.',
+    'Resumen Papel: lista 4 con esas familias (para el puesto de Docentes y VIP) y aviso en la fila del egresado de su curso.'] },
+  { v: 'v27', fecha: '20/11/2026', items: [
+    'Egresados: filtro de asistencia (Todos / Asisten / No asisten) y botón "📄 PDF de los que no asisten", por curso o de todos.',
+    'Portal: el botón "No podré asistir" pasó a estar justo debajo del QR del egresado y aclara que libera también las butacas de sus invitados.'] },
   { v: 'v26', fecha: '20/11/2026', items: ['Botón "📋 Novedades" con este historial de cambios.'] },
   { v: 'v25', fecha: '20/11/2026', items: [
     'Puerta sin conexión: si se corta internet sigue registrando y cuando vuelve la señal sube todo solo, con la hora real.',
@@ -313,6 +321,7 @@ export default function App() {
   const videoActivo = config.video_activo === true;
   const [egresados, setEgresados] = useState([]);
   const [invitados, setInvitados] = useState([]);
+  if (session) actualizarFamiliasMovilidad(invitados); // v28: familias con movilidad reducida → acceso de abajo
   const [docentes, setDocentes] = useState([]);
   const [especiales, setEspeciales] = useState([]);
   const [solicitudes, setSolicitudes] = useState([]);
@@ -1040,6 +1049,7 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
   const miSolicitud = tipoUsuario === 'egresado' && datosPersona ? (misSolicitudes[0] || null) : null;
   const etapaCarga = config.estado_etapa || 'abierta';
   const cargaHabilitada = tipoUsuario === 'egresado' && datosPersona ? puedeEditarInvitados(datosPersona, { config, solicitudes: misSolicitudes }) : false;
+  if (tipoUsuario === 'egresado' && datosPersona?.id) marcarFamiliaMovilidad(datosPersona.id, misInvitadosGuardados.some(tieneMovilidad));
   const miGrupo = misInvitadosGuardados.filter(esGrupal);
   const hayGuardados = misInvitadosGuardados.length > 0;
   const descargarMiPase = () => {
@@ -1119,6 +1129,11 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
               <p className="text-[11px] font-bold text-slate-600">📍 {tipoUsuario === 'egresado' ? ACCESO_TEXTO.egresados : ACCESO_TEXTO.abajo}</p>
               {tipoUsuario === 'egresado' && (
                 <p className="text-[11px] text-slate-500 text-center">Este QR es <b>solo para vos</b>. Tus invitados marcados <b>en grupo</b> entran juntos con el <b>QR del Grupo Familiar</b>, y los <b>individuales</b> con su propio QR.</p>
+              )}
+              {tipoUsuario === 'egresado' && (
+                <button type="button" onClick={marcarNoAsistire} className="w-full py-2.5 bg-red-50 hover:bg-red-100 border border-red-300 text-red-700 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer">
+                  <XCircle className="w-4 h-4" /> No podré asistir: se liberan mi butaca y las de mis invitados
+                </button>
               )}
             </div>
 
@@ -1245,6 +1260,9 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
                     </div>
                   ))}
                 </div>
+                {(filasInvitados.some((f) => f.movilidad_reducida === true && String(f.nombre_completo || '').trim()) || familiaConMovilidad(datosPersona)) && (
+                  <p className="text-[11px] font-bold text-amber-900 bg-amber-50 border border-amber-300 rounded-lg px-2.5 py-2">♿ Como en tu grupo hay una persona con movilidad reducida, <u>todos tus invitados</u> entran por el <b>acceso de abajo</b>, que es el más cómodo. Lo vas a ver en los pases.</p>
+                )}
 
                 {cargaHabilitada && (editando ? (
                   <div className="flex gap-2">
@@ -1316,11 +1334,11 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
               </>
             )}
 
-            <div className="pt-2 border-t">
+            {tipoUsuario !== 'egresado' && <div className="pt-2 border-t">
               <button type="button" onClick={marcarNoAsistire} className="w-full py-2.5 bg-red-50 hover:bg-red-100 border border-red-300 text-red-700 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer">
                 <XCircle className="w-4 h-4" /> No podré asistir / Liberar cupo
               </button>
-            </div>
+            </div>}
 
             <button type="button" onClick={() => { setDatosPersona(null); setDni(''); }} className="w-full py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 text-sm cursor-pointer">
               Consultar otro DNI
@@ -1367,6 +1385,7 @@ const ACCESO_TEXTO = {
   egresados: 'INGRESO POR DETRÁS DE LA ÚLTIMA FILA',
   arriba: 'INGRESO POR EL ACCESO DE ARRIBA',
   abajo: 'INGRESO POR EL ACCESO DE ABAJO',
+  abajoMovilidad: 'INGRESO POR EL ACCESO DE ABAJO (MOVILIDAD REDUCIDA)',
   aConfirmar: 'ACCESO A CONFIRMAR CON LA ESCUELA',
 };
 
@@ -1382,7 +1401,13 @@ const tipoOrientacion = (egr) => {
   return null;
 };
 const etiquetaOrientacion = (egr) => ({ cn: 'Cs. Naturales', edu: 'Educación' }[tipoOrientacion(egr)] || '');
-const accesoFamiliaDe = (egr) => ({ cn: ACCESO_TEXTO.abajo, edu: ACCESO_TEXTO.arriba }[tipoOrientacion(egr)] || ACCESO_TEXTO.aConfirmar);
+// Familias con al menos un invitado con movilidad reducida: TODO el grupo entra por el acceso de abajo
+// y lo atiende el puesto de Docentes y VIP (v28). Se arma con los invitados que tiene cargados la pantalla.
+const FAMILIAS_MOVILIDAD = new Set();
+const actualizarFamiliasMovilidad = (invitados) => { FAMILIAS_MOVILIDAD.clear(); (invitados || []).forEach((i) => { if (i && i.movilidad_reducida === true && i.egresado_id) FAMILIAS_MOVILIDAD.add(i.egresado_id); }); };
+const marcarFamiliaMovilidad = (egrId, tiene) => { if (!egrId) return; if (tiene) FAMILIAS_MOVILIDAD.add(egrId); else FAMILIAS_MOVILIDAD.delete(egrId); };
+const familiaConMovilidad = (egr) => !!(egr && egr.id && FAMILIAS_MOVILIDAD.has(egr.id));
+const accesoFamiliaDe = (egr) => (familiaConMovilidad(egr) ? ACCESO_TEXTO.abajoMovilidad : ({ cn: ACCESO_TEXTO.abajo, edu: ACCESO_TEXTO.arriba }[tipoOrientacion(egr)] || ACCESO_TEXTO.aConfirmar));
 const colorFamiliaDe = (egr) => COLOR_PASE[tipoOrientacion(egr)] || COLOR_PASE.familia;
 const textoCurso = (egr) => [egr?.division, etiquetaOrientacion(egr)].filter(Boolean).join(' · ');
 // Orden de los cursos: primero turno mañana (TM), después tarde (TT); dentro de cada turno, por sección
@@ -2166,14 +2191,19 @@ const CLAVE_CACHE_PUERTA = 'puerta_cache_v1', CLAVE_COLA_PUERTA = 'puerta_cola_v
 const leerLS = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k) || 'null'); return v === null ? d : v; } catch (_) { return d; } };
 const guardarLS = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) { /* lleno o bloqueado */ } };
 const CLAVE_DATOS_TABLA = { egresados: 'egresados', invitados: 'invitados', docentes: 'docentes', invitados_especiales: 'especiales' };
+// Lo guardado sin conexión vale 12 horas: así un ingreso de prueba que quedó en un celular no se sube después de reiniciar la base
+const VIGENCIA_COLA_MS = 12 * 60 * 60 * 1000;
+const vigente = (iso) => { const t = new Date(iso || 0).getTime(); return !isNaN(t) && Date.now() - t < VIGENCIA_COLA_MS; };
+const leerColaVigente = () => { const c = leerLS(CLAVE_COLA_PUERTA, []).filter((x) => vigente(x.hora)); guardarLS(CLAVE_COLA_PUERTA, c); return c; };
+const leerLogsVigentes = () => { const l = leerLS(CLAVE_LOGS_PUERTA, []).filter((x) => vigente(x.created_at)); guardarLS(CLAVE_LOGS_PUERTA, l); return l; };
 
 function ModuloPuerta({ config, egresados: egrProp, invitados: invProp, docentes: docProp, especiales: espProp, recargar, notify, perfilStaff }) {
   // ---- Sin conexión (v25): lista guardada en el celular + ingresos en espera que se suben solos ----
   const [cachePuerta] = useState(() => leerLS(CLAVE_CACHE_PUERTA, null));
   const usandoCache = !(egrProp && egrProp.length) && !!(cachePuerta && cachePuerta.egresados && cachePuerta.egresados.length);
-  const [cola, setCola] = useState(() => leerLS(CLAVE_COLA_PUERTA, []));
+  const [cola, setCola] = useState(() => leerColaVigente());
   const colaRef = useRef(cola);
-  const [logsPend, setLogsPend] = useState(() => leerLS(CLAVE_LOGS_PUERTA, []).length);
+  const [logsPend, setLogsPend] = useState(() => leerLogsVigentes().length);
   const [enLinea, setEnLinea] = useState(typeof navigator === 'undefined' ? true : navigator.onLine);
   const marcasLocales = useMemo(() => new Set(cola.map((x) => `${x.tabla}:${x.id}`)), [cola]);
   const conMarcas = (lista, tabla) => (marcasLocales.size ? (lista || []).map((r) => (!r.asistio && marcasLocales.has(`${tabla}:${r.id}`) ? { ...r, asistio: true, hora_ingreso: r.hora_ingreso || new Date().toISOString() } : r)) : (lista || []));
@@ -2181,6 +2211,7 @@ function ModuloPuerta({ config, egresados: egrProp, invitados: invProp, docentes
   const invitados = conMarcas(usandoCache ? cachePuerta.invitados : invProp, 'invitados');
   const docentes = conMarcas(usandoCache ? cachePuerta.docentes : docProp, 'docentes');
   const especiales = conMarcas(usandoCache ? cachePuerta.especiales : espProp, 'invitados_especiales');
+  actualizarFamiliasMovilidad(invitados);
   useEffect(() => { if (egrProp && egrProp.length) guardarLS(CLAVE_CACHE_PUERTA, { t: Date.now(), egresados: egrProp, invitados: invProp, docentes: docProp, especiales: espProp }); }, [egrProp, invProp, docProp, espProp]);
   const guardarCola = (n) => { colaRef.current = n; setCola(n); guardarLS(CLAVE_COLA_PUERTA, n); };
   const offlineRef = useRef(false);
@@ -2307,7 +2338,7 @@ function ModuloPuerta({ config, egresados: egrProp, invitados: invProp, docentes
         guardarCola(colaRef.current.filter((x) => x.k !== it.k));
       }
       yaEstaban.forEach((it) => logPuerta('DUPLICADO', `${it.nombre || it.tabla} (DNI ${it.dni || 'S/D'}): lo registró este celular sin conexión, pero ya lo había registrado otro dispositivo`, { metodo: 'CAMARA' }));
-      const logs = leerLS(CLAVE_LOGS_PUERTA, []);
+      const logs = leerLogsVigentes();
       if (logs.length && navigator.onLine) {
         let { error } = await supabase.from('logs_sistema').insert(logs);
         if (error && !esErrorRed(error)) ({ error } = await supabase.from('logs_sistema').insert(logs.map(({ created_at, ...r }) => ({ ...r, detalle: `${r.detalle} (hora real ${new Date(created_at).toLocaleTimeString('es-AR')})` }))));
@@ -2911,7 +2942,7 @@ const localAIso = (v) => { if (!v) return null; const d = new Date(v); return is
 const gruposPuesto = (egresados) => ['Egresados', ...cursosDe(egresados).map((c) => `Familias ${c}`), 'Docentes y VIP', 'Coordinación (todos)'];
 const grupoDePersona = (tipo, fila, egresados) => {
   if (tipo === 'egresado') return 'Egresados';
-  if (tipo === 'invitado' || tipo === 'grupo') { const e = tipo === 'grupo' ? fila : (egresados || []).find((x) => x.id === fila?.egresado_id); return e?.division ? `Familias ${e.division}` : ''; }
+  if (tipo === 'invitado' || tipo === 'grupo') { const e = tipo === 'grupo' ? fila : (egresados || []).find((x) => x.id === fila?.egresado_id); if (familiaConMovilidad(e)) return 'Docentes y VIP'; return e?.division ? `Familias ${e.division}` : ''; }
   if (tipo === 'docente' || tipo === 'vip') return 'Docentes y VIP';
   return '';
 };
@@ -3197,6 +3228,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
   const [tab, setTab] = useState('egresados');
   const [filtroEgresado, setFiltroEgresado] = useState('');
   const [filtroPortal, setFiltroPortal] = useState('todos');
+  const [filtroAsiste, setFiltroAsiste] = useState('todos');
   const [filtroDocente, setFiltroDocente] = useState('');
   const [filtroVip, setFiltroVip] = useState('');
   
@@ -4509,7 +4541,40 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
   const cantActivosEgr = egresados.filter((e) => e.activo !== false).length;
   const fechaCorta = (v) => { const d = new Date(v); return isNaN(d.getTime()) ? '' : d.toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); };
   const egresadosFiltrados = egresados.filter((e) => coincideBusqueda(e, filtroEgresado) && coincideCurso(e, filtroCursoEgr)
-    && (filtroPortal === 'todos' || (filtroPortal === 'entraron' ? entroPortal(e) : (!entroPortal(e) && e.activo !== false))));
+    && (filtroPortal === 'todos' || (filtroPortal === 'entraron' ? entroPortal(e) : (!entroPortal(e) && e.activo !== false)))
+    && (filtroAsiste === 'todos' || (filtroAsiste === 'no_asisten' ? e.activo === false : e.activo !== false)));
+  // PDF (impresión) de los egresados que no asisten, respetando el curso elegido
+  const pdfNoAsisten = () => {
+    const lista = egresados.filter((e) => e.activo === false && coincideCurso(e, filtroCursoEgr))
+      .sort((a, b) => claveCurso(a.division).localeCompare(claveCurso(b.division)) || String(a.nombre_completo).localeCompare(String(b.nombre_completo)));
+    if (!lista.length) { notify('No hay egresados marcados como "No asiste"' + (filtroCursoEgr ? ' en ese curso.' : '.'), 'warning'); return; }
+    const esc = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const cursoTxt = filtroCursoEgr ? (filtroCursoEgr === SIN_CURSO ? 'Sin curso' : filtroCursoEgr) : 'Todos los cursos';
+    let liberadas = 0;
+    const filas = lista.map((e, i) => {
+      const cupo = cupoDe(e, config); const cargados = invitados.filter((x) => x.egresado_id === e.id).length; liberadas += 1 + cupo;
+      return `<tr><td>${i + 1}</td><td>${esc(e.division || 'Sin curso')}</td><td><b>${esc(e.nombre_completo)}</b></td><td>${esc(e.dni)}</td><td>${esc(e.celular || '—')}</td><td class="c">${cargados}</td><td class="c">${1 + cupo}</td></tr>`;
+    }).join('');
+    const porCurso = cursosDe(lista).filter(Boolean).map((c) => `${esc(c)}: ${lista.filter((e) => e.division === c).length}`).concat(lista.some((e) => !e.division) ? [`Sin curso: ${lista.filter((e) => !e.division).length}`] : []).join(' · ');
+    const escudo = escudoDe(config);
+    const fecha = new Date().toLocaleString('es-AR');
+    const w = window.open('', '_blank');
+    if (!w) { notify('El navegador bloqueó la ventana. Permití las ventanas emergentes para este sitio.', 'error'); return; }
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Egresados que no asisten - ${esc(cursoTxt)}</title><style>
+      @page{size:A4;margin:14mm} body{font-family:Arial,sans-serif;font-size:11px;color:#111}
+      .cab{display:flex;align-items:center;gap:12px;border-bottom:3px solid #6B1D2F;padding-bottom:8px;margin-bottom:10px}
+      .cab img{width:52px;height:52px;object-fit:contain} h1{font-size:17px;margin:0;color:#6B1D2F} .sub{color:#555;margin-top:2px}
+      .res{display:flex;gap:10px;margin:8px 0 12px} .res div{border:1px solid #ccc;border-radius:6px;padding:6px 10px} .res b{font-size:15px;display:block}
+      table{border-collapse:collapse;width:100%} th,td{border:1px solid #bbb;padding:5px 6px;text-align:left} th{background:#f3e8eb} .c{text-align:center}
+      .pie{margin-top:14px;color:#666;font-size:10px} tr{page-break-inside:avoid}</style></head><body>
+      <div class="cab">${escudo ? `<img src="${escudo}">` : ''}<div><h1>Egresados que no asisten al Acto de Colación 2026</h1><div class="sub">ESRN N° 005 — Cipolletti · ${esc(cursoTxt)} · generado el ${esc(fecha)}</div></div></div>
+      <div class="res"><div><b>${lista.length}</b>egresados no asisten</div><div><b>${liberadas}</b>butacas liberadas (egresado + su cupo)</div>${porCurso ? `<div><b>Por curso</b>${porCurso}</div>` : ''}</div>
+      <table><thead><tr><th>#</th><th>Curso</th><th>Egresado</th><th>DNI</th><th>Celular</th><th class="c">Invitados cargados</th><th class="c">Butacas liberadas</th></tr></thead><tbody>${filas}</tbody></table>
+      <div class="pie">Sus QR y los de su grupo familiar quedan bloqueados en la Puerta. Para reactivar a alguien: Administración → Egresados → Editar y Descargar QR → Reactivar.</div>
+      <script>window.onload=()=>{setTimeout(()=>window.print(),300)}<\/script></body></html>`);
+    w.document.close();
+    registrarLog('EXPORTAR', 'Egresados', `PDF de egresados que no asisten (${cursoTxt}): ${lista.length}`);
+  };
   const docentesFiltrados = docentes.filter((d) => coincideBusqueda(d, filtroDocente));
   const vipsFiltrados = especiales.filter((v) => coincideBusqueda(v, filtroVip));
   const logsFiltrados = logsSistema.filter((l) => (l.usuario || '').toLowerCase().includes(filtroLogBusqueda.toLowerCase()) || (l.accion || '').toLowerCase().includes(filtroLogBusqueda.toLowerCase()) || (l.modulo || '').toLowerCase().includes(filtroLogBusqueda.toLowerCase()) || (l.detalle || '').toLowerCase().includes(filtroLogBusqueda.toLowerCase()));
@@ -4632,7 +4697,15 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
           <div className="flex flex-wrap items-center gap-2 text-xs">
             <SelectorCurso egresados={egresados} valor={filtroCursoEgr} onChange={setFiltroCursoEgr} />
             <span className="font-bold text-slate-500">Mostrando {egresadosFiltrados.length} de {egresados.length}</span>
-            {(filtroCursoEgr || filtroEgresado || filtroPortal !== 'todos') && <button onClick={() => { setFiltroCursoEgr(''); setFiltroEgresado(''); setFiltroPortal('todos'); }} className="px-2.5 py-1 bg-white border rounded-lg font-bold text-slate-600 cursor-pointer">Quitar filtros</button>}
+            {(filtroCursoEgr || filtroEgresado || filtroPortal !== 'todos' || filtroAsiste !== 'todos') && <button onClick={() => { setFiltroCursoEgr(''); setFiltroEgresado(''); setFiltroPortal('todos'); setFiltroAsiste('todos'); }} className="px-2.5 py-1 bg-white border rounded-lg font-bold text-slate-600 cursor-pointer">Quitar filtros</button>}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="font-bold text-slate-600">Asistencia: no asisten {egresados.filter((e) => e.activo === false && coincideCurso(e, filtroCursoEgr)).length}{filtroCursoEgr ? ' en este curso' : ''}</span>
+            {[['todos', 'Todos'], ['asisten', '✔ Asisten'], ['no_asisten', '✖ No asisten']].map(([v, t]) => (
+              <button key={v} onClick={() => setFiltroAsiste(v)} className={`px-3 py-1 rounded-full border font-bold cursor-pointer ${filtroAsiste === v ? 'bg-[#6B1D2F] text-white border-[#6B1D2F]' : 'bg-white text-slate-600'}`}>{t}</button>
+            ))}
+            <button onClick={pdfNoAsisten} className="ml-auto px-3 py-1 rounded-full border border-rose-300 bg-rose-50 text-rose-700 font-bold cursor-pointer">📄 PDF de los que no asisten</button>
           </div>
 
           {hayDatoPortal && (
@@ -5741,6 +5814,7 @@ function ReporteResumenPapel({ egresados, invitados, docentes, especiales, confi
           <li><b>Familiares de Ciencias Naturales (TM):</b> {ACCESO_TEXTO.abajo.toLowerCase()}.</li>
           <li><b>Familiares de Educación (TT):</b> {ACCESO_TEXTO.arriba.toLowerCase()}.</li>
           <li><b>Docentes y VIP:</b> {ACCESO_TEXTO.abajo.toLowerCase()}.</li>
+          <li><b>Familias con alguien con movilidad reducida:</b> todo el grupo {ACCESO_TEXTO.abajo.toLowerCase()}, y las atiende el puesto de Docentes y VIP (ver lista 4).</li>
         </ul>
         {salaConfigDe(config).sectores.length > 0 && (
           <>
@@ -5810,6 +5884,7 @@ function ReporteResumenPapel({ egresados, invitados, docentes, especiales, confi
                           <td className="p-2 border align-top" colSpan={6}>
                             🎓 {egr.nombre_completo} (DNI: {egr.dni}) · Cel: {egr.celular || 'S/N'}
                             {egr.activo === false ? ' · NO ASISTE' : ''}
+                            {familiaConMovilidad(egr) && egr.activo !== false ? ' · ♿ SU FAMILIA ENTRA POR ABAJO (puesto Docentes y VIP)' : ''}
                           </td>
                         </tr>
                         {misInv.length === 0 ? (
@@ -5859,6 +5934,29 @@ function ReporteResumenPapel({ egresados, invitados, docentes, especiales, confi
             ))}
           </tbody>
         </table>
+      </div>
+
+      <div className="space-y-3 pt-6" style={{ breakBefore: 'page', pageBreakBefore: 'always' }}>
+        <h3 className="font-bold text-sm text-[#6B1D2F] uppercase tracking-wide">4. Familias con movilidad reducida · entran por el acceso de abajo (puesto Docentes y VIP)</h3>
+        {(() => {
+          const fams = egresadosOrdenados.filter((e) => e.activo !== false && familiaConMovilidad(e));
+          if (!fams.length) return <p className="text-xs text-slate-400 italic">No hay familias con movilidad reducida.</p>;
+          return (
+            <table className="w-full text-left border-collapse text-xs">
+              <thead><tr className="bg-amber-50 border-b"><th className="p-2 border">Curso</th><th className="p-2 border">Invitado / Familiar</th><th className="p-2 border">DNI</th><th className="p-2 border text-center">Modalidad</th><th className="p-2 border text-center">Mov. reducida</th><th className="p-2 border text-center">Firma Ingreso</th></tr></thead>
+              <tbody>
+                {fams.map((egr) => (
+                  <React.Fragment key={egr.id}>
+                    <tr className="bg-slate-50 font-bold" style={{ breakInside: 'avoid' }}><td className="p-2 border" colSpan={6}>{egr.division || 'Sin curso'} · familia de {egr.nombre_completo} (DNI {egr.dni}) · Cel: {egr.celular || 'S/N'}</td></tr>
+                    {invitados.filter((i) => i.egresado_id === egr.id).map((inv) => (
+                      <tr key={inv.id} style={{ breakInside: 'avoid' }}><td className="p-2 border text-slate-400">{egr.division || ''}</td><td className="p-2 border font-medium">{inv.nombre_completo}</td><td className="p-2 border font-mono">{inv.dni}</td><td className="p-2 border text-center">{esGrupal(inv) ? 'En grupo' : 'Individual'}</td><td className="p-2 border text-center font-bold">{tieneMovilidad(inv) ? '♿ SÍ' : ''}</td><td className="p-2 border text-center w-28">______</td></tr>
+                    ))}
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
+          );
+        })()}
       </div>
       </>}
     </div>
