@@ -40,7 +40,7 @@ const fechaHoraAR = (v) => { if (!v) return ''; const d = new Date(v); return is
 const CAPACIDAD_MAXIMA = 525;
 const CAPACIDAD_DEFINITIVA = 525; // número definitivo de butacas (decisión del 19/11/2026)
 const CUPO_BASE_DEFECTO = 4;
-const VERSION_APP = 'v29 · 20/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
+const VERSION_APP = 'v30 · 20/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
 const MSG_FALTA_COL_BUTACA = 'Falta crear la columna "ocupa_butaca" en la tabla docentes (Supabase). Ejecutá el SQL que te pasaron y volvé a intentar.';
 const esErrorColumnaButaca = (err) => /ocupa_butaca/i.test(err?.message || '') || err?.code === 'PGRST204' || err?.code === '42703';
 const aNumeroONulo = (v) => (v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
@@ -181,6 +181,8 @@ const plazasFamiliaresDe = (egr, { config, invitados, solicitudes }) => {
 
 // ---------- Historial de cambios (se muestra con el botón "📋 Novedades"). Agregar arriba en cada entrega. ----------
 const NOVEDADES = [
+  { v: 'v30', fecha: '20/11/2026', items: [
+    'Panel de Mantenimiento: botón "🧹 Preparar para abrir". Muestra lo que hay, pide bajar el respaldo y con "LIMPIAR" borra todo lo de las pruebas (invitados, solicitudes, presentes, marcas del portal, pedidos de ayuda y registros de prueba), con la opción de borrar los celulares. Deja cupo 3 y etapa Abierta.'] },
   { v: 'v29', fecha: '20/11/2026', items: [
     'Puerta: lo que quedó guardado sin conexión en un celular se descarta a las 12 horas. Así ningún ingreso de las pruebas se sube después de reiniciar la base.'] },
   { v: 'v28', fecha: '20/11/2026', items: [
@@ -2140,7 +2142,7 @@ function AvisosCoordinacion({ perfilStaff, notify }) {
   const hora = (v) => (v ? new Date(v).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }) : '');
   return (
     <>
-      <div className="fixed top-2 right-2 z-50 w-[min(420px,calc(100vw-1rem))] space-y-2">
+      <div className="fixed bottom-20 right-3 z-[45] w-[min(420px,calc(100vw-1.5rem))] space-y-2">
         {alertas.length > 0 && (minimizado ? (
           <button type="button" onClick={() => setMinimizado(false)} className="ml-auto block px-4 py-2 rounded-full bg-rose-600 text-white text-sm font-extrabold shadow-xl cursor-pointer animate-pulse">🆘 {alertas.length} pedido(s) de ayuda</button>
         ) : (
@@ -3009,6 +3011,89 @@ function AvisoDiaAnterior({ egresados, invitados, cerrar, registrarLog }) {
   );
 }
 
+// ---------- Preparar para abrir: diagnóstico + respaldo + limpieza (v30) ----------
+function ModalLimpieza({ egresados, invitados, docentes, especiales, solicitudes, config, perfilStaff, descargarRespaldo, haciendoRespaldo, recargar, notify, cerrar }) {
+  const [extra, setExtra] = useState({ pedidos: null, registros: null });
+  const [respaldoOk, setRespaldoOk] = useState(false);
+  const [borrarCel, setBorrarCel] = useState(false);
+  const [borrarReg, setBorrarReg] = useState(true);
+  const [texto, setTexto] = useState('');
+  const [trabajando, setTrabajando] = useState(false);
+  const [resultado, setResultado] = useState(null);
+  useEffect(() => {
+    (async () => {
+      const cuenta = async (q) => { try { const { count, error } = await q; return error ? null : count; } catch (_) { return null; } };
+      const pedidos = await cuenta(supabase.from('alertas_puerta').select('id', { count: 'exact', head: true }));
+      const registros = await cuenta(supabase.from('logs_sistema').select('id', { count: 'exact', head: true }).in('modulo', ['Portal', 'Puerta', 'Ayuda']));
+      setExtra({ pedidos, registros });
+    })();
+  }, []);
+  const conCel = egresados.filter((e) => String(e.celular || '').replace(/\D/g, '').length >= 6).length;
+  const presentes = [egresados, invitados, docentes, especiales].reduce((a, l) => a + l.filter((x) => x.asistio).length, 0);
+  const filas = [
+    ['Invitados cargados', invitados.length, 'se borran'],
+    ['Solicitudes de butacas', (solicitudes || []).length, 'se borran'],
+    ['Egresados en "No asiste"', egresados.filter((e) => e.activo === false).length, 'se reactivan'],
+    ['Egresados con cupo distinto de 3', egresados.filter((e) => Number(e.cupo_asignado) !== 3).length, 'pasan a 3'],
+    ['Egresados que entraron al portal', egresados.filter((e) => e.portal_ultimo_ingreso).length, 'se borra la marca'],
+    ['Presentes marcados', presentes, 'se reinician'],
+    ['Pedidos de ayuda', extra.pedidos ?? '…', 'se borran'],
+    ['Registros de Portal, Puerta y Ayuda', extra.registros ?? '…', borrarReg ? 'se borran' : 'quedan'],
+    ['Egresados con celular cargado', conCel, borrarCel ? 'se borran' : 'quedan'],
+    ['Etapa', config.estado_etapa || 'abierta', 'pasa a Abierta'],
+  ];
+  const ejecutar = async () => {
+    if (texto.trim().toUpperCase() !== 'LIMPIAR' || !respaldoOk) return;
+    setTrabajando(true);
+    try {
+      const { data, error } = await supabase.rpc('admin_limpieza_apertura', { p_borrar_celulares: borrarCel, p_borrar_registro: borrarReg, p_usuario: perfilStaff?.nombre || perfilStaff?.email || '' });
+      if (error) throw error;
+      setResultado(data); await recargar(); notify('✓ Sistema listo para abrir.');
+    } catch (err) {
+      notify(/admin_limpieza_apertura|PGRST202|function/i.test(err.message || '') ? 'Falta correr el SQL de la v30 (sql_v30.sql).' : 'No se pudo limpiar: ' + err.message, 'error');
+    } finally { setTrabajando(false); }
+  };
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-3" onClick={() => !trabajando && cerrar()}>
+      <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-5 space-y-4 text-slate-800" onClick={(e) => e.stopPropagation()}>
+        <div className="flex justify-between items-start gap-2">
+          <div><h3 className="font-extrabold text-lg">🧹 Preparar para abrir</h3><p className="text-xs text-slate-500">Borra lo que quedó de las pruebas y deja el sistema listo para la carga real. <b>No toca</b> egresados (nombres, DNI, cursos), docentes, VIP, usuarios, sala ni escudo.</p></div>
+          <button type="button" onClick={cerrar} disabled={trabajando} className="px-3 py-1.5 bg-slate-100 rounded-lg text-xs font-bold cursor-pointer">Cerrar</button>
+        </div>
+        {resultado ? (
+          <div className="p-4 rounded-xl bg-emerald-50 border-2 border-emerald-400 space-y-1 text-sm">
+            <p className="font-extrabold text-emerald-800">✓ Listo. El sistema quedó preparado para abrir.</p>
+            <p>Se borraron {resultado.invitados} invitados, {resultado.solicitudes} solicitudes, {resultado.pedidos} pedidos de ayuda y {resultado.registros} registros de prueba. Se reactivaron {resultado.reactivados} egresados y se reiniciaron {resultado.presentes} presentes{borrarCel ? `; se borraron ${resultado.celulares} celulares` : ''}. Cupo 3 y etapa Abierta.</p>
+            <p className="text-xs text-slate-600">Quedó anotado en el registro de actividad. A partir de ahora no conviene probar con egresados reales.</p>
+          </div>
+        ) : (<>
+          <div>
+            <p className="text-xs font-bold uppercase text-slate-500 mb-1.5">1 · Lo que hay ahora</p>
+            <table className="w-full text-sm border rounded-xl overflow-hidden"><tbody className="divide-y">
+              {filas.map(([t, n, q]) => <tr key={t}><td className="px-3 py-1.5">{t}</td><td className="px-3 py-1.5 font-bold text-right">{n}</td><td className="px-3 py-1.5 text-xs text-slate-500">{q}</td></tr>)}
+            </tbody></table>
+          </div>
+          <div className={`p-3 rounded-xl border-2 ${respaldoOk ? 'border-emerald-400 bg-emerald-50' : 'border-amber-400 bg-amber-50'}`}>
+            <p className="text-xs font-bold uppercase text-slate-600 mb-1.5">2 · Respaldo (obligatorio)</p>
+            <button type="button" disabled={haciendoRespaldo} onClick={async () => { const ok = await descargarRespaldo(); if (ok !== false) setRespaldoOk(true); }} className="px-4 py-2 bg-emerald-700 text-white rounded-xl text-xs font-bold cursor-pointer disabled:opacity-60">{haciendoRespaldo ? 'Armando respaldo…' : respaldoOk ? '✓ Respaldo descargado · bajar otro' : '💾 Descargar respaldo completo'}</button>
+            <p className="text-[11px] text-slate-600 mt-1">Guardá el Excel en la compu. Con eso se puede recuperar cualquier dato si hiciera falta.</p>
+          </div>
+          <div className="space-y-2">
+            <p className="text-xs font-bold uppercase text-slate-500">3 · Opciones</p>
+            <label className="flex gap-2 text-sm items-start"><input type="checkbox" checked={borrarReg} onChange={(e) => setBorrarReg(e.target.checked)} className="mt-1" /><span>Borrar del registro de actividad lo de las pruebas de <b>Portal, Puerta y Ayuda</b> (el resto del registro queda).</span></label>
+            <label className="flex gap-2 text-sm items-start"><input type="checkbox" checked={borrarCel} onChange={(e) => setBorrarCel(e.target.checked)} className="mt-1" /><span>Borrar el <b>celular de todos los egresados</b>. Marcalo <b>solo si son de prueba</b>; si vienen de una planilla oficial, dejalo sin marcar. Si vas a usar "Portal: pedir celular", un celular de prueba le pediría al egresado los números de otro teléfono.</span></label>
+          </div>
+          <div className="space-y-2">
+            <p className="text-xs font-bold uppercase text-slate-500">4 · Confirmar</p>
+            <input type="text" value={texto} onChange={(e) => setTexto(e.target.value)} placeholder='Escribí LIMPIAR' className="w-full px-3 py-2.5 rounded-xl border-2 text-center font-bold tracking-widest" />
+            <button type="button" onClick={ejecutar} disabled={trabajando || !respaldoOk || texto.trim().toUpperCase() !== 'LIMPIAR'} className="w-full py-3 bg-rose-600 hover:bg-rose-700 disabled:opacity-40 text-white rounded-xl font-extrabold cursor-pointer">{trabajando ? 'Limpiando…' : !respaldoOk ? 'Primero descargá el respaldo' : '🧹 Limpiar y dejar listo para abrir'}</button>
+          </div>
+        </>)}
+      </div>
+    </div>
+  );
+}
+
 // ---------- Ficha de persona: busca a cualquiera del sistema y muestra todo lo que pasó con esa persona ----------
 const TABLA_DE_CLASE = { egresado: 'egresados', invitado: 'invitados', docente: 'docentes', vip: 'invitados_especiales' };
 function FichaPersona({ egresados, invitados, docentes, especiales, solicitudes, usuariosSistema, perfilStaff, config, recargar, notify, abrirEditar }) {
@@ -3666,6 +3751,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
   };
 
   const [modalAviso, setModalAviso] = useState(false);
+  const [modalLimpieza, setModalLimpieza] = useState(false);
   const [haciendoRespaldo, setHaciendoRespaldo] = useState(false);
   const [autoParcial, setAutoParcial] = useState(isoALocal(config.fecha_cierre_parcial));
   const [autoDefinitivo, setAutoDefinitivo] = useState(isoALocal(config.fecha_definitivo));
@@ -3718,8 +3804,10 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
       XLSX.writeFile(libro, nombre);
       await registrarLog('RESPALDO', 'Sistema', `Descargó el respaldo completo (${resumen.map((r) => `${r.Tabla} ${r.Filas}`).join(', ')})`);
       notify(`Respaldo descargado: ${nombre}`);
+      return true;
     } catch (err) {
       notify('No se pudo armar el respaldo: ' + err.message, 'error');
+      return false;
     } finally { setHaciendoRespaldo(false); }
   };
 
@@ -4672,6 +4760,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
         )}
       </div>
 
+      {modalLimpieza && <ModalLimpieza egresados={egresados} invitados={invitados} docentes={docentes} especiales={especiales} solicitudes={solicitudes} config={config} perfilStaff={perfilStaff} descargarRespaldo={descargarRespaldo} haciendoRespaldo={haciendoRespaldo} recargar={recargar} notify={notify} cerrar={() => setModalLimpieza(false)} />}
       {modalAviso && <AvisoDiaAnterior egresados={egresados} invitados={invitados} cerrar={() => setModalAviso(false)} registrarLog={registrarLog} />}
       {tab === 'egresados' && (
         <div className="bg-white rounded-2xl border p-5 space-y-4">
@@ -5767,6 +5856,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
           <p className="text-xs text-slate-200 mt-0.5">Acciones críticas de reinicio de asistencias y borrado de datos</p>
         </div>
         <div className="flex flex-wrap items-center gap-2.5">
+          <button onClick={() => setModalLimpieza(true)} className="px-4 py-2.5 bg-white text-[#6B1D2F] hover:bg-rose-50 rounded-xl text-xs font-extrabold flex items-center gap-2 shadow cursor-pointer">🧹 Preparar para abrir</button>
           <button onClick={reiniciarAsistenciasGeneral} className="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow cursor-pointer"><RotateCcw className="w-4 h-4" /> 🔄 Reiniciar Asistencias</button>
           <button onClick={borrarInvitadosEgresados} className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow cursor-pointer"><Trash2 className="w-4 h-4" /> 🗑️ Borrar Invitados</button>
         </div>
