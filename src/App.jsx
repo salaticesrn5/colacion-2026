@@ -182,6 +182,10 @@ const plazasFamiliaresDe = (egr, { config, invitados, solicitudes }) => {
 // ---------- Historial de cambios (se muestra con el botón "📋 Novedades"). Agregar arriba en cada entrega. ----------
 const NOVEDADES = [
   { v: 'v30', fecha: '20/11/2026', items: [
+    'Aforo y Sala: grupo de sector nuevo "VIP, autoridades y movilidad reducida". Los VIP y las FAMILIAS COMPLETAS con alguien con movilidad reducida se sientan ahí: lo ven en sus pases y se cuentan juntos en "asignadas vs. necesarias".',
+    'Pases de las familias con movilidad reducida en color naranja (grupo e individuales), para reconocerlos en la Puerta.',
+    'Portal: queda registrado cuando el egresado descarga su QR, el del grupo familiar o el de cada invitado (y cuando abre el video).',
+    'Egresados: filtro "QR descargados" (Bajaron su QR / No bajaron / Familia sin bajar), y en la ficha de persona se ve si y cuándo descargó cada QR.',
     'Aforo y Sala: la primera fila (F1, cortesía) tiene ahora 25 butacas completas; el croquis suma 523.',
     'Panel de Mantenimiento: botón "🧹 Preparar para abrir". Muestra lo que hay, pide bajar el respaldo y con "LIMPIAR" borra todo lo de las pruebas (invitados, solicitudes, presentes, marcas del portal, pedidos de ayuda y registros de prueba), con la opción de borrar los celulares. Reactiva egresados, docentes y VIP en "No asiste". Deja cupo 3 y etapa Abierta.'] },
   { v: 'v29', fecha: '20/11/2026', items: [
@@ -1060,6 +1064,15 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
     if (tipoUsuario === 'egresado') paseEgresado(personaPase, config);
     else if (tipoUsuario === 'docente') paseDocente(personaPase, config);
     else paseVip(personaPase, config);
+    registrarPortal('DESCARGA_QR', tipoUsuario === 'egresado' ? '[EGRESADO] Descargó su QR de egresado' : `[${tipoUsuario.toUpperCase()}] Descargó su pase`);
+  };
+  const descargarQrGrupo = () => {
+    paseGrupo(datosPersona, miGrupo, config);
+    registrarPortal('DESCARGA_QR', `[GRUPO] Descargó el QR del grupo familiar (${miGrupo.length}: ${miGrupo.map((i) => i.nombre_completo).join(', ')})`.slice(0, 900));
+  };
+  const descargarQrInvitado = (inv) => {
+    paseInvitado(inv, datosPersona, config);
+    registrarPortal('DESCARGA_QR', `[INVITADO] Descargó el QR individual de ${inv.nombre_completo} (DNI ${inv.dni || 'S/D'})`);
   };
 
   return (
@@ -1146,7 +1159,7 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
                 <ul className="text-xs text-slate-700 space-y-0.5">
                   {miGrupo.map((g) => <li key={g.id}>{g.nombre_completo}{tieneMovilidad(g) ? ' ♿' : ''}</li>)}
                 </ul>
-                <button type="button" onClick={() => paseGrupo(datosPersona, miGrupo, config)} className="w-full py-2.5 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 shadow cursor-pointer" style={{ backgroundColor: colorFamiliaDe(datosPersona) }}>
+                <button type="button" onClick={descargarQrGrupo} className="w-full py-2.5 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 shadow cursor-pointer" style={{ backgroundColor: colorFamiliaDe(datosPersona) }}>
                   <Download className="w-4 h-4" /> Descargar QR del Grupo Familiar
                 </button>
                 <p className="text-[11px] font-bold text-slate-600">📍 {accesoFamiliaDe(datosPersona)}</p>
@@ -1161,7 +1174,7 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
             {tipoUsuario === 'egresado' && (
               <>
                 {videoActivo && (
-                  <button type="button" onClick={() => setVerVideo(true)} className="w-full py-2 bg-white border-2 border-[#6B1D2F] text-[#6B1D2F] rounded-lg font-bold text-xs cursor-pointer">▶ ¿Dudas? Mirá el video paso a paso</button>
+                  <button type="button" onClick={() => { setVerVideo(true); registrarPortal('VIDEO', 'Abrió el video tutorial'); }} className="w-full py-2 bg-white border-2 border-[#6B1D2F] text-[#6B1D2F] rounded-lg font-bold text-xs cursor-pointer">▶ ¿Dudas? Mirá el video paso a paso</button>
                 )}
                 <div className="border-2 border-emerald-500 bg-emerald-50 p-4 rounded-xl space-y-2">
                   <label className="block text-xs font-bold text-emerald-900 uppercase">📱 Tu Celular{whatsappActivo ? ' / WhatsApp' : ''} {whatsappActivo ? <span className="text-rose-600">* Obligatorio</span> : <span className="text-slate-500">(opcional)</span>}</label>
@@ -1205,7 +1218,7 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
                           ) : (
                             <button 
                               type="button" 
-                              onClick={() => paseInvitado(guardadoInv, datosPersona, config)} 
+                              onClick={() => descargarQrInvitado(guardadoInv)} 
                               className="text-white px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 shadow-xs cursor-pointer"
                               style={{ backgroundColor: colorFamiliaDe(datosPersona) }}
                             >
@@ -1378,6 +1391,7 @@ const COLOR_PASE = {
   egresado: '#6B1D2F', // bordó institucional
   cn: '#15803D',       // familiares de Ciencias Naturales (TM)
   edu: '#1D4ED8',      // familiares de Educación (TT)
+  movilidad: '#C2410C', // familias con alguien con movilidad reducida (v30): entran por abajo y se sientan con VIP
   familia: '#475569',  // familiares sin orientación cargada
   docente: '#374151',  // gris oscuro
   vip: '#A16207',      // dorado
@@ -1411,7 +1425,7 @@ const actualizarFamiliasMovilidad = (invitados) => { FAMILIAS_MOVILIDAD.clear();
 const marcarFamiliaMovilidad = (egrId, tiene) => { if (!egrId) return; if (tiene) FAMILIAS_MOVILIDAD.add(egrId); else FAMILIAS_MOVILIDAD.delete(egrId); };
 const familiaConMovilidad = (egr) => !!(egr && egr.id && FAMILIAS_MOVILIDAD.has(egr.id));
 const accesoFamiliaDe = (egr) => (familiaConMovilidad(egr) ? ACCESO_TEXTO.abajoMovilidad : ({ cn: ACCESO_TEXTO.abajo, edu: ACCESO_TEXTO.arriba }[tipoOrientacion(egr)] || ACCESO_TEXTO.aConfirmar));
-const colorFamiliaDe = (egr) => COLOR_PASE[tipoOrientacion(egr)] || COLOR_PASE.familia;
+const colorFamiliaDe = (egr) => (familiaConMovilidad(egr) ? COLOR_PASE.movilidad : (COLOR_PASE[tipoOrientacion(egr)] || COLOR_PASE.familia));
 const textoCurso = (egr) => [egr?.division, etiquetaOrientacion(egr)].filter(Boolean).join(' · ');
 // Orden de los cursos: primero turno mañana (TM), después tarde (TT); dentro de cada turno, por sección
 const claveCurso = (div) => {
@@ -1772,7 +1786,8 @@ const GRUPOS_SALA = [
   { valor: 'familias', etiqueta: 'Familias (cualquier orientación)', color: '#0F766E' },
   { valor: 'docentes', etiqueta: 'Docentes', color: COLOR_PASE.docente },
   { valor: 'vip', etiqueta: 'VIP / Autoridades', color: COLOR_PASE.vip },
-  { valor: 'movilidad', etiqueta: 'Movilidad reducida', color: '#D97706' },
+  { valor: 'vip_movilidad', etiqueta: 'VIP, autoridades y movilidad reducida', color: '#B45309' },
+  { valor: 'movilidad', etiqueta: 'Movilidad reducida (sola)', color: '#D97706' },
   { valor: 'reservado', etiqueta: 'Reservado / No usar', color: '#94A3B8' },
 ];
 const grupoSalaInfo = (v) => GRUPOS_SALA.find((g) => g.valor === v) || GRUPOS_SALA[GRUPOS_SALA.length - 1];
@@ -1813,9 +1828,15 @@ const ubicacionPara = ({ tipo, egr, movilidad }, config) => {
   let grupos;
   if (tipo === 'egresado') grupos = ['egresados'];
   else if (tipo === 'docente') grupos = ['docentes'];
-  else if (tipo === 'vip') grupos = ['vip'];
+  else if (tipo === 'vip') grupos = ['vip', 'vip_movilidad'];
   else grupos = [{ cn: 'familias_cn', edu: 'familias_edu' }[tipoOrientacion(egr)], 'familias'].filter(Boolean);
   if (movilidad && de('movilidad').length) return `${textoSectores(de('movilidad'))} (movilidad reducida)`;
+  if (movilidad && de('vip_movilidad').length) return `${textoSectores(de('vip_movilidad'))} (movilidad reducida)`;
+  // Toda la familia de alguien con movilidad reducida se sienta junta en ese sector
+  if (tipo === 'invitado' && familiaConMovilidad(egr)) {
+    if (de('vip_movilidad').length) return `${textoSectores(de('vip_movilidad'))} (grupo con movilidad reducida)`;
+    if (de('movilidad').length) return `${textoSectores(de('movilidad'))} (grupo con movilidad reducida)`;
+  }
   for (const g of grupos) if (de(g).length) return textoSectores(de(g));
   return '';
 };
@@ -3265,6 +3286,7 @@ function FichaPersona({ egresados, invitados, docentes, especiales, solicitudes,
             {sel.clase === 'egresado' && (
               <div className="text-sm space-y-2">
                 <p>Celular <b>{item.celular || 'S/N'}</b> · cupo <b>{cupoDe(item, config)}</b> · invitados cargados <b>{misInv.length}</b>{item.portal_ultimo_ingreso ? ` · entró al portal ${item.portal_ingresos || 1} vez/veces (última ${hora(item.portal_ultimo_ingreso)})` : ' · nunca entró al portal'}</p>
+                {'qr_descargado_at' in item && <p className="text-xs">📲 QR del egresado: <b>{item.qr_descargado_at ? `descargado (último ${hora(item.qr_descargado_at)})` : 'todavía no lo descargó'}</b>{misInv.length > 0 ? <> · QR de la familia: <b>{item.qr_familia_descargado_at ? `descargado (último ${hora(item.qr_familia_descargado_at)})` : 'todavía no lo descargó'}</b></> : ''}</p>}
                 {misInv.length > 0 && (
                   <div className="divide-y border rounded-xl">
                     {misInv.map((i) => (
@@ -3317,6 +3339,10 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
   const [filtroEgresado, setFiltroEgresado] = useState('');
   const [filtroPortal, setFiltroPortal] = useState('todos');
   const [filtroAsiste, setFiltroAsiste] = useState('todos');
+  const [filtroQr, setFiltroQr] = useState('todos');
+  const tieneInvitados = (e) => invitados.some((i) => i.egresado_id === e.id);
+  const pasaFiltroQr = (e) => filtroQr === 'todos' || (e.activo !== false && (
+    filtroQr === 'con_qr' ? !!e.qr_descargado_at : filtroQr === 'sin_qr' ? !e.qr_descargado_at : (tieneInvitados(e) && !e.qr_familia_descargado_at)));
   const [filtroDocente, setFiltroDocente] = useState('');
   const [filtroVip, setFiltroVip] = useState('');
   
@@ -4633,7 +4659,8 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
   const fechaCorta = (v) => { const d = new Date(v); return isNaN(d.getTime()) ? '' : d.toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); };
   const egresadosFiltrados = egresados.filter((e) => coincideBusqueda(e, filtroEgresado) && coincideCurso(e, filtroCursoEgr)
     && (filtroPortal === 'todos' || (filtroPortal === 'entraron' ? entroPortal(e) : (!entroPortal(e) && e.activo !== false)))
-    && (filtroAsiste === 'todos' || (filtroAsiste === 'no_asisten' ? e.activo === false : e.activo !== false)));
+    && (filtroAsiste === 'todos' || (filtroAsiste === 'no_asisten' ? e.activo === false : e.activo !== false))
+    && pasaFiltroQr(e));
   // PDF (impresión) de los egresados que no asisten, respetando el curso elegido
   const pdfNoAsisten = () => {
     const lista = egresados.filter((e) => e.activo === false && coincideCurso(e, filtroCursoEgr))
@@ -4789,7 +4816,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
           <div className="flex flex-wrap items-center gap-2 text-xs">
             <SelectorCurso egresados={egresados} valor={filtroCursoEgr} onChange={setFiltroCursoEgr} />
             <span className="font-bold text-slate-500">Mostrando {egresadosFiltrados.length} de {egresados.length}</span>
-            {(filtroCursoEgr || filtroEgresado || filtroPortal !== 'todos' || filtroAsiste !== 'todos') && <button onClick={() => { setFiltroCursoEgr(''); setFiltroEgresado(''); setFiltroPortal('todos'); setFiltroAsiste('todos'); }} className="px-2.5 py-1 bg-white border rounded-lg font-bold text-slate-600 cursor-pointer">Quitar filtros</button>}
+            {(filtroCursoEgr || filtroEgresado || filtroPortal !== 'todos' || filtroAsiste !== 'todos' || filtroQr !== 'todos') && <button onClick={() => { setFiltroCursoEgr(''); setFiltroEgresado(''); setFiltroPortal('todos'); setFiltroAsiste('todos'); setFiltroQr('todos'); }} className="px-2.5 py-1 bg-white border rounded-lg font-bold text-slate-600 cursor-pointer">Quitar filtros</button>}
           </div>
 
           <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -4799,6 +4826,20 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
             ))}
             <button onClick={pdfNoAsisten} className="ml-auto px-3 py-1 rounded-full border border-rose-300 bg-rose-50 text-rose-700 font-bold cursor-pointer">📄 PDF de los que no asisten</button>
           </div>
+
+          {egresados.some((e) => 'qr_descargado_at' in e) && (() => {
+            const act = egresados.filter((e) => e.activo !== false && coincideCurso(e, filtroCursoEgr));
+            const conQr = act.filter((e) => e.qr_descargado_at).length;
+            const famSin = act.filter((e) => tieneInvitados(e) && !e.qr_familia_descargado_at).length;
+            return (
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="font-bold text-slate-600">QR descargados: egresado {conQr} de {act.length} · familias sin descargar {famSin}</span>
+                {[['todos', 'Todos'], ['con_qr', '✔ Bajaron su QR'], ['sin_qr', '✖ No bajaron su QR'], ['familia_sin_qr', '✖ Familia sin bajar']].map(([v, t]) => (
+                  <button key={v} onClick={() => setFiltroQr(v)} className={`px-3 py-1 rounded-full border font-bold cursor-pointer ${filtroQr === v ? 'bg-[#6B1D2F] text-white border-[#6B1D2F]' : 'bg-white text-slate-600'}`}>{t}</button>
+                ))}
+              </div>
+            );
+          })()}
 
           {hayDatoPortal && (
             <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -5467,14 +5508,22 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
         const famDe = (t) => activos.filter((e) => tipoOrientacion(e) === t).reduce((acc, e) => acc + plazasFamiliaresDe(e, ctx), 0);
         const famSinOri = activos.filter((e) => !tipoOrientacion(e)).reduce((acc, e) => acc + plazasFamiliaresDe(e, ctx), 0);
         const idsActivos = new Set(activos.map((e) => e.id));
+        // Personas con movilidad: si hay un sector para ellas, se sientan ahí y no en el de su familia
+        // Familias con alguien con movilidad reducida: si hay sector para ellas, TODO el grupo se sienta ahí y se descuenta de su orientación
+        const famsMov = activos.filter((e) => familiaConMovilidad(e));
+        const plazasMov = (lista) => lista.reduce((acc, e) => acc + plazasFamiliaresDe(e, ctx), 0);
+        const movVip = especiales.filter((v) => v.activo !== false && tieneMovilidad(v)).length;
+        const haySectorMov = (salaEdit.sectores || []).some((x) => x.grupo === 'movilidad' || x.grupo === 'vip_movilidad');
+        const movDe = (t) => (haySectorMov ? plazasMov(famsMov.filter((e) => tipoOrientacion(e) === t)) : 0);
         const necesita = {
           egresados: totalEgresados,
-          familias_cn: famDe('cn'),
-          familias_edu: famDe('edu'),
-          familias: famDe('cn') + famDe('edu') + famSinOri,
+          familias_cn: famDe('cn') - movDe('cn'),
+          familias_edu: famDe('edu') - movDe('edu'),
+          familias: famDe('cn') + famDe('edu') + famSinOri - (haySectorMov ? plazasMov(famsMov) : 0),
           docentes: totalDocentesConButaca,
           vip: totalEspeciales,
-          movilidad: invitados.filter((i) => tieneMovilidad(i) && idsActivos.has(i.egresado_id)).length + especiales.filter((v) => v.activo !== false && tieneMovilidad(v)).length,
+          vip_movilidad: totalEspeciales + plazasMov(famsMov),
+          movilidad: plazasMov(famsMov) + movVip,
         };
         const totalAsignadas = Object.keys(asignacion).length;
         const filasOpciones = FILAS_TEATRO.map((f) => f.fila);
@@ -5581,7 +5630,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
                   {GRUPOS_SALA.filter((g) => g.valor !== 'reservado').map((g) => {
                     const asig = butacasPorGrupo[g.valor] || 0;
                     const nec = necesita[g.valor] || 0;
-                    const usado = asig > 0 || ['egresados', 'docentes', 'vip', 'familias_cn', 'familias_edu'].includes(g.valor);
+                    const usado = asig > 0 || ['egresados', 'docentes', 'familias_cn', 'familias_edu'].includes(g.valor) || (g.valor === 'vip' && !(butacasPorGrupo.vip_movilidad > 0));
                     if (!usado) return null;
                     const dif = asig - nec;
                     return (
@@ -5598,7 +5647,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
             </div>
             <p className="text-[11px] text-slate-500">
               Butacas en sectores: <b>{totalAsignadas}</b> · sin asignar: <b>{BUTACAS_CROQUIS - totalAsignadas}</b> · ocupación prevista: <b>{totalOcupado}</b> de <b>{capNum || CAPACIDAD}</b>.
-              {' '}"Familias" se calcula con la etapa actual (en Cierre Parcial cuenta los invitados cargados). Las personas con movilidad reducida también están contadas en su familia.
+              {' '}"Familias" se calcula con la etapa actual (en Cierre Parcial cuenta los invitados cargados). {haySectorMov ? `Las familias con alguien con movilidad reducida (${famsMov.length}) se sientan completas en su sector (con VIP o propio) y se descuentan de su orientación.` : 'Las familias con movilidad reducida también están contadas en su orientación.'}
             </p>
           </div>
 
