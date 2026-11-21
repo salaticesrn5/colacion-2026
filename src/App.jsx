@@ -182,7 +182,8 @@ const plazasFamiliaresDe = (egr, { config, invitados, solicitudes }) => {
 // ---------- Historial de cambios (se muestra con el botón "📋 Novedades"). Agregar arriba en cada entrega. ----------
 const NOVEDADES = [
   { v: 'v30', fecha: '20/11/2026', items: [
-    'Panel de Mantenimiento: botón "🧹 Preparar para abrir". Muestra lo que hay, pide bajar el respaldo y con "LIMPIAR" borra todo lo de las pruebas (invitados, solicitudes, presentes, marcas del portal, pedidos de ayuda y registros de prueba), con la opción de borrar los celulares. Deja cupo 3 y etapa Abierta.'] },
+    'Aforo y Sala: la primera fila (F1, cortesía) tiene ahora 25 butacas completas; el croquis suma 523.',
+    'Panel de Mantenimiento: botón "🧹 Preparar para abrir". Muestra lo que hay, pide bajar el respaldo y con "LIMPIAR" borra todo lo de las pruebas (invitados, solicitudes, presentes, marcas del portal, pedidos de ayuda y registros de prueba), con la opción de borrar los celulares. Reactiva egresados, docentes y VIP en "No asiste". Deja cupo 3 y etapa Abierta.'] },
   { v: 'v29', fecha: '20/11/2026', items: [
     'Puerta: lo que quedó guardado sin conexión en un celular se descarta a las 12 horas. Así ningún ingreso de las pruebas se sube después de reiniciar la base.'] },
   { v: 'v28', fecha: '20/11/2026', items: [
@@ -1752,7 +1753,7 @@ const paseVip = (vip, config) => descargarPase({
 // Butacas numeradas de mayor (izquierda) a 1 (derecha), mirando al escenario.
 // Cada fila tiene tramos [desde, hasta] de butacas que existen.
 const FILAS_TEATRO = [
-  { fila: 'F1', bloque: 'delantero', tramos: [[16, 25], [1, 9]], cortesia: true },
+  { fila: 'F1', bloque: 'delantero', tramos: [[1, 25]], cortesia: true }, // 25 butacas (Mauro, 20/11)
   ...['F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9'].map((f) => ({ fila: f, bloque: 'delantero', tramos: [[1, 25]] })),
   { fila: 'F10', bloque: 'delantero', tramos: [[16, 25], [1, 10]] }, // área técnica: 11 a 15
   { fila: 'F11', bloque: 'delantero', tramos: [[17, 25], [1, 9]] },  // área técnica: 10 a 16
@@ -1761,8 +1762,8 @@ const FILAS_TEATRO = [
 const numeroFila = (f) => Number(String(f || '').replace(/\D/g, '')) || 0;
 const existeButaca = (filaObj, n) => filaObj.tramos.some(([a, b]) => n >= a && n <= b);
 const butacasDeFila = (filaObj) => filaObj.tramos.reduce((acc, [a, b]) => acc + (b - a + 1), 0);
-const BUTACAS_CROQUIS = FILAS_TEATRO.reduce((acc, f) => acc + butacasDeFila(f), 0); // 517
-const BUTACAS_CORTESIA = butacasDeFila(FILAS_TEATRO[0]); // 19
+const BUTACAS_CROQUIS = FILAS_TEATRO.reduce((acc, f) => acc + butacasDeFila(f), 0); // 523
+const BUTACAS_CORTESIA = butacasDeFila(FILAS_TEATRO[0]); // 25
 
 const GRUPOS_SALA = [
   { valor: 'egresados', etiqueta: 'Egresados', color: COLOR_PASE.egresado },
@@ -3034,6 +3035,8 @@ function ModalLimpieza({ egresados, invitados, docentes, especiales, solicitudes
     ['Invitados cargados', invitados.length, 'se borran'],
     ['Solicitudes de butacas', (solicitudes || []).length, 'se borran'],
     ['Egresados en "No asiste"', egresados.filter((e) => e.activo === false).length, 'se reactivan'],
+    ['Docentes en "No asiste"', docentes.filter((d) => d.activo === false).length, 'se reactivan'],
+    ['VIP en "No asiste"', especiales.filter((v) => v.activo === false).length, 'se reactivan'],
     ['Egresados con cupo distinto de 3', egresados.filter((e) => Number(e.cupo_asignado) !== 3).length, 'pasan a 3'],
     ['Egresados que entraron al portal', egresados.filter((e) => e.portal_ultimo_ingreso).length, 'se borra la marca'],
     ['Presentes marcados', presentes, 'se reinician'],
@@ -3057,13 +3060,13 @@ function ModalLimpieza({ egresados, invitados, docentes, especiales, solicitudes
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-3" onClick={() => !trabajando && cerrar()}>
       <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-5 space-y-4 text-slate-800" onClick={(e) => e.stopPropagation()}>
         <div className="flex justify-between items-start gap-2">
-          <div><h3 className="font-extrabold text-lg">🧹 Preparar para abrir</h3><p className="text-xs text-slate-500">Borra lo que quedó de las pruebas y deja el sistema listo para la carga real. <b>No toca</b> egresados (nombres, DNI, cursos), docentes, VIP, usuarios, sala ni escudo.</p></div>
+          <div><h3 className="font-extrabold text-lg">🧹 Preparar para abrir</h3><p className="text-xs text-slate-500">Borra lo que quedó de las pruebas y deja el sistema listo para la carga real. <b>No borra</b> egresados, docentes ni VIP (solo reactiva a los que estaban en "No asiste"), ni usuarios, sala o escudo. Los docentes "sin butaca" siguen igual.</p></div>
           <button type="button" onClick={cerrar} disabled={trabajando} className="px-3 py-1.5 bg-slate-100 rounded-lg text-xs font-bold cursor-pointer">Cerrar</button>
         </div>
         {resultado ? (
           <div className="p-4 rounded-xl bg-emerald-50 border-2 border-emerald-400 space-y-1 text-sm">
             <p className="font-extrabold text-emerald-800">✓ Listo. El sistema quedó preparado para abrir.</p>
-            <p>Se borraron {resultado.invitados} invitados, {resultado.solicitudes} solicitudes, {resultado.pedidos} pedidos de ayuda y {resultado.registros} registros de prueba. Se reactivaron {resultado.reactivados} egresados y se reiniciaron {resultado.presentes} presentes{borrarCel ? `; se borraron ${resultado.celulares} celulares` : ''}. Cupo 3 y etapa Abierta.</p>
+            <p>Se borraron {resultado.invitados} invitados, {resultado.solicitudes} solicitudes, {resultado.pedidos} pedidos de ayuda y {resultado.registros} registros de prueba. Se reactivaron {resultado.reactivados} egresados, {resultado.docentes ?? 0} docentes y {resultado.vip ?? 0} VIP, y se reiniciaron {resultado.presentes} presentes{borrarCel ? `; se borraron ${resultado.celulares} celulares` : ''}. Cupo 3 y etapa Abierta.</p>
             <p className="text-xs text-slate-600">Quedó anotado en el registro de actividad. A partir de ahora no conviene probar con egresados reales.</p>
           </div>
         ) : (<>
@@ -4037,7 +4040,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
 
   const guardarSala = async () => {
     const cap = Number(salaEdit.capacidad);
-    if (!Number.isInteger(cap) || cap < 50 || cap > 2000) { notify('La capacidad tiene que ser un número entero (por ejemplo 517).', 'error'); return; }
+    if (!Number.isInteger(cap) || cap < 50 || cap > 2000) { notify('La capacidad tiene que ser un número entero (por ejemplo 525).', 'error'); return; }
     const sectores = salaEdit.sectores.map((s) => ({
       id: s.id, nombre: String(s.nombre || '').trim(), grupo: s.grupo,
       filaDesde: s.filaDesde, filaHasta: s.filaHasta,
