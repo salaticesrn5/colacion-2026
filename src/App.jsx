@@ -55,10 +55,12 @@ const validarCelularPortal = (val, obligatorio) => {
   return '';
 };
 // Respuesta de la verificación con los 4 números del celular (v25)
-const textoClavePortal = (v) => {
+const textoClavePortal = (v, conWhatsapp = false) => {
   const t = String(v || '');
   if (t === 'falta') return 'Escribí los últimos 4 números de tu celular.';
-  if (t === 'bloqueado') return 'Por seguridad, el acceso con este DNI quedó bloqueado 15 minutos por demasiados intentos. Si no recordás el celular que cargaste, comunicate con la escuela.';
+  if (t === 'bloqueado') return 'Por seguridad, el acceso con este DNI quedó bloqueado 15 minutos por demasiados intentos. ' + (conWhatsapp
+    ? 'Si no recordás el celular que cargaste, pedí ayuda tocando el botón verde de WhatsApp (abajo a la derecha).'
+    : 'Si no recordás el celular que cargaste, comunicate con la escuela.');
   if (t.startsWith('incorrecta')) { const n = Number(t.split(':')[1]); return `Los números no coinciden con el celular cargado.${n ? ` Te quedan ${n} intento${n === 1 ? '' : 's'}.` : ''}`; }
   return 'No se pudo verificar el celular.';
 };
@@ -66,7 +68,7 @@ const fechaHoraAR = (v) => { if (!v) return ''; const d = new Date(v); return is
 const CAPACIDAD_MAXIMA = 525;
 const CAPACIDAD_DEFINITIVA = 525; // número definitivo de butacas (decisión del 19/11/2026)
 const CUPO_BASE_DEFECTO = 4;
-const VERSION_APP = 'v32 · 22/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
+const VERSION_APP = 'v33 · 22/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
 const MSG_FALTA_COL_BUTACA = 'Falta crear la columna "ocupa_butaca" en la tabla docentes (Supabase). Ejecutá el SQL que te pasaron y volvé a intentar.';
 const esErrorColumnaButaca = (err) => /ocupa_butaca/i.test(err?.message || '') || err?.code === 'PGRST204' || err?.code === '42703';
 const aNumeroONulo = (v) => (v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
@@ -207,6 +209,11 @@ const plazasFamiliaresDe = (egr, { config, invitados, solicitudes }) => {
 
 // ---------- Historial de cambios (se muestra con el botón "📋 Novedades"). Agregar arriba en cada entrega. ----------
 const NOVEDADES = [
+  { v: 'v33', fecha: '22/11/2026', items: [
+    'Al cerrar la carga (Cierre Parcial): ya no se pueden pedir butacas extra, y los invitados guardados no se pueden cambiar. Los que tienen extras aprobadas solo completan esos lugares nuevos. Todos pueden seguir entrando a ver y descargar sus QR.',
+    'Administración: si se aprueba una extra con la carga cerrada, el egresado queda con lo que tenía cargado + las aprobadas (los lugares que no usó no se reabren).',
+    'Portal: los lugares libres (por ejemplo, las butacas extra aprobadas) aparecen abiertos para completar directo, con un aviso y un botón "Guardar". El botón "Editar" queda solo para cambiar a los invitados ya guardados.',
+    'Portal: si el acceso se bloquea por equivocarse 5 veces con el celular, el mensaje indica pedir ayuda con el botón verde de WhatsApp (si está activado).'] },
   { v: 'v32', fecha: '22/11/2026', items: [
     'Portal: el "Pase del Grupo Familiar" ahora aparece al pie del formulario, justo debajo del botón "Guardar", después de cargar los invitados.',
     'Portal: los errores se avisan apenas el egresado sale del campo, en rojo y grande debajo del campo (celular, nombre, DNI y motivo de las extras). No hace falta esperar a "Guardar".',
@@ -977,7 +984,7 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
       if (data.requiere_clave) {
         setPideClave({ nombre: data.persona?.nombre_completo || '' });
         if (data.clave !== 'falta') {
-          setError(textoClavePortal(data.clave));
+          setError(textoClavePortal(data.clave, whatsappActivo));
           registrarPortal('ERROR', data.clave === 'bloqueado' ? 'Acceso bloqueado 15 min por intentos fallidos con el celular' : 'Escribió mal los 4 números del celular', limpio);
         }
         return;
@@ -1010,6 +1017,7 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
     const irAlError = () => setTimeout(() => { const el = document.querySelector('[data-error-portal="1"]'); if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.focus?.(); } }, 50);
     const errCel = validarCelularPortal(celular, celularObligatorio);
     if (errCel) {
+      if (!editando) setEditando(true);
       errorPortal('Guardar invitados', errCel);
       irAlError();
       return;
@@ -1054,7 +1062,7 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
         .map((f) => ({ id: f.id || null, nombre_completo: (f.nombre_completo || '').trim(), dni: sanitizeDNI(f.dni || ''), es_grupal: f.es_grupal === true, movilidad_reducida: f.movilidad_reducida === true }));
       const { data, error: errRpc } = await rpcPortal('portal_guardar_invitados', { p_dni: sanitizeDNI(datosPersona.dni || dni), p_celular: celular, p_invitados: payload, ...(claveRef.current ? { p_clave: claveRef.current } : {}) });
       if (errRpc) throw errRpc;
-      if (data?.error_clave) throw new Error(textoClavePortal(data.error_clave) + ' Volvé a entrar con tu DNI.');
+      if (data?.error_clave) throw new Error(textoClavePortal(data.error_clave, whatsappActivo) + ' Volvé a entrar con tu DNI.');
       if (celular) claveRef.current = String(celular).replace(/\D/g, '').slice(-4);
       const antes = new Map(misInvitadosGuardados.map((i) => [i.id, i]));
       const despues = Array.isArray(data?.invitados) ? data.invitados : [];
@@ -1077,6 +1085,10 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
   // Paso 1: al apretar "Solicitar" se muestra el aviso (las plazas no están garantizadas)
   const pedirSolicitudExtra = (e) => {
     e.preventDefault();
+    if ((config.estado_etapa || 'abierta') !== 'abierta') {
+      errorPortal('Solicitud extra', 'El plazo para pedir butacas extra terminó: la carga cerró.');
+      return;
+    }
     if (misSolicitudes.length > 0) {
       errorPortal('Solicitud extra', 'Ya enviaste una solicitud de butacas extra. Solo se puede pedir una vez.');
       return;
@@ -1107,7 +1119,7 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
         ...(claveRef.current ? { p_clave: claveRef.current } : {}),
       });
       if (errRpc) throw errRpc;
-      if (data?.error_clave) throw new Error(textoClavePortal(data.error_clave) + ' Volvé a entrar con tu DNI.');
+      if (data?.error_clave) throw new Error(textoClavePortal(data.error_clave, whatsappActivo) + ' Volvé a entrar con tu DNI.');
       aplicarDatosEgresado(data);
       notify('Solicitud de butacas extra enviada.');
       registrarPortal('SOLICITUD_EXTRA', `Pidió ${Number(cantExtra)} butaca/s extra${obsExtra.trim() ? ` · "${obsExtra.trim().slice(0, 200)}"` : ''}`);
@@ -1126,7 +1138,7 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
     if (!window.confirm(aviso)) return;
     const { data: dNo, error: errRpc } = await rpcPortal('portal_no_asistire', { p_tipo: tipoUsuario, p_dni: sanitizeDNI(datosPersona.dni || dni), ...(claveRef.current ? { p_clave: claveRef.current } : {}) });
     if (errRpc) { errorPortal('No asistiré', 'No se pudo registrar: ' + mensajeErrorRPC(errRpc)); return; }
-    if (dNo?.error_clave) { errorPortal('No asistiré', textoClavePortal(dNo.error_clave) + ' Volvé a entrar con tu DNI.'); return; }
+    if (dNo?.error_clave) { errorPortal('No asistiré', textoClavePortal(dNo.error_clave, whatsappActivo) + ' Volvé a entrar con tu DNI.'); return; }
     registrarPortal('NO_ASISTIRE', tipoUsuario === 'egresado' ? 'Se dio de baja (libera su butaca y las de sus invitados)' : 'Se dio de baja');
     notify('Has marcado que no asistirás. ¡Gracias!');
     setDatosPersona(null);
@@ -1143,6 +1155,10 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
   if (tipoUsuario === 'egresado' && datosPersona?.id) marcarFamiliaMovilidad(datosPersona.id, misInvitadosGuardados.some(tieneMovilidad));
   const miGrupo = misInvitadosGuardados.filter(esGrupal);
   const hayGuardados = misInvitadosGuardados.length > 0;
+  // Lugares vacíos (por ejemplo, butacas extra aprobadas): se completan directo, sin apretar "Editar".
+  // "Editar" queda solo para cambiar a los invitados ya guardados.
+  const filaAbierta = (fila) => editando || (cargaHabilitada && !fila.guardado);
+  const lugaresNuevos = cargaHabilitada && !editando ? filasInvitados.filter((f) => !f.guardado).length : 0;
   const descargarMiPase = () => {
     if (!personaPase) return;
     if (tipoUsuario === 'egresado') paseEgresado(personaPase, config);
@@ -1192,10 +1208,10 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
               <div className="p-3 rounded-lg bg-amber-50 border border-amber-300 space-y-2">
                 <p className="text-sm font-bold text-amber-900">🔒 {pideClave.nombre ? `Hola, ${pideClave.nombre.split(' ').slice(-1)[0]}. ` : ''}Por seguridad, escribí los <u>últimos 4 números</u> del celular que cargaste.</p>
                 <input type="text" inputMode="numeric" autoFocus maxLength={4} value={clave} onChange={(e) => setClave(String(e.target.value || '').replace(/\D/g, '').slice(0, 4))} placeholder="Ej: 4521" className="w-full px-3 py-2 border-2 border-amber-400 rounded-lg text-center text-lg font-bold tracking-[0.4em]" aria-label="Últimos 4 números del celular" />
-                <p className="text-[11px] text-amber-800">¿Cambiaste de celular o no te acordás? Comunicate con la escuela y lo corrigen.</p>
+                <p className="text-[11px] text-amber-800">¿Cambiaste de celular o no te acordás? {whatsappActivo ? <>Pedí ayuda tocando el <b>botón verde de WhatsApp</b> (abajo a la derecha) y lo corrigen.</> : 'Comunicate con la escuela y lo corrigen.'}</p>
               </div>
             )}
-            {error && <p className="text-sm text-red-600">{error}</p>}
+            {error && <p role="alert" className="flex items-start gap-1.5 text-sm font-bold text-rose-700 bg-rose-50 border-2 border-rose-300 rounded-lg px-3 py-2"><span aria-hidden="true">⚠️</span><span>{error}</span></p>}
             <button type="submit" disabled={buscando} className="w-full py-2.5 bg-[#6B1D2F] text-white rounded-lg hover:bg-opacity-90 font-medium shadow disabled:opacity-60">
               {buscando ? 'Buscando...' : pideClave ? 'Entrar' : 'Continuar'}
             </button>
@@ -1279,6 +1295,9 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
                   )}
 
                   <h4 className="font-bold text-sm text-[#6B1D2F]">{cargaHabilitada ? `Carga de Invitados (${filasInvitados.length} cupos)` : `Tus invitados (${filasInvitados.length})`}</h4>
+                  {hayGuardados && lugaresNuevos > 0 && (
+                    <p className="text-sm font-bold text-indigo-900 bg-indigo-50 border-2 border-indigo-300 rounded-lg px-3 py-2">🆕 Tenés {lugaresNuevos} lugar{lugaresNuevos === 1 ? '' : 'es'} libre{lugaresNuevos === 1 ? '' : 's'} para completar. Cargá nombre y DNI y tocá <b>"Guardar"</b> (abajo).</p>
+                  )}
                   {filasInvitados.length === 0 && <p className="text-xs text-slate-500">No cargaste invitados.</p>}
                   {filasInvitados.map((fila, idx) => (
                     <div key={idx} className="p-3 bg-white border rounded-lg space-y-2.5">
@@ -1308,11 +1327,11 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
                         value={fila.nombre_completo} 
                         onChange={(e) => { const arr = [...filasInvitados]; arr[idx].nombre_completo = e.target.value; setFilasInvitados(arr); }} 
                         onBlur={() => tocar('n' + idx)}
-                        disabled={!editando}
-                        data-error-portal={editando && errNombreFila(fila, idx) ? '1' : undefined}
-                        className={`w-full px-2.5 py-1.5 border rounded text-xs ${editando && errNombreFila(fila, idx) ? 'border-2 border-rose-600 ring-2 ring-rose-200' : ''} ${!editando ? 'bg-slate-100 text-slate-600 cursor-not-allowed' : 'bg-white'}`} 
+                        disabled={!filaAbierta(fila)}
+                        data-error-portal={filaAbierta(fila) && errNombreFila(fila, idx) ? '1' : undefined}
+                        className={`w-full px-2.5 py-1.5 border rounded text-xs ${filaAbierta(fila) && errNombreFila(fila, idx) ? 'border-2 border-rose-600 ring-2 ring-rose-200' : ''} ${!filaAbierta(fila) ? 'bg-slate-100 text-slate-600 cursor-not-allowed' : 'bg-white'}`} 
                       />
-                      {editando && errNombreFila(fila, idx) && <AvisoCampo msg={errNombreFila(fila, idx)} />}
+                      {filaAbierta(fila) && errNombreFila(fila, idx) && <AvisoCampo msg={errNombreFila(fila, idx)} />}
 
                       <input 
                         type="text" 
@@ -1321,18 +1340,18 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
                         value={fila.dni} 
                         onChange={(e) => { const arr = [...filasInvitados]; arr[idx].dni = sanitizeDNI(e.target.value); setFilasInvitados(arr); }} 
                         onBlur={() => tocar('d' + idx)}
-                        disabled={!editando}
-                        data-error-portal={editando && errDniFila(fila, idx) ? '1' : undefined}
-                        className={`w-full px-2.5 py-1.5 border rounded text-xs font-mono ${editando && errDniFila(fila, idx) ? 'border-2 border-rose-600 ring-2 ring-rose-200' : ''} ${!editando ? 'bg-slate-100 text-slate-600 cursor-not-allowed' : 'bg-white'}`} 
+                        disabled={!filaAbierta(fila)}
+                        data-error-portal={filaAbierta(fila) && errDniFila(fila, idx) ? '1' : undefined}
+                        className={`w-full px-2.5 py-1.5 border rounded text-xs font-mono ${filaAbierta(fila) && errDniFila(fila, idx) ? 'border-2 border-rose-600 ring-2 ring-rose-200' : ''} ${!filaAbierta(fila) ? 'bg-slate-100 text-slate-600 cursor-not-allowed' : 'bg-white'}`} 
                       />
-                      {editando && errDniFila(fila, idx) && <AvisoCampo msg={errDniFila(fila, idx)} />}
+                      {filaAbierta(fila) && errDniFila(fila, idx) && <AvisoCampo msg={errDniFila(fila, idx)} />}
 
                       <div className="flex items-center gap-2 pt-1">
                         <input 
                           type="checkbox" 
                           id={`grupal-${idx}`}
                           checked={fila.es_grupal}
-                          disabled={!editando}
+                          disabled={!filaAbierta(fila)}
                           onChange={(e) => { const arr = [...filasInvitados]; arr[idx].es_grupal = e.target.checked; setFilasInvitados(arr); }}
                           className="w-4 h-4 text-[#6B1D2F] rounded border-gray-300 focus:ring-[#6B1D2F] cursor-pointer"
                         />
@@ -1345,7 +1364,7 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
                           type="checkbox" 
                           id={`movilidad-${idx}`}
                           checked={fila.movilidad_reducida === true}
-                          disabled={!editando}
+                          disabled={!filaAbierta(fila)}
                           onChange={(e) => { const arr = [...filasInvitados]; arr[idx].movilidad_reducida = e.target.checked; setFilasInvitados(arr); }}
                           className="w-4 h-4 text-[#6B1D2F] rounded border-gray-300 focus:ring-[#6B1D2F] cursor-pointer"
                         />
@@ -1370,9 +1389,20 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
                     </button>
                   </div>
                 ) : (
-                  <button type="button" onClick={() => setEditando(true)} className="w-full py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-bold shadow cursor-pointer">
-                    ✏️ Editar invitados
-                  </button>
+                  <div className="space-y-2">
+                    {lugaresNuevos > 0 && (
+                      <button onClick={guardarInvitados} disabled={guardando} className="w-full py-2.5 bg-[#6B1D2F] text-white rounded-lg text-sm font-bold hover:bg-opacity-95 shadow cursor-pointer">
+                        {guardando ? 'Guardando...' : `💾 Guardar ${lugaresNuevos === 1 ? 'el invitado nuevo' : 'los invitados nuevos'} y generar QR`}
+                      </button>
+                    )}
+                    {etapaCarga === 'abierta' ? (
+                      <button type="button" onClick={() => setEditando(true)} className="w-full py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-bold shadow cursor-pointer">
+                        ✏️ Editar invitados ya guardados
+                      </button>
+                    ) : (
+                      <p className="text-xs text-slate-600 bg-slate-100 border border-slate-300 rounded-lg px-3 py-2">🔒 La carga cerró: los invitados ya guardados no se pueden cambiar. Solo podés completar los lugares extra aprobados.</p>
+                    )}
+                  </div>
                 ))}
 
                 {tipoUsuario === 'egresado' && miGrupo.length > 0 && (
@@ -1403,12 +1433,12 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
                               ? '✕ Solicitud no aprobada'
                               : `⏳ Solicitud enviada: +${miSolicitud.cantidad_solicitada} butaca(s), pendiente de revisión`}
                         </p>
-                        {est === 'aprobada' && cargaHabilitada && <p>Ya podés cargar a tus invitados adicionales arriba (apretá "Editar invitados").</p>}
+                        {est === 'aprobada' && cargaHabilitada && <p>Ya podés cargar a tus invitados adicionales arriba, en los lugares libres, y tocar "Guardar".</p>}
                         {est !== 'aprobada' && <p className="opacity-80">Solo se puede enviar una solicitud por egresado.</p>}
                       </div>
                     );
-                  })() : etapaCarga === 'cierre_definitivo' ? (
-                    <p className="text-xs text-slate-500">La carga está cerrada: ya no se reciben solicitudes.</p>
+                  })() : etapaCarga !== 'abierta' ? (
+                    <p className="text-sm font-bold text-slate-700 bg-slate-100 border border-slate-300 rounded-lg px-3 py-2">🔒 El plazo para pedir butacas extra terminó: la carga cerró. Ya no se reciben solicitudes.</p>
                   ) : (
                     <>
                       <form onSubmit={pedirSolicitudExtra} className="flex flex-col sm:flex-row gap-2">
@@ -4434,7 +4464,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
     }
     const egr = egresados.find((e) => e.id === sol.egresado_id);
     const aviso = aprobar
-      ? `¿Aprobar ${cantidad} de ${pedidas} butaca(s) para ${sol.egresado_nombre}?\n\nSe suman ${cantidad} al cupo del egresado y la solicitud queda cerrada.`
+      ? `¿Aprobar ${cantidad} de ${pedidas} butaca(s) para ${sol.egresado_nombre}?\n\n${(config.estado_etapa || 'abierta') === 'abierta' ? `Se suman ${cantidad} al cupo del egresado` : `La carga ya cerró: tiene ${(invitados || []).filter((i) => i.egresado_id === sol.egresado_id).length} invitado(s) cargado(s) y se le abren ${cantidad} lugar(es) extra para completar`} y la solicitud queda cerrada.`
       : `¿Rechazar la solicitud de ${sol.egresado_nombre}?\n\nLa solicitud queda cerrada: el egresado no puede volver a pedir.`;
     if (!window.confirm(aviso)) return;
     try {
@@ -4450,7 +4480,9 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
         return;
       }
       if (aprobar && egr) {
-        const nuevoCupo = cupoDe(egr, config) + cantidad;
+        // Con la carga cerrada, los lugares que el egresado no usó ya se liberaron: el cupo nuevo es lo que tenía cargado + las aprobadas
+        const cargados = (invitados || []).filter((i) => i.egresado_id === egr.id).length;
+        const nuevoCupo = (config.estado_etapa || 'abierta') === 'abierta' ? cupoDe(egr, config) + cantidad : cargados + cantidad;
         const { error: errCupo } = await supabase.from('egresados').update({ cupo_asignado: nuevoCupo }).eq('id', egr.id);
         if (errCupo) {
           await recargar();
