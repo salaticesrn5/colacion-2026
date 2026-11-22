@@ -208,6 +208,7 @@ const plazasFamiliaresDe = (egr, { config, invitados, solicitudes }) => {
 // ---------- Historial de cambios (se muestra con el botón "📋 Novedades"). Agregar arriba en cada entrega. ----------
 const NOVEDADES = [
   { v: 'v32', fecha: '22/11/2026', items: [
+    'Portal: el "Pase del Grupo Familiar" ahora aparece al pie del formulario, justo debajo del botón "Guardar", después de cargar los invitados.',
     'Portal: los errores se avisan apenas el egresado sale del campo, en rojo y grande debajo del campo (celular, nombre, DNI y motivo de las extras). No hace falta esperar a "Guardar".',
     'Al apretar "Guardar" con un error, la página lleva directo al campo a corregir.',
     'Los carteles de aviso ahora son más grandes, aparecen abajo al centro y tienen una ✕ para cerrarlos. En el portal, los de error duran 15 segundos.'] },
@@ -1236,19 +1237,6 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
               )}
             </div>
 
-            {tipoUsuario === 'egresado' && miGrupo.length > 0 && (
-              <div className="p-4 rounded-lg border-2 text-center space-y-2" style={{ borderColor: colorFamiliaDe(datosPersona) }}>
-                <p className="font-bold text-sm" style={{ color: colorFamiliaDe(datosPersona) }}>👨‍👩‍👧 Pase del Grupo Familiar ({miGrupo.length} persona{miGrupo.length === 1 ? '' : 's'})</p>
-                <ul className="text-xs text-slate-700 space-y-0.5">
-                  {miGrupo.map((g) => <li key={g.id}>{g.nombre_completo}{tieneMovilidad(g) ? ' ♿' : ''}</li>)}
-                </ul>
-                <button type="button" onClick={descargarQrGrupo} className="w-full py-2.5 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 shadow cursor-pointer" style={{ backgroundColor: colorFamiliaDe(datosPersona) }}>
-                  <Download className="w-4 h-4" /> Descargar QR del Grupo Familiar
-                </button>
-                <p className="text-[11px] font-bold text-slate-600">📍 {accesoFamiliaDe(datosPersona)}</p>
-                <p className="text-[11px] text-slate-500">Un solo QR para todo el grupo: con escanearlo una vez ingresan todos los que figuran en la lista.</p>
-              </div>
-            )}
 
             <div className="hidden" ref={qrRef}>
               <QRCodeSVG value={valorQRPrincipal} size={300} level="H" includeMargin={true} />
@@ -1386,6 +1374,20 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
                     ✏️ Editar invitados
                   </button>
                 ))}
+
+                {tipoUsuario === 'egresado' && miGrupo.length > 0 && (
+                  <div className="p-4 rounded-lg border-2 text-center space-y-2" style={{ borderColor: colorFamiliaDe(datosPersona) }}>
+                    <p className="font-bold text-sm" style={{ color: colorFamiliaDe(datosPersona) }}>👨‍👩‍👧 Pase del Grupo Familiar ({miGrupo.length} persona{miGrupo.length === 1 ? '' : 's'})</p>
+                    <ul className="text-xs text-slate-700 space-y-0.5">
+                      {miGrupo.map((g) => <li key={g.id}>{g.nombre_completo}{tieneMovilidad(g) ? ' ♿' : ''}</li>)}
+                    </ul>
+                    <button type="button" onClick={descargarQrGrupo} className="w-full py-2.5 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 shadow cursor-pointer" style={{ backgroundColor: colorFamiliaDe(datosPersona) }}>
+                      <Download className="w-4 h-4" /> Descargar QR del Grupo Familiar
+                    </button>
+                    <p className="text-[11px] font-bold text-slate-600">📍 {accesoFamiliaDe(datosPersona)}</p>
+                    <p className="text-[11px] text-slate-500">Un solo QR para todo el grupo: con escanearlo una vez ingresan todos los que figuran en la lista.</p>
+                  </div>
+                )}
 
                 <div className="bg-gray-50 border rounded-xl p-4 space-y-3">
                   <h4 className="font-bold text-xs text-gray-800 uppercase">Solicitar Butacas Extra</h4>
