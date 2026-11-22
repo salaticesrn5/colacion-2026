@@ -28,6 +28,13 @@ const createTempAuthClient = () =>
   });
 
 const sanitizeDNI = (val) => String(val || '').replace(/\D/g, '').slice(0, 8);
+// Celular argentino: 10 números (característica + número), sin 0 ni 15. Ej: 2994444444
+const validarCelularPortal = (val, obligatorio) => {
+  const d = String(val || '').replace(/\D/g, '');
+  if (!d) return obligatorio ? 'El celular es obligatorio: 10 números, sin 0 ni 15 (ej: 2994444444).' : '';
+  if (d.length !== 10 || d.startsWith('0') || /^(\d)\1+$/.test(d)) return 'El celular no es válido: tienen que ser 10 números, sin 0 ni 15 (ej: 2994444444).';
+  return '';
+};
 // Respuesta de la verificación con los 4 números del celular (v25)
 const textoClavePortal = (v) => {
   const t = String(v || '');
@@ -40,7 +47,7 @@ const fechaHoraAR = (v) => { if (!v) return ''; const d = new Date(v); return is
 const CAPACIDAD_MAXIMA = 525;
 const CAPACIDAD_DEFINITIVA = 525; // número definitivo de butacas (decisión del 19/11/2026)
 const CUPO_BASE_DEFECTO = 4;
-const VERSION_APP = 'v30 · 21/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
+const VERSION_APP = 'v31 · 21/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
 const MSG_FALTA_COL_BUTACA = 'Falta crear la columna "ocupa_butaca" en la tabla docentes (Supabase). Ejecutá el SQL que te pasaron y volvé a intentar.';
 const esErrorColumnaButaca = (err) => /ocupa_butaca/i.test(err?.message || '') || err?.code === 'PGRST204' || err?.code === '42703';
 const aNumeroONulo = (v) => (v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
@@ -181,6 +188,11 @@ const plazasFamiliaresDe = (egr, { config, invitados, solicitudes }) => {
 
 // ---------- Historial de cambios (se muestra con el botón "📋 Novedades"). Agregar arriba en cada entrega. ----------
 const NOVEDADES = [
+  { v: 'v31', fecha: '21/11/2026', items: [
+    'El botón "📋 Novedades" ahora está solo en Administración y lo ven solo los administradores.',
+    'Portal: el celular del egresado es siempre obligatorio y tiene que tener 10 números, sin 0 ni 15 (ej: 2994444444).',
+    'Portal: cada invitado tiene que tener nombre y apellido (2 palabras, sin números) y un DNI de 7 u 8 números. No se acepta el DNI del propio egresado.',
+    'Portal: el pedido de butacas extra exige escribir el motivo y para quién son.'] },
   { v: 'v30', fecha: '21/11/2026', items: [
     'Portal: si la base no tiene todavía la verificación del celular, el portal sigue funcionando igual (antes, al guardar por segunda vez o pedir extras salía "falta configurar la base").',
     'Registro de actividad exportado con la hora en formato de 24 horas.',
@@ -294,8 +306,6 @@ export default function App() {
   const [loadingAuth, setLoadingAuth] = useState(true);
   const yaUbicadoRef = useRef(false);
   const [modalClave, setModalClave] = useState(false);
-  const [verNovedades, setVerNovedades] = useState(false);
-  const novedadNueva = (() => { try { return localStorage.getItem('novedades_vista') !== NOVEDADES[0].v; } catch (_) { return false; } })();
   const [claveNueva, setClaveNueva] = useState('');
   const [claveRepetida, setClaveRepetida] = useState('');
   const [verClave, setVerClave] = useState(false);
@@ -693,11 +703,7 @@ export default function App() {
 
       <p className="text-center text-[10px] text-slate-400 mt-2 print:hidden">
         Control de Acceso Colación 2026 · {VERSION_APP}
-        {session && perfilStaff && (perfilStaff.rol === 'admin' || perfilStaff.rol === 'coordinador') && (
-          <button type="button" onClick={() => setVerNovedades(true)} className="ml-2 px-2 py-0.5 rounded-full border border-slate-300 text-slate-600 font-bold cursor-pointer hover:bg-slate-100">📋 Novedades{novedadNueva ? ' 🔴' : ''}</button>
-        )}
       </p>
-      {verNovedades && <ModalNovedades cerrar={() => setVerNovedades(false)} />}
 
       {whatsappActivo && (
       <a
@@ -814,6 +820,7 @@ function ModalVideoTutorial({ cerrar }) {
 }
 
 function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, config, notify }) {
+  const celularObligatorio = true; // 21/11: siempre obligatorio (sirve para avisos y como clave de 4 números)
   const [verVideo, setVerVideo] = useState(false);
   const [dni, setDni] = useState('');
   const [tipoUsuario, setTipoUsuario] = useState('egresado');
@@ -957,8 +964,9 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
       errorPortal('Guardar invitados', 'La carga de invitados está cerrada. Si necesitás un cambio, comunicate con la escuela.');
       return;
     }
-    if (whatsappActivo && (!celular || celular.trim().length < 6)) {
-      errorPortal('Guardar invitados', 'El número de celular/WhatsApp es obligatorio para continuar.');
+    const errCel = validarCelularPortal(celular, celularObligatorio);
+    if (errCel) {
+      errorPortal('Guardar invitados', errCel);
       return;
     }
 
@@ -969,6 +977,21 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
       const dniFila = sanitizeDNI(filasInvitados[i].dni || '');
       if ((nombre && !dniFila) || (!nombre && dniFila)) {
         errorPortal('Guardar invitados', `Invitado #${i + 1}: completá el nombre y el DNI (o dejá los dos vacíos).`);
+        return;
+      }
+      if (nombre) {
+        const palabras = nombre.split(/\s+/).filter((w) => w.replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ]/g, '').length >= 2);
+        if (palabras.length < 2 || /\d/.test(nombre)) {
+          errorPortal('Guardar invitados', `Invitado #${i + 1}: escribí nombre y apellido completos (sin números).`);
+          return;
+        }
+      }
+      if (dniFila && (dniFila.length < 7 || /^(\d)\1+$/.test(dniFila))) {
+        errorPortal('Guardar invitados', `Invitado #${i + 1}: el DNI ${dniFila} no es válido. Tiene que tener 7 u 8 números.`);
+        return;
+      }
+      if (dniFila && dniFila === sanitizeDNI(datosPersona?.dni || dni)) {
+        errorPortal('Guardar invitados', `Invitado #${i + 1}: ese es tu propio DNI. Cargá el DNI de tu invitado.`);
         return;
       }
       if (dniFila) {
@@ -1016,8 +1039,12 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
       return;
     }
     const cel = (celular || datosPersona?.celular || '').trim();
-    if (whatsappActivo && cel.length < 6) {
-      errorPortal('Solicitud extra', 'Antes de pedir butacas extra, cargá tu celular / WhatsApp y guardá los datos: por ahí te avisamos si se aprueba.');
+    if (validarCelularPortal(cel, true)) {
+      errorPortal('Solicitud extra', 'Antes de pedir butacas extra, cargá tu celular (10 números, ej: 2994444444) y guardá los datos: por ahí te avisamos si se aprueba.');
+      return;
+    }
+    if (obsExtra.trim().length < 10) {
+      errorPortal('Solicitud extra', 'Contanos el motivo del pedido y para quién son las butacas (por ejemplo: "abuela y tía que viajan desde Neuquén").');
       return;
     }
     setAvisoSolicitud(true);
@@ -1190,12 +1217,12 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
                   <button type="button" onClick={() => { setVerVideo(true); registrarPortal('VIDEO', 'Abrió el video tutorial'); }} className="w-full py-2 bg-white border-2 border-[#6B1D2F] text-[#6B1D2F] rounded-lg font-bold text-xs cursor-pointer">▶ ¿Dudas? Mirá el video paso a paso</button>
                 )}
                 <div className="border-2 border-emerald-500 bg-emerald-50 p-4 rounded-xl space-y-2">
-                  <label className="block text-xs font-bold text-emerald-900 uppercase">📱 Tu Celular{whatsappActivo ? ' / WhatsApp' : ''} {whatsappActivo ? <span className="text-rose-600">* Obligatorio</span> : <span className="text-slate-500">(opcional)</span>}</label>
+                  <label className="block text-xs font-bold text-emerald-900 uppercase">📱 Tu Celular{whatsappActivo ? ' / WhatsApp' : ''} <span className="text-rose-600">* Obligatorio</span></label>
                   {config.portal_verificar_celular === true && <p className="text-[11px] text-emerald-800">🔒 Guardá bien este número: la próxima vez que entres te vamos a pedir sus <b>últimos 4 números</b>.</p>}
                   <input 
                     type="text" 
                     maxLength={15}
-                    placeholder="Ej: 2994444444" 
+                    placeholder="10 números, sin 0 ni 15. Ej: 2994444444" 
                     value={celular} 
                     onChange={(e) => setCelular(String(e.target.value || '').replace(/\D/g, '').slice(0, 15))} 
                     disabled={!editando}
@@ -1334,7 +1361,7 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
                         <select value={cantExtra} onChange={(e) => setCantExtra(e.target.value)} className="px-2 py-2 border rounded-xl text-xs bg-white">
                           <option value={1}>+1</option><option value={2}>+2</option><option value={3}>+3</option>
                         </select>
-                        <input type="text" placeholder="Observación (ej: abuelos)" value={obsExtra} onChange={(e) => setObsExtra(e.target.value)} className="w-full sm:flex-1 px-3 py-2 border rounded-xl text-xs bg-white outline-none" />
+                        <input type="text" placeholder="Motivo y para quién (obligatorio, ej: abuela y tía)" value={obsExtra} onChange={(e) => setObsExtra(e.target.value)} className="w-full sm:flex-1 px-3 py-2 border rounded-xl text-xs bg-white outline-none" />
                         <button type="submit" disabled={enviandoSol} className="w-full sm:w-auto px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow shrink-0 cursor-pointer">{enviandoSol ? 'Enviando...' : 'Solicitar'}</button>
                       </form>
                       <p className="text-[11px] text-slate-500">Se puede enviar <b>una sola solicitud</b> por egresado.</p>
@@ -3347,6 +3374,9 @@ function FichaPersona({ egresados, invitados, docentes, especiales, solicitudes,
 }
 
 function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActivo, perfilStaff, config, egresados, invitados, docentes, especiales, solicitudes, usuariosSistema, logsSistema, totalEgresados, totalDocentes, totalDocentesConButaca, totalDocentesSinButaca, totalEspeciales, butacasVipOcupadas = 0, butacasReservadas = 0, totalCuposFamiliares, totalOcupado, vacantesLibres, recargar, notify, reiniciarAsistenciasGeneral, borrarInvitadosEgresados, registrarLog }) {
+  const esAdminNov = perfilStaff?.rol === 'admin';
+  const [verNovedades, setVerNovedades] = useState(false);
+  const novedadNueva = (() => { try { return localStorage.getItem('novedades_vista') !== NOVEDADES[0].v; } catch (_) { return false; } })();
   const CAPACIDAD = capacidadDe(config);
   const [tab, setTab] = useState('egresados');
   const [filtroEgresado, setFiltroEgresado] = useState('');
@@ -4712,6 +4742,12 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
 
   return (
     <div className="space-y-6">
+      {esAdminNov && (
+        <div className="flex justify-end">
+          <button type="button" onClick={() => setVerNovedades(true)} className="px-3 py-1.5 rounded-xl border border-slate-300 bg-white text-slate-700 text-xs font-bold cursor-pointer hover:bg-slate-100">📋 Novedades del sistema{novedadNueva ? ' 🔴' : ''}</button>
+        </div>
+      )}
+      {esAdminNov && verNovedades && <ModalNovedades cerrar={() => setVerNovedades(false)} />}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Egresados</p><p className="text-2xl font-extrabold">{totalEgresados}</p></div>
         <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Docentes</p><p className="text-2xl font-extrabold">{totalDocentes}</p><p className="text-[10px] text-slate-500 mt-0.5">{totalDocentesConButaca} con butaca · {totalDocentesSinButaca} sin</p></div>
