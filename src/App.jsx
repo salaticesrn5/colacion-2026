@@ -36,8 +36,9 @@ function AvisoCampo({ msg }) {
 const validarNombreInvitado = (nombre) => {
   const n = String(nombre || '').trim();
   if (!n) return '';
-  const palabras = n.split(/\s+/).filter((w) => w.replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ]/g, '').length >= 2);
-  if (palabras.length < 2 || /\d/.test(n)) return 'Escribí nombre y apellido completos (sin números).';
+  if (/\d/.test(n) || !/^[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ '.-]*$/.test(n)) return 'Escribí nombre y apellido usando solo letras (sin números ni símbolos).';
+  const palabras = n.split(/\s+/).filter((w) => w.replace(/[^A-Za-zÀ-ÿ]/g, '').length >= 2);
+  if (palabras.length < 2) return 'Escribí nombre y apellido completos.';
   return '';
 };
 const validarDniInvitado = (dniVal, dniEgresado) => {
@@ -68,7 +69,7 @@ const fechaHoraAR = (v) => { if (!v) return ''; const d = new Date(v); return is
 const CAPACIDAD_MAXIMA = 525;
 const CAPACIDAD_DEFINITIVA = 525; // número definitivo de butacas (decisión del 19/11/2026)
 const CUPO_BASE_DEFECTO = 4;
-const VERSION_APP = 'v33 · 22/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
+const VERSION_APP = 'v34 · 23/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
 const MSG_FALTA_COL_BUTACA = 'Falta crear la columna "ocupa_butaca" en la tabla docentes (Supabase). Ejecutá el SQL que te pasaron y volvé a intentar.';
 const esErrorColumnaButaca = (err) => /ocupa_butaca/i.test(err?.message || '') || err?.code === 'PGRST204' || err?.code === '42703';
 const aNumeroONulo = (v) => (v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
@@ -173,8 +174,10 @@ const analizarCSVPersonas = (texto, { dniObligatorio = true, detectarButaca = fa
   return res;
 };
 
+// CSV seguro: si una celda empieza con = + - @ (o tab/enter), se le antepone ' para que Excel no la tome como fórmula
+const celdaCSV = (v) => { let t = String(v ?? ''); if (/^[=+\-@\t\r]/.test(t)) t = "'" + t; return `"${t.replace(/"/g, '""')}"`; };
 const descargarCSV = (nombreArchivo, filas) => {
-  const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const esc = celdaCSV;
   const contenido = filas.map((f) => f.map(esc).join(',')).join('\r\n');
   const blob = new Blob(['\uFEFF' + contenido], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -209,6 +212,13 @@ const plazasFamiliaresDe = (egr, { config, invitados, solicitudes }) => {
 
 // ---------- Historial de cambios (se muestra con el botón "📋 Novedades"). Agregar arriba en cada entrega. ----------
 const NOVEDADES = [
+  { v: 'v34', fecha: '23/11/2026', items: [
+    'Seguridad: si alguien prueba muchos DNI que no existen desde la misma conexión, el portal lo frena 10 minutos (no se puede armar una lista de alumnos probando números).',
+    'Seguridad: en la pantalla de los 4 números del celular ya no se muestra el nombre completo, solo las iniciales.',
+    'Seguridad: la base exige las mismas reglas que la página (celular, nombre y apellido solo con letras, DNI de 7 u 8 números, extras solo con la carga abierta).',
+    'Seguridad: las exportaciones CSV neutralizan las celdas que empiezan con = + - @ (no se ejecutan como fórmula en Excel).',
+    'Administración: botón "📞 Bajas para confirmar" con la lista imprimible de egresados, docentes y VIP que marcaron No asiste, con fecha y casilla para confirmar por teléfono.',
+    'Usuarios: se pueden seguir creando aunque el registro público de Supabase esté cerrado (la app indica cómo crear la cuenta de acceso).'] },
   { v: 'v33', fecha: '22/11/2026', items: [
     'Al cerrar la carga (Cierre Parcial): ya no se pueden pedir butacas extra, y los invitados guardados no se pueden cambiar. Los que tienen extras aprobadas solo completan esos lugares nuevos. Todos pueden seguir entrando a ver y descargar sus QR.',
     'Administración: si se aprueba una extra con la carga cerrada, el egresado queda con lo que tenía cargado + las aprobadas (los lugares que no usó no se reabren).',
@@ -969,6 +979,10 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
       if (claveEnviada) params.p_clave = claveEnviada;
       const { data, error: errRpc } = await rpcPortal('portal_consultar', params);
       if (errRpc) throw errRpc;
+      if (data?.demasiados_intentos) {
+        setError('Por seguridad, hubo demasiadas consultas de DNI desde esta conexión. Esperá 10 minutos y volvé a intentar. Si necesitás ayuda, usá el botón verde de WhatsApp.');
+        return;
+      }
       if (!data || !data.encontrado) {
         if (data?.motivo !== 'vip_desactivado') registrarPortal('NO_ENCONTRADO', `Buscó un DNI que no está en ${tipoUsuario.toUpperCase()}`, limpio);
         setError(data?.motivo === 'vip_desactivado'
@@ -978,7 +992,7 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
       }
       if (data.persona?.activo === false) {
         registrarPortal('ERROR', 'Intentó entrar pero figura como "No asiste"', limpio);
-        setError('Figurás como que no asistirás al acto. Si cambiaste de opinión, comunicate con la escuela.');
+        setError(whatsappActivo ? 'Figurás como que no asistirás al acto. Si cambiaste de opinión, avisá tocando el botón verde de WhatsApp (abajo a la derecha).' : 'Figurás como que no asistirás al acto. Si cambiaste de opinión, comunicate con la escuela.');
         return;
       }
       if (data.requiere_clave) {
@@ -3460,6 +3474,52 @@ function FichaPersona({ egresados, invitados, docentes, especiales, solicitudes,
 
 function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActivo, perfilStaff, config, egresados, invitados, docentes, especiales, solicitudes, usuariosSistema, logsSistema, totalEgresados, totalDocentes, totalDocentesConButaca, totalDocentesSinButaca, totalEspeciales, butacasVipOcupadas = 0, butacasReservadas = 0, totalCuposFamiliares, totalOcupado, vacantesLibres, recargar, notify, reiniciarAsistenciasGeneral, borrarInvitadosEgresados, registrarLog }) {
   const esAdminNov = perfilStaff?.rol === 'admin';
+  // Bajas para confirmar por teléfono: egresados, docentes y VIP que figuran como "No asiste"
+  const bajasEgr = (egresados || []).filter((e) => e.activo === false);
+  const bajasDoc = (docentes || []).filter((d) => d.activo === false);
+  const bajasVip = (especiales || []).filter((v) => v.activo === false);
+  const totalBajas = bajasEgr.length + bajasDoc.length + bajasVip.length;
+  const imprimirBajasConfirmar = async () => {
+    const w = window.open('', '_blank');
+    if (!w) { notify('El navegador bloqueó la ventana. Permití las ventanas emergentes para este sitio.', 'error'); return; }
+    w.document.write('<p style="font-family:Arial">Preparando la lista…</p>');
+    const h = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const soloDig = (t) => String(t ?? '').replace(/\D/g, '');
+    // Fecha y origen de cada baja, desde el registro de actividad
+    const fechas = {};
+    try {
+      const { data } = await supabase.from('logs_sistema').select('created_at, usuario, accion, detalle').or('accion.eq.PORTAL_NO_ASISTIRE,detalle.ilike.%No asiste%,detalle.ilike.%dio de baja%').order('created_at', { ascending: true }).limit(2000);
+      (data || []).forEach((l) => {
+        const txt = `${l.usuario || ''} ${l.detalle || ''}`;
+        const dnis = txt.match(/\d{7,8}/g) || [];
+        dnis.forEach((d) => { fechas[d] = { fecha: new Date(l.created_at).toLocaleString('es-AR', { hourCycle: 'h23', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }), origen: l.accion === 'PORTAL_NO_ASISTIRE' ? 'Portal' : 'Administración' }; });
+      });
+    } catch (_) { /* sin fechas */ }
+    const fila = (tipo, curso, p, cel, extra) => {
+      const f = fechas[soloDig(p.dni)] || {};
+      return `<tr><td>${h(tipo)}</td><td>${h(curso)}</td><td><b>${h(p.nombre_completo)}</b>${extra ? `<br><small>${h(extra)}</small>` : ''}</td><td>${h(p.dni)}</td><td>${h(cel || '—')}</td><td>${h(f.fecha || '—')}<br><small>${h(f.origen || '')}</small></td><td class="chk">☐ Sí, confirmó<br>☐ Fue un error → reactivar</td><td></td></tr>`;
+    };
+    const filas = [
+      ...bajasEgr.sort((a, b) => String(a.division || '').localeCompare(String(b.division || '')) || String(a.nombre_completo).localeCompare(String(b.nombre_completo))).map((e) => fila('Egresado', e.division || '', e, e.celular, `Sus invitados: ${(invitados || []).filter((i) => i.egresado_id === e.id).length}`)),
+      ...bajasDoc.sort((a, b) => String(a.nombre_completo).localeCompare(String(b.nombre_completo))).map((d) => fila('Docente', '', d, '', '')),
+      ...bajasVip.sort((a, b) => String(a.nombre_completo).localeCompare(String(b.nombre_completo))).map((v) => fila('VIP', '', v, '', '')),
+    ].join('');
+    const hoy = new Date().toLocaleString('es-AR', { hourCycle: 'h23' });
+    w.document.open();
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Bajas para confirmar</title><style>
+      body{font-family:Arial,sans-serif;font-size:13px;margin:18px;color:#111}h1{font-size:20px;margin:0 0 4px}p{margin:2px 0 10px}
+      table{border-collapse:collapse;width:100%}th,td{border:1px solid #888;padding:6px;text-align:left;vertical-align:top}th{background:#eee}
+      td.chk{white-space:nowrap;font-size:13px;line-height:1.6}small{color:#555}td:last-child{min-width:140px}
+      @media print{button{display:none}}</style></head><body>
+      <h1>Bajas para confirmar por teléfono (${bajasEgr.length + bajasDoc.length + bajasVip.length})</h1>
+      <p>ESRN N° 005 · Acto de Colación 2026 · Generada el ${h(hoy)} · Egresados: ${bajasEgr.length} · Docentes: ${bajasDoc.length} · VIP: ${bajasVip.length}</p>
+      <p>Llamar a cada persona y confirmar que no asiste. Si fue un error o una broma, reactivarla en Administración (su lugar vuelve a estar ocupado).</p>
+      <button onclick="window.print()" style="font-size:16px;padding:8px 16px;margin-bottom:10px">🖨️ Imprimir</button>
+      ${filas ? `<table><thead><tr><th>Tipo</th><th>Curso</th><th>Nombre</th><th>DNI</th><th>Celular</th><th>Fecha de la baja</th><th>Confirmación</th><th>Observaciones</th></tr></thead><tbody>${filas}</tbody></table>` : '<p><b>No hay bajas por ahora.</b></p>'}
+      </body></html>`);
+    w.document.close();
+    registrarLog('IMPRIMIR', 'Administración', `Lista de bajas para confirmar (${bajasEgr.length + bajasDoc.length + bajasVip.length})`);
+  };
   const [verNovedades, setVerNovedades] = useState(false);
   const novedadNueva = (() => { try { return localStorage.getItem('novedades_vista') !== NOVEDADES[0].v; } catch (_) { return false; } })();
   const CAPACIDAD = capacidadDe(config);
@@ -3789,7 +3849,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
         data.push(...(parte || []));
         if (!parte || parte.length < 1000) break;
       }
-      const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+      const esc = celdaCSV;
       const filas = [['fecha_hora_local', 'fecha_hora_iso', 'usuario', 'modulo', 'accion', 'detalle'].join(',')];
       (data || []).forEach((l) => {
         filas.push([esc(new Date(l.created_at).toLocaleString('es-AR', { hourCycle: 'h23' })), esc(l.created_at), esc(l.usuario), esc(l.modulo), esc(l.accion), esc(l.detalle)].join(','));
@@ -4256,14 +4316,19 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
     try {
       const tempClient = createTempAuthClient();
       const { error: authError } = await tempClient.auth.signUp({ email, password });
-      if (authError) throw authError;
+      // Con el registro público cerrado en Supabase (más seguro), la cuenta de acceso se crea a mano en el panel de Supabase
+      const registroCerrado = authError && (authError.code === 'signup_disabled' || /signups? not allowed|signup.*disabled/i.test(authError.message || ''));
+      if (authError && !registroCerrado) throw authError;
 
       const { error: dbError } = await supabase.from('usuarios_sistema').insert({
         nombre, email, rol: nuevoRolUsr, activo: true
       });
       if (dbError) throw dbError;
 
-      await registrarLog('CREAR_USUARIO', 'Sistema', `Se creó el usuario ${nombre} (${email})`);
+      await registrarLog('CREAR_USUARIO', 'Sistema', `Se creó el usuario ${nombre} (${email})${registroCerrado ? ' · falta crear la cuenta de acceso en Supabase' : ''}`);
+      if (registroCerrado) {
+        window.alert(`Se agregó a ${nombre} con su rol.\n\nComo el registro público está cerrado (por seguridad), falta crearle la cuenta de acceso:\n\n1. Entrá a Supabase → Authentication → Users → "Add user" → "Create new user".\n2. Email: ${email}\n3. Contraseña: la que elegiste.\n4. Tildá "Auto Confirm User" y tocá "Create user".\n\nDesde ese momento ya puede entrar.`);
+      }
       setNuevoNombreUsr('');
       setNuevoEmailUsr('');
       setNuevoPassUsr('');
@@ -4829,11 +4894,12 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
 
   return (
     <div className="space-y-6">
+      <div className="flex flex-wrap justify-end gap-2">
+        <button type="button" onClick={imprimirBajasConfirmar} className={`px-3 py-1.5 rounded-xl border text-xs font-bold cursor-pointer ${totalBajas > 0 ? 'border-rose-400 bg-rose-50 text-rose-800 hover:bg-rose-100' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100'}`}>📞 Bajas para confirmar ({totalBajas})</button>
       {esAdminNov && (
-        <div className="flex justify-end">
           <button type="button" onClick={() => setVerNovedades(true)} className="px-3 py-1.5 rounded-xl border border-slate-300 bg-white text-slate-700 text-xs font-bold cursor-pointer hover:bg-slate-100">📋 Novedades del sistema{novedadNueva ? ' 🔴' : ''}</button>
-        </div>
       )}
+      </div>
       {esAdminNov && verNovedades && <ModalNovedades cerrar={() => setVerNovedades(false)} />}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         <div className="bg-white p-4 rounded-2xl border"><p className="text-xs text-slate-500">Egresados</p><p className="text-2xl font-extrabold">{totalEgresados}</p></div>
