@@ -69,7 +69,7 @@ const fechaHoraAR = (v) => { if (!v) return ''; const d = new Date(v); return is
 const CAPACIDAD_MAXIMA = 525;
 const CAPACIDAD_DEFINITIVA = 525; // número definitivo de butacas (decisión del 19/11/2026)
 const CUPO_BASE_DEFECTO = 4;
-const VERSION_APP = 'v34 · 23/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
+const VERSION_APP = 'v35 · 23/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
 const MSG_FALTA_COL_BUTACA = 'Falta crear la columna "ocupa_butaca" en la tabla docentes (Supabase). Ejecutá el SQL que te pasaron y volvé a intentar.';
 const esErrorColumnaButaca = (err) => /ocupa_butaca/i.test(err?.message || '') || err?.code === 'PGRST204' || err?.code === '42703';
 const aNumeroONulo = (v) => (v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
@@ -212,6 +212,8 @@ const plazasFamiliaresDe = (egr, { config, invitados, solicitudes }) => {
 
 // ---------- Historial de cambios (se muestra con el botón "📋 Novedades"). Agregar arriba en cada entrega. ----------
 const NOVEDADES = [
+  { v: 'v35', fecha: '23/11/2026', items: [
+    'Portal: el motivo de las butacas extra ahora pide al menos 5 letras (antes 10), así "mi abuela" o "mis tíos" ya alcanza. El aviso explica mejor qué escribir.'] },
   { v: 'v34', fecha: '23/11/2026', items: [
     'Seguridad: si alguien prueba muchos DNI que no existen desde la misma conexión, el portal lo frena 10 minutos (no se puede armar una lista de alumnos probando números).',
     'Seguridad: en la pantalla de los 4 números del celular ya no se muestra el nombre completo, solo las iniciales.',
@@ -1112,9 +1114,9 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
       errorPortal('Solicitud extra', 'Antes de pedir butacas extra, cargá tu celular (10 números, ej: 2994444444) y guardá los datos: por ahí te avisamos si se aprueba.');
       return;
     }
-    if (obsExtra.trim().length < 10) {
+    if (obsExtra.trim().length < 5) {
       tocar('obs');
-      errorPortal('Solicitud extra', 'Contanos el motivo del pedido y para quién son las butacas (por ejemplo: "abuela y tía que viajan desde Neuquén").');
+      errorPortal('Solicitud extra', 'Escribí para quién son las butacas extra (por ejemplo: "mi abuela" o "mis tíos").');
       return;
     }
     setAvisoSolicitud(true);
@@ -1459,10 +1461,10 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
                         <select value={cantExtra} onChange={(e) => setCantExtra(e.target.value)} className="px-2 py-2 border rounded-xl text-xs bg-white">
                           <option value={1}>+1</option><option value={2}>+2</option><option value={3}>+3</option>
                         </select>
-                        <input type="text" placeholder="Motivo y para quién (obligatorio, ej: abuela y tía)" value={obsExtra} onChange={(e) => setObsExtra(e.target.value)} onBlur={() => { if (obsExtra) tocar('obs'); }} className={`w-full sm:flex-1 px-3 py-2 border rounded-xl text-xs bg-white outline-none ${tocados.obs && obsExtra.trim().length < 10 ? 'border-2 border-rose-600 ring-2 ring-rose-200' : ''}`} />
+                        <input type="text" placeholder="¿Para quién? (obligatorio, ej: mi abuela)" value={obsExtra} onChange={(e) => setObsExtra(e.target.value)} onBlur={() => { if (obsExtra) tocar('obs'); }} className={`w-full sm:flex-1 px-3 py-2 border rounded-xl text-xs bg-white outline-none ${tocados.obs && obsExtra.trim().length < 5 ? 'border-2 border-rose-600 ring-2 ring-rose-200' : ''}`} />
                         <button type="submit" disabled={enviandoSol} className="w-full sm:w-auto px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow shrink-0 cursor-pointer">{enviandoSol ? 'Enviando...' : 'Solicitar'}</button>
                       </form>
-                      {tocados.obs && obsExtra.trim().length < 10 && <AvisoCampo msg='Contanos el motivo y para quién son las butacas (por ejemplo: "abuela y tía que viajan desde Neuquén").' />}
+                      {tocados.obs && obsExtra.trim().length < 5 && <AvisoCampo msg='Escribí para quién son las butacas extra (por ejemplo: "mi abuela" o "mis tíos").' />}
                       <p className="text-[11px] text-slate-500">Se puede enviar <b>una sola solicitud</b> por egresado.</p>
                     </>
                   )}
