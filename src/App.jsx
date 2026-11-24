@@ -69,7 +69,7 @@ const fechaHoraAR = (v) => { if (!v) return ''; const d = new Date(v); return is
 const CAPACIDAD_MAXIMA = 525;
 const CAPACIDAD_DEFINITIVA = 525; // número definitivo de butacas (decisión del 19/11/2026)
 const CUPO_BASE_DEFECTO = 4;
-const VERSION_APP = 'v36 · 24/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
+const VERSION_APP = 'v37 · 24/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
 const MSG_FALTA_COL_BUTACA = 'Falta crear la columna "ocupa_butaca" en la tabla docentes (Supabase). Ejecutá el SQL que te pasaron y volvé a intentar.';
 const esErrorColumnaButaca = (err) => /ocupa_butaca/i.test(err?.message || '') || err?.code === 'PGRST204' || err?.code === '42703';
 const aNumeroONulo = (v) => (v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
@@ -212,6 +212,8 @@ const plazasFamiliaresDe = (egr, { config, invitados, solicitudes }) => {
 
 // ---------- Historial de cambios (se muestra con el botón "📋 Novedades"). Agregar arriba en cada entrega. ----------
 const NOVEDADES = [
+  { v: 'v37', fecha: '24/11/2026', items: [
+    'Pases: la franja de arriba es bordó en todos los pases (egresados, familias, docentes y VIP). El QR sigue negro, y la etiqueta y el recuadro de acceso mantienen el color de cada grupo. Los pases ya descargados siguen sirviendo.'] },
   { v: 'v36', fecha: '24/11/2026', items: [
     'Aviso de versión nueva: si alguien tiene la página abierta desde antes de una actualización, aparece un cartel grande para actualizar (no recarga sola, para no perder lo que se está cargando).',
     'Portal: para pedir butacas extra hay que tener cargados y guardados los 3 invitados (las extras son para quien necesita más lugares). Lo controla también la base.'] },
@@ -1787,10 +1789,11 @@ const descargarPase = async ({ nombre, subtitulo, rol, valor, color = COLOR_PASE
     const ctx = canvas.getContext('2d');
     ctx.textAlign = 'center';
 
-    // Fondo y franja superior del color del pase
+    // Fondo y franja superior: bordó institucional en TODOS los pases (v37, decisión de la escuela).
+    // La etiqueta del rol y el recuadro de acceso siguen con el color de cada grupo (guía para la puerta).
     ctx.fillStyle = '#F3F4F6';
     ctx.fillRect(0, 0, 1080, 1920);
-    ctx.fillStyle = color;
+    ctx.fillStyle = COLOR_PASE.egresado;
     ctx.fillRect(0, 0, 1080, 400);
 
     let yTitulo = 160;
