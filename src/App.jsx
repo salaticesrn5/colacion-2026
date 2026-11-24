@@ -69,7 +69,7 @@ const fechaHoraAR = (v) => { if (!v) return ''; const d = new Date(v); return is
 const CAPACIDAD_MAXIMA = 525;
 const CAPACIDAD_DEFINITIVA = 525; // número definitivo de butacas (decisión del 19/11/2026)
 const CUPO_BASE_DEFECTO = 4;
-const VERSION_APP = 'v39 · 24/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
+const VERSION_APP = 'v40 · 24/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
 const MSG_FALTA_COL_BUTACA = 'Falta crear la columna "ocupa_butaca" en la tabla docentes (Supabase). Ejecutá el SQL que te pasaron y volvé a intentar.';
 const esErrorColumnaButaca = (err) => /ocupa_butaca/i.test(err?.message || '') || err?.code === 'PGRST204' || err?.code === '42703';
 const aNumeroONulo = (v) => (v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
@@ -216,6 +216,8 @@ const plazasFamiliaresDe = (egr, { config, invitados, solicitudes }) => {
 
 // ---------- Historial de cambios (se muestra con el botón "📋 Novedades"). Agregar arriba en cada entrega. ----------
 const NOVEDADES = [
+  { v: 'v40', fecha: '24/11/2026', items: [
+    'Portal de docentes: se quitó también la frase de la mesa de ayuda. El docente solo ve su QR para descargar.'] },
   { v: 'v39', fecha: '24/11/2026', items: [
     'Portal de docentes: se quitó el botón "No podré asistir". En su lugar dice que avisen a la mesa de ayuda. Los VIP y los egresados lo siguen teniendo. Los docentes que ya se habían dado de baja siguen igual.'] },
   { v: 'v38', fecha: '24/11/2026', items: [
@@ -1564,10 +1566,6 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
                 )}
               </>
             )}
-
-            {tipoUsuario === 'docente' && <div className="pt-2 border-t">
-              <p className="text-sm font-bold text-slate-800 bg-slate-100 border-2 border-slate-300 rounded-lg px-3 py-2.5 text-center">Si no vas a poder asistir, avisá a la mesa de ayuda{whatsappActivo ? ' (botón verde de WhatsApp, abajo a la derecha)' : ''}.</p>
-            </div>}
 
             {tipoUsuario !== 'egresado' && tipoUsuario !== 'docente' && <div className="pt-2 border-t">
               <button type="button" onClick={marcarNoAsistire} className="w-full py-2.5 bg-red-50 hover:bg-red-100 border border-red-300 text-red-700 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer">
