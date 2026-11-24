@@ -69,7 +69,7 @@ const fechaHoraAR = (v) => { if (!v) return ''; const d = new Date(v); return is
 const CAPACIDAD_MAXIMA = 525;
 const CAPACIDAD_DEFINITIVA = 525; // número definitivo de butacas (decisión del 19/11/2026)
 const CUPO_BASE_DEFECTO = 4;
-const VERSION_APP = 'v35 · 23/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
+const VERSION_APP = 'v36 · 24/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
 const MSG_FALTA_COL_BUTACA = 'Falta crear la columna "ocupa_butaca" en la tabla docentes (Supabase). Ejecutá el SQL que te pasaron y volvé a intentar.';
 const esErrorColumnaButaca = (err) => /ocupa_butaca/i.test(err?.message || '') || err?.code === 'PGRST204' || err?.code === '42703';
 const aNumeroONulo = (v) => (v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
@@ -212,6 +212,9 @@ const plazasFamiliaresDe = (egr, { config, invitados, solicitudes }) => {
 
 // ---------- Historial de cambios (se muestra con el botón "📋 Novedades"). Agregar arriba en cada entrega. ----------
 const NOVEDADES = [
+  { v: 'v36', fecha: '24/11/2026', items: [
+    'Aviso de versión nueva: si alguien tiene la página abierta desde antes de una actualización, aparece un cartel grande para actualizar (no recarga sola, para no perder lo que se está cargando).',
+    'Portal: para pedir butacas extra hay que tener cargados y guardados los 3 invitados (las extras son para quien necesita más lugares). Lo controla también la base.'] },
   { v: 'v35', fecha: '23/11/2026', items: [
     'Portal: el motivo de las butacas extra ahora pide al menos 5 letras (antes 10), así "mi abuela" o "mis tíos" ya alcanza. El aviso explica mejor qué escribir.'] },
   { v: 'v34', fecha: '23/11/2026', items: [
@@ -342,7 +345,45 @@ function ModalNovedades({ cerrar }) {
   );
 }
 
+// Detecta si se publicó una versión nueva (compara el archivo principal publicado con el que está cargado).
+// No recarga sola: muestra un cartel para que la persona actualice cuando pueda (sin perder lo que está cargando).
+function useNuevaVersion() {
+  const [hay, setHay] = useState(false);
+  useEffect(() => {
+    const actual = Array.from(document.querySelectorAll('script[type="module"][src]'))
+      .map((x) => x.getAttribute('src') || '')
+      .find((src) => /\/assets\/index-[^/]+\.js$/.test(src));
+    if (!actual) return undefined; // modo desarrollo
+    let vivo = true;
+    const revisar = async () => {
+      if (!vivo || !navigator.onLine || document.visibilityState !== 'visible') return;
+      try {
+        const r = await fetch(`/?nv=${Date.now()}`, { cache: 'no-store' });
+        if (!r.ok) return;
+        const html = await r.text();
+        const m = html.match(/\/assets\/index-[^"']+\.js/);
+        if (vivo && m && m[0] !== actual) setHay(true);
+      } catch (_) { /* sin conexión: se vuelve a probar después */ }
+    };
+    const alVolver = () => { if (document.visibilityState === 'visible') revisar(); };
+    const t0 = setTimeout(revisar, 20000);
+    const t = setInterval(revisar, 120000);
+    document.addEventListener('visibilitychange', alVolver);
+    window.addEventListener('focus', alVolver);
+    window.addEventListener('online', revisar);
+    return () => {
+      vivo = false; clearTimeout(t0); clearInterval(t);
+      document.removeEventListener('visibilitychange', alVolver);
+      window.removeEventListener('focus', alVolver);
+      window.removeEventListener('online', revisar);
+    };
+  }, []);
+  return hay;
+}
+
 export default function App() {
+  const hayVersionNueva = useNuevaVersion();
+  const [versionPospuesta, setVersionPospuesta] = useState(0);
   const [vista, setVista] = useState('portal'); // 'portal', 'login', 'puerta', 'admin', 'reporte_papel'
   const [session, setSession] = useState(null);
   const [perfilStaff, setPerfilStaff] = useState(null);
@@ -601,6 +642,16 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans relative pb-24 overflow-x-hidden">
+      {hayVersionNueva && Date.now() > versionPospuesta && (
+        <div role="alert" className="fixed top-2 left-2 right-2 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 sm:w-[min(94vw,680px)] z-[70] bg-indigo-800 text-white rounded-2xl shadow-2xl ring-4 ring-white/70 px-5 py-4">
+          <p className="text-lg font-extrabold leading-snug">🔄 Hay una versión nueva del sistema</p>
+          <p className="text-base mt-1 leading-snug">{vista === 'puerta' ? 'Actualizá solo si tenés señal de internet.' : 'Si estás cargando datos, primero tocá "Guardar" y después actualizá.'}</p>
+          <div className="flex flex-wrap gap-2 mt-3">
+            <button type="button" onClick={() => window.location.reload()} className="px-5 py-2.5 bg-white text-indigo-900 rounded-xl text-base font-extrabold cursor-pointer hover:bg-indigo-50">Actualizar ahora</button>
+            <button type="button" onClick={() => setVersionPospuesta(Date.now() + 15 * 60 * 1000)} className="px-4 py-2.5 bg-indigo-700 border border-white/50 text-white rounded-xl text-base font-bold cursor-pointer hover:bg-indigo-600">Más tarde</button>
+          </div>
+        </div>
+      )}
       {toast && (
         <div role="alert" className={`fixed bottom-5 left-3 right-3 sm:left-1/2 sm:right-auto sm:-translate-x-1/2 sm:w-[min(92vw,640px)] z-[60] flex items-start gap-3 px-5 py-4 rounded-2xl shadow-2xl text-white text-base font-semibold leading-snug ring-4 ring-white/70 ${
           toast.type === 'error' ? 'bg-rose-700' : toast.type === 'warning' ? 'bg-amber-700' : 'bg-emerald-700'
@@ -1105,6 +1156,10 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
       errorPortal('Solicitud extra', 'El plazo para pedir butacas extra terminó: la carga cerró.');
       return;
     }
+    if (faltanParaExtra > 0) {
+      errorPortal('Solicitud extra', `Para pedir butacas extra, primero cargá y guardá tus ${cupoBaseEgr} invitados.`);
+      return;
+    }
     if (misSolicitudes.length > 0) {
       errorPortal('Solicitud extra', 'Ya enviaste una solicitud de butacas extra. Solo se puede pedir una vez.');
       return;
@@ -1171,6 +1226,9 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
   if (tipoUsuario === 'egresado' && datosPersona?.id) marcarFamiliaMovilidad(datosPersona.id, misInvitadosGuardados.some(tieneMovilidad));
   const miGrupo = misInvitadosGuardados.filter(esGrupal);
   const hayGuardados = misInvitadosGuardados.length > 0;
+  // Las butacas extra son para quien necesita más lugares que su cupo: primero tiene que completar y guardar su cupo
+  const cupoBaseEgr = tipoUsuario === 'egresado' && datosPersona ? cupoDe(datosPersona, config) : 0;
+  const faltanParaExtra = Math.max(0, cupoBaseEgr - misInvitadosGuardados.length);
   // Lugares vacíos (por ejemplo, butacas extra aprobadas): se completan directo, sin apretar "Editar".
   // "Editar" queda solo para cambiar a los invitados ya guardados.
   const filaAbierta = (fila) => editando || (cargaHabilitada && !fila.guardado);
@@ -1453,7 +1511,9 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
                         {est !== 'aprobada' && <p className="opacity-80">Solo se puede enviar una solicitud por egresado.</p>}
                       </div>
                     );
-                  })() : etapaCarga !== 'abierta' ? (
+                  })() : etapaCarga === 'abierta' && faltanParaExtra > 0 ? (
+                    <p className="text-sm font-bold text-indigo-900 bg-indigo-50 border-2 border-indigo-300 rounded-lg px-3 py-2">ℹ️ Para pedir butacas extra, primero cargá y guardá tus {cupoBaseEgr} invitados (te {faltanParaExtra === 1 ? 'falta 1' : `faltan ${faltanParaExtra}`}). Las butacas extra son para quien necesita más de {cupoBaseEgr} lugares.</p>
+                  ) : etapaCarga !== 'abierta' ? (
                     <p className="text-sm font-bold text-slate-700 bg-slate-100 border border-slate-300 rounded-lg px-3 py-2">🔒 El plazo para pedir butacas extra terminó: la carga cerró. Ya no se reciben solicitudes.</p>
                   ) : (
                     <>
