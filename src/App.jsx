@@ -69,7 +69,7 @@ const fechaHoraAR = (v) => { if (!v) return ''; const d = new Date(v); return is
 const CAPACIDAD_MAXIMA = 525;
 const CAPACIDAD_DEFINITIVA = 525; // número definitivo de butacas (decisión del 19/11/2026)
 const CUPO_BASE_DEFECTO = 4;
-const VERSION_APP = 'v36 · 24/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
+const VERSION_APP = 'v39 · 24/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
 const MSG_FALTA_COL_BUTACA = 'Falta crear la columna "ocupa_butaca" en la tabla docentes (Supabase). Ejecutá el SQL que te pasaron y volvé a intentar.';
 const esErrorColumnaButaca = (err) => /ocupa_butaca/i.test(err?.message || '') || err?.code === 'PGRST204' || err?.code === '42703';
 const aNumeroONulo = (v) => (v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
@@ -195,9 +195,13 @@ const descargarCSV = (nombreArchivo, filas) => {
 const tieneExtraAprobada = (egr, solicitudes) => (solicitudes || []).some((s) => s.egresado_id === egr.id && String(s.estado || '').toLowerCase() === 'aprobada');
 
 // ¿Puede el egresado cargar o modificar invitados en la etapa actual?
+// Habilitación individual (v38): la escuela le reabre la carga a un egresado puntual hasta una fecha (ej: estaban de viaje)
+const habilitadoIndividual = (egr) => !!(egr && egr.carga_habilitada_hasta && new Date(egr.carga_habilitada_hasta).getTime() >= Date.now());
+const fechaHoraCorta = (v) => { const d = new Date(v); return isNaN(d) ? '' : d.toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }); };
 const puedeEditarInvitados = (egr, { config, solicitudes }) => {
   const etapa = config?.estado_etapa || 'abierta';
   if (etapa === 'abierta') return true;
+  if (habilitadoIndividual(egr)) return true;
   if (etapa === 'cierre_parcial') return tieneExtraAprobada(egr, solicitudes);
   return false;
 };
@@ -212,6 +216,13 @@ const plazasFamiliaresDe = (egr, { config, invitados, solicitudes }) => {
 
 // ---------- Historial de cambios (se muestra con el botón "📋 Novedades"). Agregar arriba en cada entrega. ----------
 const NOVEDADES = [
+  { v: 'v39', fecha: '24/11/2026', items: [
+    'Portal de docentes: se quitó el botón "No podré asistir". En su lugar dice que avisen a la mesa de ayuda. Los VIP y los egresados lo siguen teniendo. Los docentes que ya se habían dado de baja siguen igual.'] },
+  { v: 'v38', fecha: '24/11/2026', items: [
+    'Egresados: después del cierre, se le puede habilitar la carga a un egresado puntual hasta un día (ej: estaba de viaje). Se hace desde "Editar" del egresado, con el botón "🔓 Habilitar carga". Solo él puede cargar y cambiar sus invitados; no puede pedir extras. En la lista aparece "🔓 Habilitado hasta…".',
+    'Solicitudes de butacas extra: mientras están pendientes se pueden "✏️ Corregir" (cantidad y motivo) o "🗑️ Anular" (si la carga sigue abierta, el egresado puede volver a pedir). Todo queda en el registro.'] },
+  { v: 'v37', fecha: '24/11/2026', items: [
+    'Pases: la franja de arriba es bordó en todos los pases (egresados, familias, docentes y VIP). El QR sigue negro, y la etiqueta y el recuadro de acceso mantienen el color de cada grupo. Los pases ya descargados siguen sirviendo.'] },
   { v: 'v36', fecha: '24/11/2026', items: [
     'Aviso de versión nueva: si alguien tiene la página abierta desde antes de una actualización, aparece un cartel grande para actualizar (no recarga sola, para no perder lo que se está cargando).',
     'Portal: para pedir butacas extra hay que tener cargados y guardados los 3 invitados (las extras son para quien necesita más lugares). Lo controla también la base.'] },
@@ -1356,6 +1367,9 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
                 </div>
 
                 <div className="border-2 border-[#6B1D2F] bg-rose-50/40 p-4 rounded-xl space-y-3">
+                  {cargaHabilitada && etapaCarga !== 'abierta' && habilitadoIndividual(datosPersona) && (
+                    <p className="text-sm font-bold text-emerald-900 bg-emerald-50 border-2 border-emerald-400 rounded-lg px-3 py-2">🔓 La escuela te habilitó la carga de invitados hasta el <b>{fechaHoraCorta(datosPersona.carga_habilitada_hasta)}</b>. Cargá, guardá y descargá tus pases antes de esa fecha.</p>
+                  )}
                   {cargaHabilitada ? (
                     <div className="bg-amber-100 border border-amber-300 p-3 rounded-lg">
                       <p className="text-xs font-bold text-amber-900">⚠️ Atención: Revise bien sus datos</p>
@@ -1469,7 +1483,7 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
                         {guardando ? 'Guardando...' : `💾 Guardar ${lugaresNuevos === 1 ? 'el invitado nuevo' : 'los invitados nuevos'} y generar QR`}
                       </button>
                     )}
-                    {etapaCarga === 'abierta' ? (
+                    {etapaCarga === 'abierta' || habilitadoIndividual(datosPersona) ? (
                       <button type="button" onClick={() => setEditando(true)} className="w-full py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-bold shadow cursor-pointer">
                         ✏️ Editar invitados ya guardados
                       </button>
@@ -1551,7 +1565,11 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
               </>
             )}
 
-            {tipoUsuario !== 'egresado' && <div className="pt-2 border-t">
+            {tipoUsuario === 'docente' && <div className="pt-2 border-t">
+              <p className="text-sm font-bold text-slate-800 bg-slate-100 border-2 border-slate-300 rounded-lg px-3 py-2.5 text-center">Si no vas a poder asistir, avisá a la mesa de ayuda{whatsappActivo ? ' (botón verde de WhatsApp, abajo a la derecha)' : ''}.</p>
+            </div>}
+
+            {tipoUsuario !== 'egresado' && tipoUsuario !== 'docente' && <div className="pt-2 border-t">
               <button type="button" onClick={marcarNoAsistire} className="w-full py-2.5 bg-red-50 hover:bg-red-100 border border-red-300 text-red-700 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer">
                 <XCircle className="w-4 h-4" /> No podré asistir / Liberar cupo
               </button>
@@ -1787,10 +1805,11 @@ const descargarPase = async ({ nombre, subtitulo, rol, valor, color = COLOR_PASE
     const ctx = canvas.getContext('2d');
     ctx.textAlign = 'center';
 
-    // Fondo y franja superior del color del pase
+    // Fondo y franja superior: bordó institucional en TODOS los pases (v37, decisión de la escuela).
+    // La etiqueta del rol y el recuadro de acceso siguen con el color de cada grupo (guía para la puerta).
     ctx.fillStyle = '#F3F4F6';
     ctx.fillRect(0, 0, 1080, 1920);
-    ctx.fillStyle = color;
+    ctx.fillStyle = COLOR_PASE.egresado;
     ctx.fillRect(0, 0, 1080, 400);
 
     let yTitulo = 160;
@@ -3633,6 +3652,8 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
   const [nuevoVipMovilidad, setNuevoVipMovilidad] = useState(false);
   const [editVipMovilidad, setEditVipMovilidad] = useState(false);
   const [cantAprobar, setCantAprobar] = useState({});
+  const [corrigiendoSol, setCorrigiendoSol] = useState(null); // { id, cantidad, observacion }
+  const [habHasta, setHabHasta] = useState('');
   const [subiendoEscudo, setSubiendoEscudo] = useState(false);
   const [salaEdit, setSalaEdit] = useState(() => ({ capacidad: capacidadDe(config), sectores: salaConfigDe(config).sectores }));
   const [salaCambiada, setSalaCambiada] = useState(false);
@@ -4480,8 +4501,34 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
     }
   };
 
+  // ---------- v38: habilitar la carga a un egresado puntual después del cierre ----------
+  const fechaInputDe = (v) => { const d = new Date(v); const z = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}`; };
+  const habilitarCargaEgresado = async (egr, quitar = false) => {
+    let hasta = null;
+    if (!quitar) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(habHasta)) { notify('Elegí hasta qué día queda habilitado.', 'error', { largo: true }); return; }
+      hasta = new Date(`${habHasta}T23:59:00`);
+      if (hasta.getTime() < Date.now()) { notify('La fecha ya pasó: elegí hoy o un día posterior.', 'error', { largo: true }); return; }
+    }
+    const aviso = quitar
+      ? `¿Quitar la habilitación de ${egr.nombre_completo}?\n\nVuelve a quedar como todos: con la carga cerrada.`
+      : `¿Habilitar a ${egr.nombre_completo} para cargar invitados hasta el ${fechaHoraCorta(hasta)}?\n\nPuede cargar, cambiar y guardar sus invitados aunque la carga esté cerrada para el resto. No puede pedir butacas extra.`;
+    if (!window.confirm(aviso)) return;
+    try {
+      const { error } = await supabase.from('egresados').update({ carga_habilitada_hasta: hasta ? hasta.toISOString() : null }).eq('id', egr.id);
+      if (error) throw error;
+      await registrarLog('HABILITAR_CARGA', 'Egresados', quitar ? `Se quitó la habilitación de carga de ${egr.nombre_completo}` : `Se habilitó la carga de invitados a ${egr.nombre_completo} hasta el ${fechaHoraCorta(hasta)}`);
+      setModalEditarEgr((m) => (m && m.id === egr.id ? { ...m, carga_habilitada_hasta: hasta ? hasta.toISOString() : null } : m));
+      await recargar();
+      notify(quitar ? 'Habilitación quitada.' : `Habilitado hasta el ${fechaHoraCorta(hasta)}.`, 'success', { largo: true });
+    } catch (err) {
+      notify(/carga_habilitada_hasta/i.test(err.message || '') ? 'Falta correr el SQL de la v38 en Supabase (columna "carga_habilitada_hasta").' : 'No se pudo guardar: ' + err.message, 'error', { largo: true });
+    }
+  };
+
   const abrirModalEditar = (e) => {
     setModalEditarEgr(e);
+    { const d = new Date(); d.setDate(d.getDate() + 7); setHabHasta(fechaInputDe(e.carga_habilitada_hasta && habilitadoIndividual(e) ? e.carga_habilitada_hasta : d)); }
     setEditNombre(e.nombre_completo || '');
     setEditDni(e.dni || '');
     setEditCelular(e.celular || '');
@@ -4623,6 +4670,44 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
     } catch (err) {
       const faltaColumna = /cantidad_aprobada/i.test(err.message || '');
       notify(faltaColumna ? 'Falta crear la columna "cantidad_aprobada" en solicitudes_butacas (Supabase). Ejecutá el SQL y volvé a intentar.' : 'Error al procesar solicitud: ' + err.message, 'error');
+    }
+  };
+
+  // ---------- v38: corregir o anular una solicitud pendiente ----------
+  const guardarCorreccionSolicitud = async (sol) => {
+    const c = corrigiendoSol;
+    if (!c || c.id !== sol.id) return;
+    const cantidad = Number(c.cantidad);
+    const obs = String(c.observacion || '').trim();
+    if (!Number.isInteger(cantidad) || cantidad < 1 || cantidad > 3) { notify('La cantidad tiene que ser 1, 2 o 3.', 'error', { largo: true }); return; }
+    if (obs.length < 5) { notify('Escribí el motivo (al menos 5 letras).', 'error', { largo: true }); return; }
+    try {
+      const { data, error } = await supabase.from('solicitudes_butacas').update({ cantidad_solicitada: cantidad, observacion: obs })
+        .eq('id', sol.id).eq('estado', 'pendiente').select('id');
+      if (error) throw error;
+      if (!data || data.length === 0) { await recargar(); notify('Esta solicitud ya no está pendiente: no se cambió.', 'warning', { largo: true }); return; }
+      await registrarLog('SOLICITUD', 'Butacas', `Se corrigió la solicitud de ${sol.egresado_nombre}: de +${sol.cantidad_solicitada} a +${cantidad}${obs !== (sol.observacion || '') ? ` · motivo: "${obs.slice(0, 120)}"` : ''}`);
+      setCorrigiendoSol(null);
+      setCantAprobar((prev) => { const n = { ...prev }; delete n[sol.id]; return n; });
+      await recargar();
+      notify(`Solicitud corregida: +${cantidad}.`, 'success', { largo: true });
+    } catch (err) {
+      notify('No se pudo corregir: ' + err.message, 'error', { largo: true });
+    }
+  };
+  const anularSolicitud = async (sol) => {
+    const abierta = (config.estado_etapa || 'abierta') === 'abierta';
+    if (!window.confirm(`¿Anular la solicitud de ${sol.egresado_nombre} (+${sol.cantidad_solicitada})?\n\nSe borra como si nunca la hubiera hecho.${abierta ? ' El egresado puede volver a pedir mientras la carga siga abierta.' : ' La carga ya cerró: NO va a poder volver a pedir.'}`)) return;
+    try {
+      const { data, error } = await supabase.from('solicitudes_butacas').delete().eq('id', sol.id).eq('estado', 'pendiente').select('id');
+      if (error) throw error;
+      if (!data || data.length === 0) { await recargar(); notify('Esta solicitud ya no está pendiente: no se anuló.', 'warning', { largo: true }); return; }
+      await registrarLog('SOLICITUD', 'Butacas', `Se anuló la solicitud de ${sol.egresado_nombre} (+${sol.cantidad_solicitada} · "${String(sol.observacion || '').slice(0, 120)}")`);
+      setCorrigiendoSol(null);
+      await recargar();
+      notify('Solicitud anulada.', 'success', { largo: true });
+    } catch (err) {
+      notify('No se pudo anular: ' + err.message, 'error', { largo: true });
     }
   };
 
@@ -5139,6 +5224,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
                       Invitados cargados: <b>{misInvitados.length} / {e.cupo_asignado}</b>
                       {misInvitados.some(tieneMovilidad) && <span className="ml-1">· ♿ {misInvitados.filter(tieneMovilidad).length}</span>}
                       {tieneExtraAprobada(e, solicitudes) && <span className="ml-1 font-bold text-emerald-700">· Extra aprobada</span>}
+                      {habilitadoIndividual(e) && <span className="ml-1 font-bold text-emerald-700">· 🔓 Habilitado hasta {fechaHoraCorta(e.carga_habilitada_hasta)}</span>}
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
@@ -5214,6 +5300,23 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
             </div>
 
             <form onSubmit={guardarEdicionEgresado} className="p-5 space-y-3.5 max-h-[80vh] overflow-y-auto">
+              {(config.estado_etapa || 'abierta') !== 'abierta' || habilitadoIndividual(modalEditarEgr) ? (
+                <div className={`p-3 border-2 rounded-xl space-y-2 ${habilitadoIndividual(modalEditarEgr) ? 'border-emerald-500 bg-emerald-50' : 'border-amber-400 bg-amber-50'}`}>
+                  <p className="font-bold text-sm text-slate-900">🔓 Habilitar la carga fuera de término</p>
+                  {habilitadoIndividual(modalEditarEgr)
+                    ? <p className="text-sm font-bold text-emerald-900">Habilitado hasta el {fechaHoraCorta(modalEditarEgr.carga_habilitada_hasta)}. Puede cargar y cambiar sus invitados desde el portal.</p>
+                    : <p className="text-xs text-slate-700">La carga está cerrada. Para un egresado que no pudo cargar a tiempo (por ejemplo, estaba de viaje), habilitalo hasta un día: puede cargar y cambiar sus invitados como si la carga siguiera abierta, solo él. No puede pedir butacas extra.</p>}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="text-sm font-bold text-slate-700">Hasta el día</label>
+                    <input type="date" value={habHasta} onChange={(ev) => setHabHasta(ev.target.value)} className="px-2 py-1.5 border-2 rounded-lg text-sm bg-white" />
+                    <span className="text-xs text-slate-500">(hasta las 23:59)</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={() => habilitarCargaEgresado(modalEditarEgr)} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-bold cursor-pointer">{habilitadoIndividual(modalEditarEgr) ? '🔓 Cambiar la fecha' : '🔓 Habilitar carga'}</button>
+                    {modalEditarEgr.carga_habilitada_hasta && <button type="button" onClick={() => habilitarCargaEgresado(modalEditarEgr, true)} className="px-4 py-2 bg-white border-2 border-slate-400 text-slate-700 rounded-xl text-sm font-bold cursor-pointer">🔒 Quitar habilitación</button>}
+                  </div>
+                </div>
+              ) : null}
               <div className="p-3 bg-slate-50 border rounded-xl flex items-center justify-between gap-2">
                 <div>
                   <p className="font-bold text-sm text-slate-900">QR del Egresado</p>
@@ -5602,7 +5705,7 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
           <div className="flex justify-between items-center border-b pb-3">
             <div>
               <h3 className="font-bold text-base text-slate-900">Bandeja de Solicitudes de Butacas Extra (Plus)</h3>
-              <p className="text-xs text-slate-500">Cada egresado puede pedir una sola vez. Se puede aprobar todo, una parte o rechazar; en todos los casos la solicitud queda cerrada. Vacantes libres hoy: <b>{vacantesLibres}</b>.</p>
+              <p className="text-xs text-slate-500">Cada egresado puede pedir una sola vez. Se puede aprobar todo, una parte o rechazar; en todos los casos la solicitud queda cerrada. Si el egresado se equivocó, mientras está pendiente se puede <b>✏️ Corregir</b> (cantidad y motivo) o <b>🗑️ Anular</b> (puede volver a pedir si la carga sigue abierta). Vacantes libres hoy: <b>{vacantesLibres}</b>.</p>
             </div>
             <span className="px-3 py-1 bg-indigo-50 text-indigo-700 rounded-full font-bold text-xs">{solicitudes.length} solicitudes</span>
           </div>
@@ -5631,9 +5734,25 @@ function PanelAdministracion({ abrirResumenPapel, vipPortalActivo, whatsappActiv
                       <p className="text-[11px] text-slate-400 font-mono">Solicitado el: {new Date(s.created_at).toLocaleString()}</p>
                     </div>
 
-                    <div className="flex items-center gap-2">
-                      {estadoSol === 'pendiente' ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      {estadoSol === 'pendiente' && corrigiendoSol?.id === s.id ? (
+                        <div className="w-full sm:w-auto p-3 bg-white border-2 border-indigo-400 rounded-xl space-y-2">
+                          <p className="text-sm font-bold text-indigo-900">✏️ Corregir la solicitud</p>
+                          <label className="flex items-center gap-2 text-sm font-bold text-slate-700">Cantidad
+                            <select value={corrigiendoSol.cantidad} onChange={(ev) => setCorrigiendoSol((c) => ({ ...c, cantidad: Number(ev.target.value) }))} className="px-2 py-1.5 border-2 rounded-lg bg-white text-sm font-bold">
+                              <option value={1}>+1</option><option value={2}>+2</option><option value={3}>+3</option>
+                            </select>
+                          </label>
+                          <input type="text" value={corrigiendoSol.observacion} onChange={(ev) => setCorrigiendoSol((c) => ({ ...c, observacion: ev.target.value }))} placeholder="Motivo (para quién son)" className="w-full sm:w-72 px-3 py-2 border-2 rounded-lg text-sm" />
+                          <div className="flex gap-2">
+                            <button type="button" onClick={() => guardarCorreccionSolicitud(s)} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-bold cursor-pointer">💾 Guardar corrección</button>
+                            <button type="button" onClick={() => setCorrigiendoSol(null)} className="px-4 py-2 bg-white border rounded-xl text-sm font-semibold cursor-pointer">Cancelar</button>
+                          </div>
+                        </div>
+                      ) : estadoSol === 'pendiente' ? (
                         <>
+                          <button type="button" onClick={() => setCorrigiendoSol({ id: s.id, cantidad: Number(s.cantidad_solicitada) || 1, observacion: s.observacion || '' })} className="px-3.5 py-2 bg-white border-2 border-indigo-500 text-indigo-700 hover:bg-indigo-50 rounded-xl text-xs font-bold cursor-pointer">✏️ Corregir</button>
+                          <button type="button" onClick={() => anularSolicitud(s)} className="px-3.5 py-2 bg-white border-2 border-slate-400 text-slate-700 hover:bg-slate-100 rounded-xl text-xs font-bold cursor-pointer">🗑️ Anular</button>
                           <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
                             Aprobar
                             <select value={cantAprobar[s.id] ?? s.cantidad_solicitada} onChange={(e) => setCantAprobar((prev) => ({ ...prev, [s.id]: Number(e.target.value) }))} className="px-2 py-1.5 border rounded-lg bg-white text-xs font-bold">
