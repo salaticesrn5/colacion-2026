@@ -69,7 +69,7 @@ const fechaHoraAR = (v) => { if (!v) return ''; const d = new Date(v); return is
 const CAPACIDAD_MAXIMA = 525;
 const CAPACIDAD_DEFINITIVA = 525; // número definitivo de butacas (decisión del 19/11/2026)
 const CUPO_BASE_DEFECTO = 4;
-const VERSION_APP = 'v40 · 24/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
+const VERSION_APP = 'v41 · 26/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
 const MSG_FALTA_COL_BUTACA = 'Falta crear la columna "ocupa_butaca" en la tabla docentes (Supabase). Ejecutá el SQL que te pasaron y volvé a intentar.';
 const esErrorColumnaButaca = (err) => /ocupa_butaca/i.test(err?.message || '') || err?.code === 'PGRST204' || err?.code === '42703';
 const aNumeroONulo = (v) => (v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
@@ -216,6 +216,9 @@ const plazasFamiliaresDe = (egr, { config, invitados, solicitudes }) => {
 
 // ---------- Historial de cambios (se muestra con el botón "📋 Novedades"). Agregar arriba en cada entrega. ----------
 const NOVEDADES = [
+  { v: 'v41', fecha: '26/11/2026', items: [
+    'Portal: un invitado con movilidad reducida va siempre en el grupo familiar, así la familia entra junta. Al tildar ♿ se marca solo "Ingresa en grupo" y no se puede destildar.',
+    'Si una familia ya tenía a alguien con movilidad reducida como individual, el portal le avisa que toque "Editar" y "Guardar" para pasarlo al grupo y volver a bajar el pase del grupo.'] },
   { v: 'v40', fecha: '24/11/2026', items: [
     'Portal de docentes: se quitó también la frase de la mesa de ayuda. El docente solo ve su QR para descargar.'] },
   { v: 'v39', fecha: '24/11/2026', items: [
@@ -1139,7 +1142,7 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
       // Se manda todo junto: la base guarda todo o nada
       const payload = filasInvitados
         .filter((f) => f.id || (f.nombre_completo || '').trim() || (f.dni || '').trim())
-        .map((f) => ({ id: f.id || null, nombre_completo: (f.nombre_completo || '').trim(), dni: sanitizeDNI(f.dni || ''), es_grupal: f.es_grupal === true, movilidad_reducida: f.movilidad_reducida === true }));
+        .map((f) => ({ id: f.id || null, nombre_completo: (f.nombre_completo || '').trim(), dni: sanitizeDNI(f.dni || ''), es_grupal: f.es_grupal === true || f.movilidad_reducida === true, movilidad_reducida: f.movilidad_reducida === true }));
       const { data, error: errRpc } = await rpcPortal('portal_guardar_invitados', { p_dni: sanitizeDNI(datosPersona.dni || dni), p_celular: celular, p_invitados: payload, ...(claveRef.current ? { p_clave: claveRef.current } : {}) });
       if (errRpc) throw errRpc;
       if (data?.error_clave) throw new Error(textoClavePortal(data.error_clave, whatsappActivo) + ' Volvé a entrar con tu DNI.');
@@ -1440,8 +1443,8 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
                         <input 
                           type="checkbox" 
                           id={`grupal-${idx}`}
-                          checked={fila.es_grupal}
-                          disabled={!filaAbierta(fila)}
+                          checked={fila.es_grupal || fila.movilidad_reducida === true}
+                          disabled={!filaAbierta(fila) || fila.movilidad_reducida === true}
                           onChange={(e) => { const arr = [...filasInvitados]; arr[idx].es_grupal = e.target.checked; setFilasInvitados(arr); }}
                           className="w-4 h-4 text-[#6B1D2F] rounded border-gray-300 focus:ring-[#6B1D2F] cursor-pointer"
                         />
@@ -1455,16 +1458,24 @@ function PortalPrincipalDNI({ vipPortalActivo, whatsappActivo, videoActivo, conf
                           id={`movilidad-${idx}`}
                           checked={fila.movilidad_reducida === true}
                           disabled={!filaAbierta(fila)}
-                          onChange={(e) => { const arr = [...filasInvitados]; arr[idx].movilidad_reducida = e.target.checked; setFilasInvitados(arr); }}
+                          onChange={(e) => { const arr = [...filasInvitados]; arr[idx].movilidad_reducida = e.target.checked; if (e.target.checked) arr[idx].es_grupal = true; setFilasInvitados(arr); }}
                           className="w-4 h-4 text-[#6B1D2F] rounded border-gray-300 focus:ring-[#6B1D2F] cursor-pointer"
                         />
                         <label htmlFor={`movilidad-${idx}`} className="text-[11px] font-semibold text-slate-700 cursor-pointer">
-                          ♿ Tiene movilidad reducida
+                          ♿ Tiene movilidad reducida{fila.movilidad_reducida === true ? ' (entra con el grupo familiar)' : ''}
                         </label>
                       </div>
                     </div>
                   ))}
                 </div>
+                {filasInvitados.some((f) => f.guardado && f.movilidad_reducida === true && !f.es_grupal) && !editando && (
+                  <div className="text-sm font-bold text-rose-900 bg-rose-50 border-2 border-rose-400 rounded-lg px-3 py-2.5 space-y-1">
+                    <p>⚠️ {filasInvitados.filter((f) => f.guardado && f.movilidad_reducida === true && !f.es_grupal).map((f) => f.nombre_completo).join(', ')} tiene movilidad reducida y tiene que entrar <u>junto con su familia</u>.</p>
+                    {cargaHabilitada
+                      ? <p className="font-semibold">Tocá <b>"Editar invitados ya guardados"</b> y después <b>"Guardar"</b>: pasa al pase del grupo familiar. Después <b>volvé a descargar el pase del grupo</b>.</p>
+                      : <p className="font-semibold">Comunicate con la escuela para pasarlo/a al pase del grupo familiar.</p>}
+                  </div>
+                )}
                 {(filasInvitados.some((f) => f.movilidad_reducida === true && String(f.nombre_completo || '').trim()) || familiaConMovilidad(datosPersona)) && (
                   <p className="text-[11px] font-bold text-amber-900 bg-amber-50 border border-amber-300 rounded-lg px-2.5 py-2">♿ Como en tu grupo hay una persona con movilidad reducida, <u>todos tus invitados</u> entran por el <b>acceso de abajo</b>, que es el más cómodo. Lo vas a ver en los pases.</p>
                 )}
