@@ -69,7 +69,7 @@ const fechaHoraAR = (v) => { if (!v) return ''; const d = new Date(v); return is
 const CAPACIDAD_MAXIMA = 525;
 const CAPACIDAD_DEFINITIVA = 525; // número definitivo de butacas (decisión del 19/11/2026)
 const CUPO_BASE_DEFECTO = 4;
-const VERSION_APP = 'v41 · 26/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
+const VERSION_APP = 'v42 · 27/11/2026'; // cambiarla en cada entrega para saber qué versión está publicada
 const MSG_FALTA_COL_BUTACA = 'Falta crear la columna "ocupa_butaca" en la tabla docentes (Supabase). Ejecutá el SQL que te pasaron y volvé a intentar.';
 const esErrorColumnaButaca = (err) => /ocupa_butaca/i.test(err?.message || '') || err?.code === 'PGRST204' || err?.code === '42703';
 const aNumeroONulo = (v) => (v === null || v === undefined || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
@@ -2872,7 +2872,7 @@ function ModuloPuerta({ config, egresados: egrProp, invitados: invProp, docentes
           );
         } catch (err) {
           console.error(err);
-          notify('No se pudo acceder a la cámara. Verifique los permisos del navegador o use el campo "Lector / código manual".', 'error');
+          notify('No se pudo acceder a la cámara. Verifique los permisos del navegador o use ' + (perfilStaff?.rol === 'puerta' ? 'la Búsqueda manual.' : 'el campo "Lector / código manual".'), 'error');
           html5Ref.current = null;
           setModoFallback(false);
           setEscaneandoCamara(false);
@@ -3039,6 +3039,7 @@ function ModuloPuerta({ config, egresados: egrProp, invitados: invProp, docentes
         )}
       </div>
 
+      {perfilStaff?.rol !== 'puerta' && (
       <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-3 shadow-sm">
         <h3 className="font-bold text-xs text-slate-500 uppercase tracking-wider">Lector de códigos / código manual</h3>
         <p className="text-xs text-slate-500">Sirve para un lector USB de códigos (apuntá, escanea y envía solo) o para escribir a mano el DNI o el número de entrada y apretar Enter.</p>
@@ -3057,6 +3058,7 @@ function ModuloPuerta({ config, egresados: egrProp, invitados: invProp, docentes
           className="w-full px-4 py-3 rounded-xl border-2 border-slate-200 focus:border-emerald-500 outline-none text-sm font-mono"
         />
       </div>
+      )}
 
       <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-4 shadow-sm">
         <h3 className="font-bold text-xs text-slate-500 uppercase tracking-wider">Búsqueda manual (Por si un invitado llega por separado)</h3>
